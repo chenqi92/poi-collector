@@ -9,7 +9,7 @@ import { SettingsDialog } from '@/components/SettingsDialog';
 interface SelectedRegion {
     code: string;
     name: string;
-    level: number;
+    level: string;
 }
 
 interface CollectorStatus {
@@ -213,8 +213,10 @@ export default function Collector() {
                 {['tianditu', 'amap', 'baidu'].map((platform) => {
                     const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
                     const config = statusConfig[status.status] || statusConfig.idle;
-                    const progress = categories.length > 0
-                        ? (status.completed_categories?.length || 0) / categories.length * 100
+                    // 使用选中的类别数量计算进度，而非全部类别数量
+                    const selectedCount = selectedCategories[platform]?.length || 0;
+                    const progress = selectedCount > 0
+                        ? (status.completed_categories?.length || 0) / selectedCount * 100
                         : 0;
                     const isExpanded = expandedPlatform === platform;
 

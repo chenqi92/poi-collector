@@ -23,7 +23,7 @@ interface POI {
 interface Region {
     code: string;
     name: string;
-    level: number;
+    level: string; // "province", "city", "district"
     parent_code: string | null;
 }
 
@@ -147,7 +147,7 @@ export default function Export() {
         : stats?.by_platform[platform] || 0;
 
     const renderRegion = (region: Region, indent: number = 0) => {
-        const hasChildren = region.level < 3;
+        const hasChildren = region.level !== 'district';
         const isExpanded = expanded.has(region.code);
         const isSelected = selectedRegions.includes(region.code);
         const regionChildren = children[region.code] || [];

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -52,6 +52,39 @@ function FitBounds({ pois }: { pois: POI[] }) {
     return null;
 }
 
+// 监听容器大小变化，自动调用 invalidateSize
+function ResizeHandler() {
+    const map = useMap();
+
+    useEffect(() => {
+        // 窗口 resize 事件
+        const handleResize = () => {
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 100);
+        };
+
+        window.addEventListener('resize', handleResize);
+
+        // 使用 ResizeObserver 监听容器变化
+        const container = map.getContainer();
+        const resizeObserver = new ResizeObserver(() => {
+            map.invalidateSize();
+        });
+        resizeObserver.observe(container);
+
+        // 初始化时也调用一次
+        setTimeout(() => map.invalidateSize(), 200);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
+        };
+    }, [map]);
+
+    return null;
+}
+
 // 平台颜色配置
 const platformColors: Record<string, string> = {
     tianditu: '#06b6d4', // cyan
@@ -81,52 +114,57 @@ export function POIMap({
     zoom = 10,
     onMarkerClick
 }: POIMapProps) {
+    const containerRef = useRef<HTMLDivElement>(null);
+
     return (
-        <MapContainer
-            center={center}
-            zoom={zoom}
-            className="w-full h-full rounded-lg"
-            style={{ minHeight: '400px' }}
-        >
-            <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
+        <div ref={containerRef} className="w-full h-full" style={{ minHeight: '300px' }}>
+            <MapContainer
+                center={center}
+                zoom={zoom}
+                className="w-full h-full rounded-lg"
+                style={{ height: '100%', width: '100%' }}
+            >
+                <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
 
-            <FitBounds pois={pois} />
+                <FitBounds pois={pois} />
+                <ResizeHandler />
 
-            {pois.map((poi) => (
-                <Marker
-                    key={poi.id}
-                    position={[poi.lat, poi.lon]}
-                    icon={createColoredIcon(platformColors[poi.platform] || '#3b82f6')}
-                    eventHandlers={{
-                        click: () => onMarkerClick?.(poi),
-                    }}
-                >
-                    <Popup>
-                        <div className="text-sm">
-                            <div className="font-semibold text-gray-900">{poi.name}</div>
-                            <div className="text-gray-500 mt-1">{poi.address || '暂无地址'}</div>
-                            <div className="flex items-center gap-2 mt-2 text-xs">
-                                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                                    {poi.category || '未分类'}
-                                </span>
-                                <span
-                                    className="px-2 py-0.5 rounded text-white"
-                                    style={{ backgroundColor: platformColors[poi.platform] || '#3b82f6' }}
-                                >
-                                    {poi.platform}
-                                </span>
+                {pois.map((poi) => (
+                    <Marker
+                        key={poi.id}
+                        position={[poi.lat, poi.lon]}
+                        icon={createColoredIcon(platformColors[poi.platform] || '#3b82f6')}
+                        eventHandlers={{
+                            click: () => onMarkerClick?.(poi),
+                        }}
+                    >
+                        <Popup>
+                            <div className="text-sm">
+                                <div className="font-semibold text-gray-900">{poi.name}</div>
+                                <div className="text-gray-500 mt-1">{poi.address || '暂无地址'}</div>
+                                <div className="flex items-center gap-2 mt-2 text-xs">
+                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                                        {poi.category || '未分类'}
+                                    </span>
+                                    <span
+                                        className="px-2 py-0.5 rounded text-white"
+                                        style={{ backgroundColor: platformColors[poi.platform] || '#3b82f6' }}
+                                    >
+                                        {poi.platform}
+                                    </span>
+                                </div>
+                                <div className="text-gray-400 mt-1 text-xs">
+                                    {poi.lon.toFixed(6)}, {poi.lat.toFixed(6)}
+                                </div>
                             </div>
-                            <div className="text-gray-400 mt-1 text-xs">
-                                {poi.lon.toFixed(6)}, {poi.lat.toFixed(6)}
-                            </div>
-                        </div>
-                    </Popup>
-                </Marker>
-            ))}
-        </MapContainer>
+                        </Popup>
+                    </Marker>
+                ))}
+            </MapContainer>
+        </div>
     );
 }
 

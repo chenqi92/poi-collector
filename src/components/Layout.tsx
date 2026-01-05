@@ -25,7 +25,7 @@ export default function Layout() {
     return (
         <div className="flex h-screen bg-background">
             {/* Sidebar */}
-            <aside className="w-16 bg-sidebar border-r border-sidebar-border flex flex-col items-center py-4">
+            <aside className="w-16 bg-muted/50 border-r border-border flex flex-col items-center py-4">
                 {/* Logo */}
                 <div className="mb-6">
                     <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold">
@@ -34,16 +34,16 @@ export default function Layout() {
                 </div>
 
                 {/* Navigation */}
-                <nav className="flex-1 flex flex-col gap-2">
+                <nav className="flex-1 flex flex-col gap-1">
                     {navItems.map((item) => (
                         <NavLink
                             key={item.path}
                             to={item.path}
                             className={({ isActive }) =>
                                 cn(
-                                    "w-10 h-10 rounded-lg flex items-center justify-center transition-colors",
-                                    "hover:bg-sidebar-accent text-sidebar-foreground",
-                                    isActive && "bg-sidebar-accent text-sidebar-primary"
+                                    "w-11 h-11 rounded-lg flex items-center justify-center transition-all relative",
+                                    "hover:bg-accent text-muted-foreground hover:text-foreground",
+                                    isActive && "bg-primary text-primary-foreground shadow-md hover:bg-primary hover:text-primary-foreground"
                                 )
                             }
                             title={item.label}

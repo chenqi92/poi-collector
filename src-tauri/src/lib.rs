@@ -3,6 +3,7 @@ mod database;
 mod config;
 mod collectors;
 mod regions;
+mod coords;
 
 use commands::*;
 
