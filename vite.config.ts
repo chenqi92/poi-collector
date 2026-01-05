@@ -16,7 +16,8 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || 'localhost',
+    // Force IPv4 for Tauri compatibility
+    host: '127.0.0.1',
     hmr: host
       ? {
         protocol: "ws",
