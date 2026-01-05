@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Square, RotateCcw, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Play, Square, RotateCcw, Loader2 } from 'lucide-react';
 
 interface CollectorStatus {
     platform: string;
@@ -172,8 +172,8 @@ export default function Collector() {
                                         <label
                                             key={cat.id}
                                             className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer transition-colors ${selectedCategories[platform]?.includes(cat.id)
-                                                    ? 'bg-primary-100 text-primary-700'
-                                                    : 'bg-white text-slate-500 border'
+                                                ? 'bg-primary-100 text-primary-700'
+                                                : 'bg-white text-slate-500 border'
                                                 }`}
                                         >
                                             <input

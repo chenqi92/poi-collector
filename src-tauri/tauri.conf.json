@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "poi-collector-app",
+  "productName": "POI Collector",
   "version": "0.2.0",
-  "identifier": "com.poicollector.app",
+  "identifier": "com.kkape.poi",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,9 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "poi-collector-app",
-        "width": 800,
-        "height": 600
+        "title": "POI Collector",
+        "width": 1200,
+        "height": 800
       }
     ],
     "security": {
