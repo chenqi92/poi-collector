@@ -1,75 +1,100 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import {
     LayoutDashboard,
-    Settings,
     Download,
     Search,
-    MapPin
+    MapPin,
+    FileOutput,
+    Settings,
+    Key,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { Button } from '@/components/ui/button';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ThemeToggle } from '@/components/theme-toggle';
+import { cn } from '@/lib/utils';
 
 const navItems = [
-    { path: '/dashboard', icon: LayoutDashboard, label: '数据概览' },
-    { path: '/settings', icon: Settings, label: 'API Key设置' },
-    { path: '/collector', icon: Download, label: '数据采集' },
-    { path: '/search', icon: Search, label: '数据查询' },
+    { path: '/dashboard', icon: LayoutDashboard, label: '概览' },
+    { path: '/regions', icon: MapPin, label: '地区' },
+    { path: '/collector', icon: Download, label: '采集' },
+    { path: '/search', icon: Search, label: '查询' },
+    { path: '/export', icon: FileOutput, label: '导出' },
 ];
 
 export default function Layout() {
-    const [regionName, setRegionName] = useState('加载中...');
-
-    useEffect(() => {
-        loadRegion();
-    }, []);
-
-    const loadRegion = async () => {
-        try {
-            const config = await invoke<{ name: string }>('get_region_config');
-            setRegionName(config.name);
-        } catch (e) {
-            setRegionName('未配置');
-        }
-    };
-
     return (
-        <div className="flex h-screen bg-slate-50">
+        <div className="flex h-screen bg-background">
             {/* Sidebar */}
-            <aside className="w-64 bg-sidebar text-white flex flex-col">
-                <div className="p-5 border-b border-white/10">
-                    <h1 className="text-lg font-bold flex items-center gap-2">
-                        <MapPin className="w-5 h-5 text-primary-400" />
-                        POI Collector
-                    </h1>
-                    <p className="text-sm text-slate-400 mt-1">{regionName}</p>
+            <aside className="w-16 bg-sidebar border-r border-sidebar-border flex flex-col items-center py-4">
+                {/* Logo */}
+                <div className="mb-6">
+                    <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
+                        <MapPin className="w-5 h-5 text-primary-foreground" />
+                    </div>
                 </div>
 
-                <nav className="flex-1 py-4">
+                {/* Navigation */}
+                <nav className="flex-1 flex flex-col gap-2">
                     {navItems.map((item) => (
                         <NavLink
                             key={item.path}
                             to={item.path}
                             className={({ isActive }) =>
-                                `sidebar-item ${isActive ? 'active' : ''}`
+                                cn(
+                                    "w-10 h-10 rounded-lg flex items-center justify-center transition-colors",
+                                    "hover:bg-sidebar-accent text-sidebar-foreground",
+                                    isActive && "bg-sidebar-accent text-sidebar-primary"
+                                )
                             }
+                            title={item.label}
                         >
                             <item.icon className="w-5 h-5" />
-                            {item.label}
                         </NavLink>
                     ))}
                 </nav>
-
-                <div className="p-4 border-t border-white/10 text-xs text-slate-400">
-                    v1.0.0 · Tauri Desktop
-                </div>
             </aside>
 
-            {/* Main Content */}
-            <main className="flex-1 overflow-y-auto">
-                <div className="p-8">
+            {/* Main Area */}
+            <div className="flex-1 flex flex-col">
+                {/* Top Bar */}
+                <header className="h-14 border-b border-border flex items-center justify-between px-6">
+                    <h1 className="text-lg font-semibold text-foreground">POI Collector</h1>
+
+                    <div className="flex items-center gap-2">
+                        <ThemeToggle />
+
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon">
+                                    <Settings className="h-5 w-5" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuLabel>设置</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem asChild>
+                                    <NavLink to="/settings" className="flex items-center gap-2 cursor-pointer">
+                                        <Key className="w-4 h-4" />
+                                        API Key 管理
+                                    </NavLink>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                </header>
+
+                {/* Content */}
+                <main className="flex-1 overflow-y-auto p-6">
                     <Outlet />
-                </div>
-            </main>
+                </main>
+            </div>
         </div>
     );
 }

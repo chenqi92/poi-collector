@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Key, MapPin, Plus, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Key, Plus, Trash2, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
 interface ApiKey {
     id: number;
@@ -10,36 +12,18 @@ interface ApiKey {
     quota_exhausted: boolean;
 }
 
-interface RegionConfig {
-    name: string;
-    admin_code: string;
-    city_code: string;
-    bounds: {
-        min_lon: number;
-        max_lon: number;
-        min_lat: number;
-        max_lat: number;
-    };
-}
-
-interface RegionPreset {
-    id: string;
-    name: string;
-    admin_code: string;
-}
-
 const platforms = [
-    { id: 'tianditu', name: '天地图', hint: '访问 console.tianditu.gov.cn 申请' },
-    { id: 'amap', name: '高德地图', hint: '访问 console.amap.com 申请 Web服务API Key' },
-    { id: 'baidu', name: '百度地图', hint: '访问 lbsyun.baidu.com 申请服务端AK' },
+    { id: 'tianditu', name: '天地图', hint: 'console.tianditu.gov.cn' },
+    { id: 'amap', name: '高德地图', hint: 'console.amap.com' },
+    { id: 'baidu', name: '百度地图', hint: 'lbsyun.baidu.com' },
 ];
 
 export default function Settings() {
     const [keys, setKeys] = useState<Record<string, ApiKey[]>>({});
-    const [region, setRegion] = useState<RegionConfig | null>(null);
-    const [presets, setPresets] = useState<RegionPreset[]>([]);
     const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
     const [newKey, setNewKey] = useState<Record<string, { name: string; key: string }>>({});
+    const [loading, setLoading] = useState(true);
+    const [addingKey, setAddingKey] = useState<string | null>(null);
 
     useEffect(() => {
         loadData();
@@ -47,16 +31,12 @@ export default function Settings() {
 
     const loadData = async () => {
         try {
-            const [keysData, regionData, presetsData] = await Promise.all([
-                invoke<Record<string, ApiKey[]>>('get_api_keys'),
-                invoke<RegionConfig>('get_region_config'),
-                invoke<RegionPreset[]>('get_region_presets'),
-            ]);
+            const keysData = await invoke<Record<string, ApiKey[]>>('get_api_keys');
             setKeys(keysData);
-            setRegion(regionData);
-            setPresets(presetsData);
         } catch (e) {
             console.error('加载设置失败:', e);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -64,6 +44,7 @@ export default function Settings() {
         const data = newKey[platform];
         if (!data?.key) return;
 
+        setAddingKey(platform);
         try {
             await invoke('add_api_key', {
                 platform,
@@ -74,11 +55,13 @@ export default function Settings() {
             loadData();
         } catch (e) {
             console.error('添加Key失败:', e);
+        } finally {
+            setAddingKey(null);
         }
     };
 
     const deleteKey = async (platform: string, keyId: number) => {
-        if (!confirm('确定要删除这个API Key吗？')) return;
+        if (!confirm('确定要删除这个 API Key 吗？')) return;
         try {
             await invoke('delete_api_key', { platform, keyId });
             loadData();
@@ -87,126 +70,169 @@ export default function Settings() {
         }
     };
 
-    const selectPreset = async (presetId: string) => {
-        try {
-            await invoke('set_region_by_preset', { presetId });
-            loadData();
-        } catch (e) {
-            console.error('切换区域失败:', e);
-        }
-    };
+    const getTotalKeys = () => Object.values(keys).reduce((sum, arr) => sum + arr.length, 0);
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+            </div>
+        );
+    }
 
     return (
-        <div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">设置</h1>
-            <p className="text-slate-500 mb-8">配置API Key和采集区域</p>
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">API Key 设置</h1>
+                    <p className="text-muted-foreground">配置各平台的 API Key 用于数据采集</p>
+                </div>
+                <div className="text-right">
+                    <div className="text-2xl font-bold text-foreground">{getTotalKeys()}</div>
+                    <div className="text-xs text-muted-foreground">已配置 Key</div>
+                </div>
+            </div>
 
-            {/* API Keys */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                {platforms.map((platform) => (
-                    <div key={platform.id} className="card">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Key className="w-5 h-5 text-primary-500" />
-                            <h3 className="font-semibold">{platform.name}</h3>
-                        </div>
-                        <p className="text-xs text-slate-400 mb-4">{platform.hint}</p>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {platforms.map((platform) => {
+                    const platformKeys = keys[platform.id] || [];
+                    const isAdding = addingKey === platform.id;
 
-                        {/* Key List */}
-                        <div className="space-y-2 mb-4 max-h-40 overflow-y-auto">
-                            {keys[platform.id]?.map((k) => (
-                                <div key={k.id} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg text-sm">
-                                    <div className="flex-1 truncate">
-                                        <div className="font-medium">{k.name || `Key ${k.id}`}</div>
-                                        <div className="text-slate-400 text-xs font-mono">{k.api_key}</div>
-                                    </div>
-                                    <button
-                                        onClick={() => deleteKey(platform.id, k.id)}
-                                        className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
+                    return (
+                        <Card key={platform.id}>
+                            <CardHeader>
+                                <div className="flex items-center gap-2">
+                                    <Key className="w-5 h-5 text-primary" />
+                                    <CardTitle className="text-lg">{platform.name}</CardTitle>
+                                    <span className="ml-auto text-sm text-muted-foreground">
+                                        {platformKeys.length} 个
+                                    </span>
                                 </div>
-                            )) || <div className="text-slate-400 text-sm">尚未配置Key</div>}
-                        </div>
+                                <CardDescription>{platform.hint}</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {/* Key 列表 */}
+                                <div className="space-y-2 max-h-40 overflow-y-auto">
+                                    {platformKeys.length > 0 ? (
+                                        platformKeys.map((k) => (
+                                            <div
+                                                key={k.id}
+                                                className="flex items-center gap-2 p-3 bg-muted rounded-lg"
+                                            >
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-medium text-foreground truncate">
+                                                        {k.name || `Key ${k.id}`}
+                                                    </div>
+                                                    <div className="text-xs text-muted-foreground font-mono truncate">
+                                                        {showKeys[`${platform.id}-${k.id}`]
+                                                            ? k.api_key
+                                                            : '••••••••••••••••'
+                                                        }
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => setShowKeys({
+                                                        ...showKeys,
+                                                        [`${platform.id}-${k.id}`]: !showKeys[`${platform.id}-${k.id}`]
+                                                    })}
+                                                >
+                                                    {showKeys[`${platform.id}-${k.id}`]
+                                                        ? <EyeOff className="w-4 h-4" />
+                                                        : <Eye className="w-4 h-4" />
+                                                    }
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => deleteKey(platform.id, k.id)}
+                                                    className="text-destructive hover:text-destructive"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-center py-4 text-muted-foreground text-sm">
+                                            尚未配置 API Key
+                                        </div>
+                                    )}
+                                </div>
 
-                        {/* Add Key */}
-                        <div className="space-y-2 pt-4 border-t">
-                            <input
-                                type="text"
-                                placeholder="备注名称（可选）"
-                                className="input text-sm"
-                                value={newKey[platform.id]?.name || ''}
-                                onChange={(e) => setNewKey({
-                                    ...newKey,
-                                    [platform.id]: { ...newKey[platform.id], name: e.target.value }
-                                })}
-                            />
-                            <div className="flex gap-2">
-                                <div className="flex-1 relative">
+                                {/* 添加新 Key */}
+                                <div className="pt-4 border-t space-y-2">
                                     <input
-                                        type={showKeys[platform.id] ? 'text' : 'password'}
-                                        placeholder="API Key"
-                                        className="input text-sm pr-10"
-                                        value={newKey[platform.id]?.key || ''}
+                                        type="text"
+                                        placeholder="备注名称（可选）"
+                                        className="w-full px-3 py-2 border border-input bg-background rounded-md 
+                                                 text-foreground placeholder:text-muted-foreground text-sm 
+                                                 focus:outline-none focus:ring-2 focus:ring-ring"
+                                        value={newKey[platform.id]?.name || ''}
                                         onChange={(e) => setNewKey({
                                             ...newKey,
-                                            [platform.id]: { ...newKey[platform.id], key: e.target.value }
+                                            [platform.id]: { ...newKey[platform.id], name: e.target.value }
                                         })}
                                     />
-                                    <button
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"
-                                        onClick={() => setShowKeys({ ...showKeys, [platform.id]: !showKeys[platform.id] })}
-                                    >
-                                        {showKeys[platform.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 relative">
+                                            <input
+                                                type={showKeys[`new-${platform.id}`] ? 'text' : 'password'}
+                                                placeholder="API Key"
+                                                className="w-full px-3 py-2 pr-10 border border-input bg-background 
+                                                         rounded-md text-foreground placeholder:text-muted-foreground 
+                                                         text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                                value={newKey[platform.id]?.key || ''}
+                                                onChange={(e) => setNewKey({
+                                                    ...newKey,
+                                                    [platform.id]: { ...newKey[platform.id], key: e.target.value }
+                                                })}
+                                                onKeyDown={(e) => e.key === 'Enter' && addKey(platform.id)}
+                                            />
+                                            <button
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground 
+                                                         hover:text-foreground"
+                                                onClick={() => setShowKeys({
+                                                    ...showKeys,
+                                                    [`new-${platform.id}`]: !showKeys[`new-${platform.id}`]
+                                                })}
+                                            >
+                                                {showKeys[`new-${platform.id}`]
+                                                    ? <EyeOff className="w-4 h-4" />
+                                                    : <Eye className="w-4 h-4" />
+                                                }
+                                            </button>
+                                        </div>
+                                        <Button
+                                            onClick={() => addKey(platform.id)}
+                                            disabled={isAdding || !newKey[platform.id]?.key}
+                                        >
+                                            {isAdding ? (
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                            ) : (
+                                                <Plus className="w-4 h-4" />
+                                            )}
+                                        </Button>
+                                    </div>
                                 </div>
-                                <button className="btn btn-primary" onClick={() => addKey(platform.id)}>
-                                    <Plus className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                ))}
+                            </CardContent>
+                        </Card>
+                    );
+                })}
             </div>
 
-            {/* Region Config */}
-            <div className="card">
-                <div className="flex items-center gap-2 mb-4">
-                    <MapPin className="w-5 h-5 text-primary-500" />
-                    <h3 className="font-semibold">采集区域配置</h3>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">预设区域</label>
-                        <select
-                            className="input"
-                            value=""
-                            onChange={(e) => e.target.value && selectPreset(e.target.value)}
-                        >
-                            <option value="">选择预设区域...</option>
-                            {presets.map((p) => (
-                                <option key={p.id} value={p.id}>
-                                    {p.name} ({p.admin_code})
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div className="p-4 bg-slate-50 rounded-lg">
-                        <div className="text-sm font-medium text-slate-700 mb-2">当前配置</div>
-                        {region ? (
-                            <div className="text-sm space-y-1">
-                                <div><span className="text-slate-500">区域:</span> <span className="font-medium">{region.name}</span></div>
-                                <div><span className="text-slate-500">代码:</span> {region.admin_code}</div>
-                                <div><span className="text-slate-500">范围:</span> {region.bounds.min_lon.toFixed(2)}~{region.bounds.max_lon.toFixed(2)}, {region.bounds.min_lat.toFixed(2)}~{region.bounds.max_lat.toFixed(2)}</div>
-                            </div>
-                        ) : (
-                            <div className="text-slate-400">未配置</div>
-                        )}
-                    </div>
-                </div>
-            </div>
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-sm">使用说明</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                        <li>• 每个平台可以配置多个 API Key，系统会自动轮换使用</li>
+                        <li>• 当某个 Key 配额耗尽时，会自动切换到下一个可用 Key</li>
+                        <li>• 建议为每个平台配置至少 2-3 个 Key 以确保采集稳定性</li>
+                    </ul>
+                </CardContent>
+            </Card>
         </div>
     );
 }

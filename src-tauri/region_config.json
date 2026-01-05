@@ -1,0 +1,15 @@
+{
+  "name": "射阳县",
+  "admin_code": "320924",
+  "city_code": "320900",
+  "bounds": {
+    "min_lon": 119.75,
+    "max_lon": 120.45,
+    "min_lat": 33.6,
+    "max_lat": 34.1
+  },
+  "center": [
+    120.13,
+    33.85
+  ]
+}

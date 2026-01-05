@@ -197,3 +197,30 @@ pub fn search_poi(query: String, platform: String, mode: String, limit: Option<i
     db.search_poi(&query, platform_filter, &mode, limit.unwrap_or(50))
         .map_err(|e| e.to_string())
 }
+
+// ============ 行政区划命令 ============
+
+#[tauri::command]
+pub fn get_regions() -> Vec<crate::regions::Region> {
+    crate::regions::get_all_regions().clone()
+}
+
+#[tauri::command]
+pub fn get_provinces() -> Vec<crate::regions::Region> {
+    crate::regions::get_provinces()
+}
+
+#[tauri::command]
+pub fn get_region_children(parent_code: String) -> Vec<crate::regions::Region> {
+    crate::regions::get_children(&parent_code)
+}
+
+#[tauri::command]
+pub fn search_regions(query: String) -> Vec<crate::regions::Region> {
+    crate::regions::search_regions(&query)
+}
+
+#[tauri::command]
+pub fn get_district_codes_for_region(code: String) -> Vec<String> {
+    crate::regions::get_all_district_codes(&code)
+}

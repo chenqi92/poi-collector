@@ -2,6 +2,7 @@ mod commands;
 mod database;
 mod config;
 mod collectors;
+mod regions;
 
 use commands::*;
 
@@ -14,7 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Stats
             get_stats,
-            // Region
+            // Region (legacy)
             get_region_config,
             get_region_presets,
             set_region_by_preset,
@@ -30,6 +31,12 @@ pub fn run() {
             reset_collector,
             // Search
             search_poi,
+            // 行政区划
+            get_regions,
+            get_provinces,
+            get_region_children,
+            search_regions,
+            get_district_codes_for_region,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

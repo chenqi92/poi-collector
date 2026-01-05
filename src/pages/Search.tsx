@@ -1,178 +1,212 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Search as SearchIcon, MapPin, Copy, ExternalLink } from 'lucide-react';
+import { Search as SearchIcon, MapPin, List, Columns, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import POIMap, { POI } from '@/components/POIMap';
 
-interface POI {
-    id: number;
-    name: string;
-    lon: number;
-    lat: number;
-    address: string;
-    category: string;
-    platform: string;
-}
-
-const platformBadges: Record<string, { bg: string; text: string }> = {
-    tianditu: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
-    amap: { bg: 'bg-blue-100', text: 'text-blue-700' },
-    baidu: { bg: 'bg-red-100', text: 'text-red-700' },
-};
+type ViewMode = 'list' | 'map' | 'split';
 
 const platformNames: Record<string, string> = {
+    all: '全部平台',
     tianditu: '天地图',
     amap: '高德',
     baidu: '百度',
 };
 
+const modeOptions = [
+    { value: 'contains', label: '包含' },
+    { value: 'exact', label: '精确' },
+    { value: 'prefix', label: '前缀' },
+];
+
 export default function Search() {
     const [query, setQuery] = useState('');
     const [platform, setPlatform] = useState('all');
-    const [mode, setMode] = useState('smart');
+    const [mode, setMode] = useState('contains');
     const [results, setResults] = useState<POI[]>([]);
     const [loading, setLoading] = useState(false);
-    const [searched, setSearched] = useState(false);
+    const [viewMode, setViewMode] = useState<ViewMode>('split');
+    const [selectedId, setSelectedId] = useState<number | null>(null);
 
-    const doSearch = async () => {
+    const handleSearch = async () => {
         if (!query.trim()) return;
 
         setLoading(true);
-        setSearched(true);
         try {
             const data = await invoke<POI[]>('search_poi', {
                 query: query.trim(),
-                platform,
+                platform: platform === 'all' ? null : platform,
                 mode,
-                limit: 50
             });
             setResults(data);
         } catch (e) {
             console.error('搜索失败:', e);
-            setResults([]);
         } finally {
             setLoading(false);
         }
     };
 
-    const copyCoords = (poi: POI) => {
-        navigator.clipboard.writeText(`${poi.lon},${poi.lat}`);
+    const handleMarkerClick = (poi: POI) => {
+        setSelectedId(poi.id);
     };
 
-    const openInMap = (poi: POI) => {
-        window.open(`https://uri.amap.com/marker?position=${poi.lon},${poi.lat}&name=${encodeURIComponent(poi.name)}`, '_blank');
-    };
+    const showList = viewMode === 'list' || viewMode === 'split';
+    const showMap = viewMode === 'map' || viewMode === 'split';
 
     return (
-        <div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">数据查询</h1>
-            <p className="text-slate-500 mb-8">搜索已采集的POI数据</p>
-
-            {/* Search Box */}
-            <div className="card mb-6">
-                <div className="flex flex-wrap gap-4">
-                    <div className="flex-1 min-w-[200px]">
-                        <div className="relative">
-                            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+        <div className="h-full flex flex-col gap-4">
+            {/* 搜索栏 */}
+            <Card>
+                <CardContent className="py-4">
+                    <div className="flex items-center gap-3">
+                        <div className="relative flex-1">
+                            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                             <input
                                 type="text"
-                                className="input pl-10"
-                                placeholder="输入地点名称搜索..."
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && doSearch()}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                placeholder="输入名称搜索 POI..."
+                                className="w-full pl-10 pr-4 py-2.5 border border-input bg-background rounded-lg
+                                         text-foreground placeholder:text-muted-foreground focus:outline-none
+                                         focus:ring-2 focus:ring-ring"
                             />
+                        </div>
+
+                        <select
+                            value={platform}
+                            onChange={(e) => setPlatform(e.target.value)}
+                            className="px-4 py-2.5 border border-input bg-background rounded-lg text-foreground
+                                     focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                            {Object.entries(platformNames).map(([key, name]) => (
+                                <option key={key} value={key}>{name}</option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={mode}
+                            onChange={(e) => setMode(e.target.value)}
+                            className="px-4 py-2.5 border border-input bg-background rounded-lg text-foreground
+                                     focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                            {modeOptions.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+
+                        <Button onClick={handleSearch} disabled={loading}>
+                            {loading ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                '搜索'
+                            )}
+                        </Button>
+
+                        <div className="flex border border-input rounded-lg overflow-hidden">
+                            <button
+                                onClick={() => setViewMode('list')}
+                                className={`p-2.5 transition-colors ${viewMode === 'list'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-background text-muted-foreground hover:bg-accent'
+                                    }`}
+                                title="列表视图"
+                            >
+                                <List className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('split')}
+                                className={`p-2.5 border-x border-input transition-colors ${viewMode === 'split'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-background text-muted-foreground hover:bg-accent'
+                                    }`}
+                                title="分屏视图"
+                            >
+                                <Columns className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('map')}
+                                className={`p-2.5 transition-colors ${viewMode === 'map'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'bg-background text-muted-foreground hover:bg-accent'
+                                    }`}
+                                title="地图视图"
+                            >
+                                <MapPin className="w-4 h-4" />
+                            </button>
                         </div>
                     </div>
 
-                    <select
-                        className="input w-32"
-                        value={platform}
-                        onChange={(e) => setPlatform(e.target.value)}
-                    >
-                        <option value="all">全部平台</option>
-                        <option value="tianditu">天地图</option>
-                        <option value="amap">高德地图</option>
-                        <option value="baidu">百度地图</option>
-                    </select>
+                    {results.length > 0 && (
+                        <div className="mt-3 text-sm text-muted-foreground">
+                            找到 <span className="font-medium text-foreground">{results.length}</span> 条结果
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
-                    <select
-                        className="input w-32"
-                        value={mode}
-                        onChange={(e) => setMode(e.target.value)}
-                    >
-                        <option value="smart">智能匹配</option>
-                        <option value="exact">精确匹配</option>
-                        <option value="prefix">前缀匹配</option>
-                        <option value="contains">包含匹配</option>
-                        <option value="fuzzy">模糊匹配</option>
-                    </select>
-
-                    <button className="btn btn-primary" onClick={doSearch} disabled={loading}>
-                        {loading ? '搜索中...' : '搜索'}
-                    </button>
-                </div>
-            </div>
-
-            {/* Results */}
-            <div className="card">
-                {loading ? (
-                    <div className="text-center py-12 text-slate-400">搜索中...</div>
-                ) : results.length > 0 ? (
-                    <div className="divide-y">
-                        {results.map((poi) => {
-                            const badge = platformBadges[poi.platform] || platformBadges.tianditu;
-                            return (
-                                <div key={poi.id} className="py-4 flex items-start justify-between gap-4 group">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="font-medium text-slate-900 truncate">{poi.name}</span>
-                                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${badge.bg} ${badge.text}`}>
-                                                {platformNames[poi.platform]}
-                                            </span>
-                                        </div>
-                                        <div className="text-sm text-slate-500 flex items-center gap-2">
-                                            <span>{poi.category || '未分类'}</span>
-                                            {poi.address && (
-                                                <>
-                                                    <span>·</span>
-                                                    <span className="truncate">{poi.address}</span>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center gap-2">
-                                        <div className="text-xs text-slate-400 font-mono bg-slate-100 px-2 py-1 rounded">
-                                            {poi.lon.toFixed(6)}, {poi.lat.toFixed(6)}
-                                        </div>
-                                        <button
-                                            className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => copyCoords(poi)}
-                                            title="复制坐标"
+            {/* 结果区域 */}
+            <div className={`flex-1 grid gap-4 ${showList && showMap ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {/* 列表 */}
+                {showList && (
+                    <Card className="overflow-hidden">
+                        <CardContent className="p-0 h-full">
+                            {results.length > 0 ? (
+                                <div className="h-full overflow-y-auto">
+                                    {results.map((poi) => (
+                                        <div
+                                            key={poi.id}
+                                            onClick={() => setSelectedId(poi.id)}
+                                            className={`p-4 border-b border-border cursor-pointer transition-colors ${selectedId === poi.id
+                                                ? 'bg-primary/10 border-l-2 border-l-primary'
+                                                : 'hover:bg-accent'
+                                                }`}
                                         >
-                                            <Copy className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => openInMap(poi)}
-                                            title="在地图中查看"
-                                        >
-                                            <ExternalLink className="w-4 h-4" />
-                                        </button>
-                                    </div>
+                                            <div className="flex items-start gap-3">
+                                                <MapPin className={`w-4 h-4 mt-1 ${selectedId === poi.id ? 'text-primary' : 'text-muted-foreground'
+                                                    }`} />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="font-medium text-foreground truncate">{poi.name}</div>
+                                                    <div className="text-sm text-muted-foreground truncate">
+                                                        {poi.address || '无地址'}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <span className="text-xs bg-muted px-2 py-0.5 rounded">
+                                                            {platformNames[poi.platform] || poi.platform}
+                                                        </span>
+                                                        {poi.category && (
+                                                            <span className="text-xs text-muted-foreground">
+                                                                {poi.category}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
-                            );
-                        })}
-                    </div>
-                ) : searched ? (
-                    <div className="text-center py-12">
-                        <MapPin className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                        <div className="text-slate-400">未找到匹配结果</div>
-                    </div>
-                ) : (
-                    <div className="text-center py-12">
-                        <SearchIcon className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-                        <div className="text-slate-400">输入关键词开始搜索</div>
-                    </div>
+                            ) : (
+                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                                    <SearchIcon className="w-12 h-12 mb-4 opacity-20" />
+                                    <p>输入关键词搜索 POI</p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+
+                {/* 地图 */}
+                {showMap && (
+                    <Card className="overflow-hidden">
+                        <CardContent className="p-0 h-full">
+                            <POIMap
+                                pois={results}
+                                selectedId={selectedId}
+                                onMarkerClick={handleMarkerClick}
+                            />
+                        </CardContent>
+                    </Card>
                 )}
             </div>
         </div>

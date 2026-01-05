@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Square, RotateCcw, Loader2 } from 'lucide-react';
+import { Play, Square, RotateCcw, Loader2, MapPin, ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { SelectedRegion } from '@/pages/Regions';
 
 interface CollectorStatus {
     platform: string;
@@ -25,11 +28,11 @@ const platformNames: Record<string, string> = {
 };
 
 const statusConfig = {
-    idle: { text: '未开始', bg: 'bg-slate-100', color: 'text-slate-600' },
-    running: { text: '采集中', bg: 'bg-blue-100', color: 'text-blue-600' },
-    paused: { text: '已暂停', bg: 'bg-yellow-100', color: 'text-yellow-600' },
-    completed: { text: '已完成', bg: 'bg-green-100', color: 'text-green-600' },
-    error: { text: '出错', bg: 'bg-red-100', color: 'text-red-600' },
+    idle: { text: '未开始', variant: 'secondary' as const },
+    running: { text: '采集中', variant: 'default' as const },
+    paused: { text: '已暂停', variant: 'outline' as const },
+    completed: { text: '已完成', variant: 'secondary' as const },
+    error: { text: '出错', variant: 'destructive' as const },
 };
 
 export default function Collector() {
@@ -37,16 +40,22 @@ export default function Collector() {
     const [categories, setCategories] = useState<Category[]>([]);
     const [selectedCategories, setSelectedCategories] = useState<Record<string, string[]>>({});
     const [logs, setLogs] = useState<string[]>([]);
+    const [selectedRegions, setSelectedRegions] = useState<SelectedRegion[]>([]);
+    const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('poi_selected_regions');
+            if (saved) setSelectedRegions(JSON.parse(saved));
+        } catch (e) { console.error(e); }
+    }, []);
 
     useEffect(() => {
         loadData();
         const interval = setInterval(loadStatuses, 2000);
-
-        // Listen for log events
         const unlisten = listen<string>('collector-log', (event) => {
             setLogs(prev => [...prev.slice(-99), event.payload]);
         });
-
         return () => {
             clearInterval(interval);
             unlisten.then(fn => fn());
@@ -61,36 +70,35 @@ export default function Collector() {
             ]);
             setStatuses(statusData);
             setCategories(categoriesData);
-
-            // Initialize selected categories
             const initial: Record<string, string[]> = {};
             ['tianditu', 'amap', 'baidu'].forEach(p => {
                 initial[p] = categoriesData.map(c => c.id);
             });
             setSelectedCategories(initial);
-        } catch (e) {
-            console.error('加载数据失败:', e);
-        }
+        } catch (e) { console.error(e); }
     };
 
     const loadStatuses = async () => {
         try {
             const data = await invoke<Record<string, CollectorStatus>>('get_collector_statuses');
             setStatuses(data);
-        } catch (e) {
-            console.error('加载状态失败:', e);
-        }
+        } catch (e) { console.error(e); }
     };
 
     const startCollector = async (platform: string) => {
+        if (selectedRegions.length === 0) {
+            alert('请先在"地区"页面选择要采集的地区');
+            return;
+        }
         try {
             await invoke('start_collector', {
                 platform,
-                categories: selectedCategories[platform]
+                categories: selectedCategories[platform],
+                regions: selectedRegions.map(r => r.code),
             });
             loadStatuses();
-        } catch (e: any) {
-            alert(e.toString());
+        } catch (e: unknown) {
+            alert(String(e));
         }
     };
 
@@ -98,9 +106,7 @@ export default function Collector() {
         try {
             await invoke('stop_collector', { platform });
             loadStatuses();
-        } catch (e) {
-            console.error('停止失败:', e);
-        }
+        } catch (e) { console.error(e); }
     };
 
     const resetCollector = async (platform: string) => {
@@ -108,9 +114,7 @@ export default function Collector() {
         try {
             await invoke('reset_collector', { platform });
             loadStatuses();
-        } catch (e) {
-            console.error('重置失败:', e);
-        }
+        } catch (e) { console.error(e); }
     };
 
     const toggleCategory = (platform: string, categoryId: string) => {
@@ -131,123 +135,227 @@ export default function Collector() {
         }));
     };
 
-    return (
-        <div>
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">数据采集</h1>
-            <p className="text-slate-500 mb-8">从各平台采集POI数据，支持断点续采</p>
+    const overallStats = useMemo(() => {
+        let totalCollected = 0;
+        let runningCount = 0;
+        Object.values(statuses).forEach(s => {
+            totalCollected += s.total_collected || 0;
+            if (s.status === 'running') runningCount++;
+        });
+        return { totalCollected, runningCount };
+    }, [statuses]);
 
-            {/* Collector Cards */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">数据采集</h1>
+                    <p className="text-muted-foreground">从各平台采集 POI 数据</p>
+                </div>
+                <div className="flex items-center gap-4">
+                    <div className="text-right">
+                        <div className="text-2xl font-bold text-foreground">
+                            {overallStats.totalCollected.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-muted-foreground">总采集量</div>
+                    </div>
+                    {overallStats.runningCount > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-lg">
+                            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                            <span className="text-primary text-sm">
+                                {overallStats.runningCount} 个任务运行中
+                            </span>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* 地区配置提示 */}
+            <Card className={selectedRegions.length > 0 ? 'border-primary/30' : 'border-destructive/30'}>
+                <CardContent className="py-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <MapPin className={`w-5 h-5 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'
+                                }`} />
+                            <div>
+                                <div className={`font-medium ${selectedRegions.length > 0 ? 'text-foreground' : 'text-destructive'
+                                    }`}>
+                                    {selectedRegions.length > 0
+                                        ? `已选择 ${selectedRegions.length} 个地区`
+                                        : '未配置采集地区'
+                                    }
+                                </div>
+                                <div className="text-sm text-muted-foreground">
+                                    {selectedRegions.length > 0
+                                        ? selectedRegions.slice(0, 5).map(r => r.name).join('、') +
+                                        (selectedRegions.length > 5 ? ` 等` : '')
+                                        : '请先在"地区"页面选择要采集的地区'
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <Button variant="outline" size="sm" asChild>
+                            <a href="/regions">管理地区</a>
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* 平台采集卡片 */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {['tianditu', 'amap', 'baidu'].map((platform) => {
                     const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
                     const config = statusConfig[status.status] || statusConfig.idle;
                     const progress = categories.length > 0
                         ? (status.completed_categories?.length || 0) / categories.length * 100
                         : 0;
+                    const isExpanded = expandedPlatform === platform;
 
                     return (
-                        <div key={platform} className="card">
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="font-semibold">{platformNames[platform]}</h3>
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${config.bg} ${config.color}`}>
-                                    {config.text}
-                                </span>
-                            </div>
-
-                            {/* Categories */}
-                            <div className="mb-4 p-3 bg-slate-50 rounded-lg max-h-32 overflow-y-auto">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-xs text-slate-500">选择类别</span>
-                                    <label className="flex items-center gap-1 text-xs text-primary-600 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedCategories[platform]?.length === categories.length}
-                                            onChange={(e) => toggleAllCategories(platform, e.target.checked)}
+                        <Card key={platform}>
+                            <CardHeader className="pb-2">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-lg">{platformNames[platform]}</CardTitle>
+                                    <span className={`px-2 py-1 rounded text-xs font-medium 
+                                        ${status.status === 'running' ? 'bg-primary/10 text-primary' :
+                                            status.status === 'error' ? 'bg-destructive/10 text-destructive' :
+                                                'bg-muted text-muted-foreground'}`}>
+                                        {config.text}
+                                    </span>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {/* 进度条 */}
+                                <div>
+                                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-primary transition-all duration-300"
+                                            style={{ width: `${progress}%` }}
                                         />
-                                        全选
-                                    </label>
+                                    </div>
+                                    <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+                                        <span>{status.completed_categories?.length || 0} / {categories.length} 类别</span>
+                                        <span>已采集: {status.total_collected?.toLocaleString() || 0}</span>
+                                    </div>
                                 </div>
-                                <div className="flex flex-wrap gap-1">
-                                    {categories.map((cat) => (
-                                        <label
-                                            key={cat.id}
-                                            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs cursor-pointer transition-colors ${selectedCategories[platform]?.includes(cat.id)
-                                                ? 'bg-primary-100 text-primary-700'
-                                                : 'bg-white text-slate-500 border'
-                                                }`}
-                                        >
-                                            <input
-                                                type="checkbox"
-                                                className="hidden"
-                                                checked={selectedCategories[platform]?.includes(cat.id)}
-                                                onChange={() => toggleCategory(platform, cat.id)}
-                                            />
-                                            {cat.name}
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
 
-                            {/* Progress */}
-                            <div className="mb-4">
-                                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-gradient-to-r from-primary-500 to-green-500 transition-all duration-300"
-                                        style={{ width: `${progress}%` }}
-                                    />
-                                </div>
-                                <div className="flex justify-between mt-2 text-xs text-slate-500">
-                                    <span>{status.completed_categories?.length || 0} / {categories.length} 类别</span>
-                                    <span>已采集: {status.total_collected?.toLocaleString() || 0}</span>
-                                </div>
-                            </div>
+                                {/* 类别配置 */}
+                                <div className="border rounded-lg">
+                                    <button
+                                        onClick={() => setExpandedPlatform(isExpanded ? null : platform)}
+                                        className="w-full flex items-center justify-between p-3 hover:bg-accent transition-colors"
+                                    >
+                                        <span className="flex items-center gap-2 text-sm">
+                                            <Settings2 className="w-4 h-4" />
+                                            类别配置
+                                            <span className="text-muted-foreground">
+                                                ({selectedCategories[platform]?.length || 0}/{categories.length})
+                                            </span>
+                                        </span>
+                                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                    </button>
 
-                            {/* Actions */}
-                            <div className="flex gap-2">
-                                <button
-                                    className="btn btn-primary flex-1 flex items-center justify-center gap-2"
-                                    onClick={() => startCollector(platform)}
-                                    disabled={status.status === 'running'}
-                                >
-                                    {status.status === 'running' ? (
-                                        <Loader2 className="w-4 h-4 animate-spin" />
-                                    ) : (
-                                        <Play className="w-4 h-4" />
+                                    {isExpanded && (
+                                        <div className="p-3 border-t bg-muted/30">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <span className="text-xs text-muted-foreground">选择采集类别</span>
+                                                <label className="flex items-center gap-1 text-xs text-primary cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedCategories[platform]?.length === categories.length}
+                                                        onChange={(e) => toggleAllCategories(platform, e.target.checked)}
+                                                        className="rounded"
+                                                    />
+                                                    全选
+                                                </label>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                                                {categories.map((cat) => (
+                                                    <label
+                                                        key={cat.id}
+                                                        className={`flex items-center gap-1 px-2 py-1 rounded text-xs 
+                                                                  cursor-pointer transition-colors border ${selectedCategories[platform]?.includes(cat.id)
+                                                                ? 'bg-primary/10 text-primary border-primary/30'
+                                                                : 'bg-background text-muted-foreground border-border hover:border-primary/50'
+                                                            }`}
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            className="hidden"
+                                                            checked={selectedCategories[platform]?.includes(cat.id)}
+                                                            onChange={() => toggleCategory(platform, cat.id)}
+                                                        />
+                                                        {cat.name}
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
                                     )}
-                                    {status.status === 'running' ? '采集中' : status.status === 'paused' ? '继续' : '开始'}
-                                </button>
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={() => stopCollector(platform)}
-                                    disabled={status.status !== 'running'}
-                                >
-                                    <Square className="w-4 h-4" />
-                                </button>
-                                <button
-                                    className="btn btn-danger"
-                                    onClick={() => resetCollector(platform)}
-                                >
-                                    <RotateCcw className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
+                                </div>
+
+                                {/* 操作按钮 */}
+                                <div className="flex gap-2">
+                                    <Button
+                                        className="flex-1"
+                                        onClick={() => startCollector(platform)}
+                                        disabled={status.status === 'running'}
+                                    >
+                                        {status.status === 'running' ? (
+                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                        ) : (
+                                            <Play className="w-4 h-4 mr-2" />
+                                        )}
+                                        {status.status === 'running' ? '采集中' : '开始'}
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        onClick={() => stopCollector(platform)}
+                                        disabled={status.status !== 'running'}
+                                    >
+                                        <Square className="w-4 h-4" />
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        size="icon"
+                                        onClick={() => resetCollector(platform)}
+                                    >
+                                        <RotateCcw className="w-4 h-4" />
+                                    </Button>
+                                </div>
+
+                                {status.error_message && (
+                                    <div className="p-2 bg-destructive/10 border border-destructive/30 rounded text-destructive text-sm">
+                                        {status.error_message}
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
                     );
                 })}
             </div>
 
-            {/* Logs */}
-            <div className="card">
-                <h3 className="font-semibold mb-4">采集日志</h3>
-                <div className="bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-sm">
-                    {logs.length > 0 ? (
-                        logs.map((log, i) => (
-                            <div key={i} className="text-slate-300 py-0.5">{log}</div>
-                        ))
-                    ) : (
-                        <div className="text-slate-500">等待采集开始...</div>
-                    )}
-                </div>
-            </div>
+            {/* 采集日志 */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>采集日志</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <div className="bg-muted rounded-lg p-4 h-48 overflow-y-auto font-mono text-sm">
+                        {logs.length > 0 ? (
+                            logs.map((log, i) => (
+                                <div key={i} className="text-muted-foreground py-0.5 hover:bg-accent/50">
+                                    {log}
+                                </div>
+                            ))
+                        ) : (
+                            <div className="text-muted-foreground flex items-center gap-2">
+                                等待采集开始...
+                            </div>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
         </div>
     );
 }
