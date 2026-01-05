@@ -57,7 +57,7 @@ export default function Search() {
     return (
         <div className="h-full flex flex-col gap-4">
             {/* 搜索栏 */}
-            <Card>
+            <Card className="shrink-0">
                 <CardContent className="py-4">
                     <div className="flex items-center gap-3">
                         <div className="relative flex-1">
@@ -146,11 +146,12 @@ export default function Search() {
                 </CardContent>
             </Card>
 
-            {/* 结果区域 */}
-            <div className={`flex-1 grid gap-4 ${showList && showMap ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {/* 结果区域 - 修复地图铺满问题 */}
+            <div className={`flex-1 min-h-0 grid gap-4 ${showList && showMap ? 'grid-cols-2' : 'grid-cols-1'
+                }`}>
                 {/* 列表 */}
                 {showList && (
-                    <Card className="overflow-hidden">
+                    <Card className="overflow-hidden h-full">
                         <CardContent className="p-0 h-full">
                             {results.length > 0 ? (
                                 <div className="h-full overflow-y-auto">
@@ -159,8 +160,8 @@ export default function Search() {
                                             key={poi.id}
                                             onClick={() => setSelectedId(poi.id)}
                                             className={`p-4 border-b border-border cursor-pointer transition-colors ${selectedId === poi.id
-                                                ? 'bg-primary/10 border-l-2 border-l-primary'
-                                                : 'hover:bg-accent'
+                                                    ? 'bg-primary/10 border-l-2 border-l-primary'
+                                                    : 'hover:bg-accent'
                                                 }`}
                                         >
                                             <div className="flex items-start gap-3">
@@ -196,15 +197,17 @@ export default function Search() {
                     </Card>
                 )}
 
-                {/* 地图 */}
+                {/* 地图 - 使用 h-full 确保铺满 */}
                 {showMap && (
-                    <Card className="overflow-hidden">
+                    <Card className="overflow-hidden h-full">
                         <CardContent className="p-0 h-full">
-                            <POIMap
-                                pois={results}
-                                selectedId={selectedId}
-                                onMarkerClick={handleMarkerClick}
-                            />
+                            <div className="h-full w-full">
+                                <POIMap
+                                    pois={results}
+                                    selectedId={selectedId}
+                                    onMarkerClick={handleMarkerClick}
+                                />
+                            </div>
                         </CardContent>
                     </Card>
                 )}

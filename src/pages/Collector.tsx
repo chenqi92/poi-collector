@@ -4,7 +4,13 @@ import { listen } from '@tauri-apps/api/event';
 import { Play, Square, RotateCcw, Loader2, MapPin, ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { SelectedRegion } from '@/pages/Regions';
+import { SettingsDialog } from '@/components/SettingsDialog';
+
+interface SelectedRegion {
+    code: string;
+    name: string;
+    level: number;
+}
 
 interface CollectorStatus {
     platform: string;
@@ -42,6 +48,7 @@ export default function Collector() {
     const [logs, setLogs] = useState<string[]>([]);
     const [selectedRegions, setSelectedRegions] = useState<SelectedRegion[]>([]);
     const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+    const [showSettings, setShowSettings] = useState(false);
 
     useEffect(() => {
         try {
@@ -189,13 +196,13 @@ export default function Collector() {
                                     {selectedRegions.length > 0
                                         ? selectedRegions.slice(0, 5).map(r => r.name).join('、') +
                                         (selectedRegions.length > 5 ? ` 等` : '')
-                                        : '请先在"地区"页面选择要采集的地区'
+                                        : '请先在设置中选择要采集的地区'
                                     }
                                 </div>
                             </div>
                         </div>
-                        <Button variant="outline" size="sm" asChild>
-                            <a href="/regions">管理地区</a>
+                        <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
+                            管理地区
                         </Button>
                     </div>
                 </CardContent>
@@ -356,6 +363,9 @@ export default function Collector() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Settings Dialog */}
+            <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
         </div>
     );
 }

@@ -1,42 +1,35 @@
+import { useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import {
     LayoutDashboard,
     Download,
     Search,
-    MapPin,
     FileOutput,
     Settings,
-    Key,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from '@/components/theme-toggle';
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { cn } from '@/lib/utils';
 
 const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: '概览' },
-    { path: '/regions', icon: MapPin, label: '地区' },
     { path: '/collector', icon: Download, label: '采集' },
     { path: '/search', icon: Search, label: '查询' },
     { path: '/export', icon: FileOutput, label: '导出' },
 ];
 
 export default function Layout() {
+    const [settingsOpen, setSettingsOpen] = useState(false);
+
     return (
         <div className="flex h-screen bg-background">
             {/* Sidebar */}
             <aside className="w-16 bg-sidebar border-r border-sidebar-border flex flex-col items-center py-4">
                 {/* Logo */}
                 <div className="mb-6">
-                    <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
-                        <MapPin className="w-5 h-5 text-primary-foreground" />
+                    <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-primary-foreground font-bold">
+                        P
                     </div>
                 </div>
 
@@ -62,31 +55,16 @@ export default function Layout() {
             </aside>
 
             {/* Main Area */}
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Top Bar */}
-                <header className="h-14 border-b border-border flex items-center justify-between px-6">
+                <header className="h-14 border-b border-border flex items-center justify-between px-6 shrink-0">
                     <h1 className="text-lg font-semibold text-foreground">POI Collector</h1>
 
                     <div className="flex items-center gap-2">
                         <ThemeToggle />
-
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                    <Settings className="h-5 w-5" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                                <DropdownMenuLabel>设置</DropdownMenuLabel>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem asChild>
-                                    <NavLink to="/settings" className="flex items-center gap-2 cursor-pointer">
-                                        <Key className="w-4 h-4" />
-                                        API Key 管理
-                                    </NavLink>
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                        <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}>
+                            <Settings className="h-5 w-5" />
+                        </Button>
                     </div>
                 </header>
 
@@ -95,6 +73,9 @@ export default function Layout() {
                     <Outlet />
                 </main>
             </div>
+
+            {/* Settings Dialog */}
+            <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
         </div>
     );
 }
