@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Key, Plus, Trash2, Eye, EyeOff, Loader2, ExternalLink, Search, ChevronRight, ChevronDown, X, Check, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -113,8 +114,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         }
     };
 
-    const openPlatformUrl = (url: string) => {
-        window.open(url, '_blank');
+    const openPlatformUrl = async (url: string) => {
+        try {
+            await openUrl(url);
+        } catch (e) {
+            console.error('打开链接失败:', e);
+        }
     };
 
     // Region Functions

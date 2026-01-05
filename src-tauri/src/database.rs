@@ -10,8 +10,27 @@ impl Database {
     pub fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
         let db = Self { conn };
+        db.migrate()?;
         db.init_tables()?;
         Ok(db)
+    }
+
+    /// 数据库迁移：检查表结构版本并升级
+    fn migrate(&self) -> Result<()> {
+        // 检查是否有旧版本的 poi_data 表（没有新字段）
+        let has_category_id: bool = self.conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('poi_data') WHERE name = 'category_id'",
+            [],
+            |row| row.get(0)
+        ).unwrap_or(false);
+
+        // 如果表存在但没有 category_id 字段，重建表
+        if !has_category_id {
+            log::info!("迁移数据库：重建 poi_data 表");
+            let _ = self.conn.execute("DROP TABLE IF EXISTS poi_data", []);
+        }
+
+        Ok(())
     }
 
     fn init_tables(&self) -> Result<()> {
@@ -32,8 +51,12 @@ impl Database {
                 name TEXT NOT NULL,
                 lon REAL NOT NULL,
                 lat REAL NOT NULL,
+                original_lon REAL,
+                original_lat REAL,
                 address TEXT,
+                phone TEXT,
                 category TEXT,
+                category_id TEXT,
                 raw_data TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(platform, name, lon, lat)
@@ -87,7 +110,7 @@ impl Database {
                 ApiKey {
                     id: row.get(0)?,
                     name: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    api_key: mask_key(&row.get::<_, String>(2)?),
+                    api_key: row.get::<_, String>(2)?, // 返回完整的 key 给后端使用
                     is_active: row.get::<_, i64>(4)? == 1,
                     quota_exhausted: row.get::<_, i64>(5)? == 1,
                 }
@@ -166,19 +189,32 @@ impl Database {
         Ok(results)
     }
 
-    pub fn insert_poi(&self, platform: &str, name: &str, lon: f64, lat: f64, address: Option<&str>, category: Option<&str>) -> Result<()> {
+    pub fn insert_poi(
+        &self,
+        name: &str,
+        lon: f64,
+        lat: f64,
+        original_lon: f64,
+        original_lat: f64,
+        category: &str,
+        category_id: &str,
+        address: &str,
+        phone: &str,
+        platform: &str,
+        raw_data: &str,
+    ) -> Result<bool> {
+        let rows = self.conn.execute(
+            "INSERT OR IGNORE INTO poi_data (name, lon, lat, original_lon, original_lat, category, category_id, address, phone, platform, raw_data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![name, lon, lat, original_lon, original_lat, category, category_id, address, phone, platform, raw_data]
+        )?;
+        Ok(rows > 0)  // 返回是否实际插入了行
+    }
+
+    pub fn mark_key_exhausted(&self, key_id: i64) -> Result<()> {
         self.conn.execute(
-            "INSERT OR IGNORE INTO poi_data (platform, name, lon, lat, address, category) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![platform, name, lon, lat, address, category]
+            "UPDATE api_keys SET quota_exhausted = 1 WHERE id = ?1",
+            params![key_id]
         )?;
         Ok(())
-    }
-}
-
-fn mask_key(key: &str) -> String {
-    if key.len() > 8 {
-        format!("{}****{}", &key[..4], &key[key.len()-4..])
-    } else {
-        key.to_string()
     }
 }

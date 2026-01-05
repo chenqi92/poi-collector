@@ -5,6 +5,7 @@ import { Play, Square, RotateCcw, Loader2, MapPin, ChevronDown, ChevronUp, Setti
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
+import { useToast } from '@/components/ui/toast';
 
 interface SelectedRegion {
     code: string;
@@ -49,6 +50,8 @@ export default function Collector() {
     const [selectedRegions, setSelectedRegions] = useState<SelectedRegion[]>([]);
     const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
+    const [apiKeys, setApiKeys] = useState<Record<string, { id: number; api_key: string }[]>>({});
+    const { warning, error: showError, success } = useToast();
 
     useEffect(() => {
         try {
@@ -71,12 +74,14 @@ export default function Collector() {
 
     const loadData = async () => {
         try {
-            const [statusData, categoriesData] = await Promise.all([
+            const [statusData, categoriesData, apiKeysData] = await Promise.all([
                 invoke<Record<string, CollectorStatus>>('get_collector_statuses'),
                 invoke<Category[]>('get_categories'),
+                invoke<Record<string, { id: number; api_key: string }[]>>('get_api_keys'),
             ]);
             setStatuses(statusData);
             setCategories(categoriesData);
+            setApiKeys(apiKeysData);
             const initial: Record<string, string[]> = {};
             ['tianditu', 'amap', 'baidu'].forEach(p => {
                 initial[p] = categoriesData.map(c => c.id);
@@ -93,19 +98,37 @@ export default function Collector() {
     };
 
     const startCollector = async (platform: string) => {
-        if (selectedRegions.length === 0) {
-            alert('请先在"地区"页面选择要采集的地区');
+        // 检查 API Key
+        const platformKeys = apiKeys[platform] || [];
+        if (platformKeys.length === 0) {
+            warning('未配置 API Key', `请先在设置中配置 ${platformNames[platform]} 的 API Key`);
+            setShowSettings(true);
             return;
         }
+
+        // 检查地区
+        if (selectedRegions.length === 0) {
+            warning('未选择地区', '请先在设置中选择要采集的地区');
+            setShowSettings(true);
+            return;
+        }
+
+        // 检查类别
+        if ((selectedCategories[platform]?.length || 0) === 0) {
+            warning('未选择类别', '请先选择要采集的类别');
+            return;
+        }
+
         try {
             await invoke('start_collector', {
                 platform,
                 categories: selectedCategories[platform],
                 regions: selectedRegions.map(r => r.code),
             });
+            success('开始采集', `${platformNames[platform]} 已开始采集`);
             loadStatuses();
         } catch (e: unknown) {
-            alert(String(e));
+            showError('采集失败', String(e));
         }
     };
 
