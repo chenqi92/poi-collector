@@ -1,0 +1,9 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="1024" height="1024" rx="240" fill="#2563EB"/>
+
+    <g transform="translate(192, 192) scale(0.625)"> <path fill-rule="evenodd" clip-rule="evenodd" d="M512 32C300.032 32 128 204.032 128 416C128 664 512 992 512 992C512 992 896 664 896 416C896 204.032 723.968 32 512 32ZM512 672L320 480H416V256H608V480H704L512 672Z" fill="white"/>
+    </g>
+
+    <path d="M360 760H664C686.091 760 704 777.909 704 800V820C704 842.091 686.091 860 664 860H360C337.909 860 320 842.091 320 820V800C320 777.909 337.909 760 360 760Z" fill="white"/>
+
+</svg>

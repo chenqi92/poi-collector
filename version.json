@@ -1,5 +1,5 @@
 {
-    "version": "0.1.0",
-    "name": "poi-collector-app",
-    "description": "Multi-platform POI data collector for TianDiTu, Amap, Baidu Maps"
+  "version": "0.2.0",
+  "name": "poi-collector-app",
+  "description": "Multi-platform POI data collector for TianDiTu, Amap, Baidu Maps"
 }

@@ -1,7 +1,7 @@
 {
   "name": "poi-collector-app",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -33,6 +33,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "autoprefixer": "^10.4.23",
     "postcss": "^8.5.6",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
