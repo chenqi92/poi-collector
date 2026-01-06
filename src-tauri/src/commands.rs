@@ -8,7 +8,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 use crate::collectors::{
-    default_categories, AmapCollector, BaiduCollector, Bounds, Collector,
+    default_categories, AmapCollector, BaiduCollector, Bounds, Collector, OsmCollector,
     RegionConfig as CollectorRegionConfig, TianDiTuCollector,
 };
 use crate::config::{get_current_region, set_region, RegionConfig, PRESET_REGIONS};
@@ -306,6 +306,7 @@ fn run_collector(
         "tianditu" => Box::new(TianDiTuCollector::new(api_key)),
         "amap" => Box::new(AmapCollector::new(api_key)),
         "baidu" => Box::new(BaiduCollector::new(api_key)),
+        "osm" => Box::new(OsmCollector::new()),
         _ => {
             update_status(&platform, |s| {
                 s.status = "error".to_string();

@@ -33,6 +33,7 @@ const platformNames: Record<string, string> = {
     tianditu: '天地图',
     amap: '高德地图',
     baidu: '百度地图',
+    osm: 'OpenStreetMap',
 };
 
 const statusConfig = {

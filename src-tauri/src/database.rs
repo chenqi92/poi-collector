@@ -9,6 +9,10 @@ pub struct Database {
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
+
+        // 启用 WAL 模式，避免 journal 文件频繁出现/消失
+        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+
         let db = Self { conn };
         db.migrate()?;
         db.init_tables()?;

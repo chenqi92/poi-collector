@@ -5,6 +5,7 @@ import {
     Download,
     Search,
     FileOutput,
+    Database,
     Settings,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ const navItems = [
     { path: '/collector', icon: Download, label: '采集' },
     { path: '/search', icon: Search, label: '查询' },
     { path: '/export', icon: FileOutput, label: '导出' },
+    { path: '/data-management', icon: Database, label: '数据管理' },
 ];
 
 export default function Layout() {

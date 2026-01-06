@@ -6,6 +6,7 @@ import Dashboard from '@/pages/Dashboard';
 import Collector from '@/pages/Collector';
 import Search from '@/pages/Search';
 import Export from '@/pages/Export';
+import DataManagement from '@/pages/DataManagement';
 import '@/index.css';
 
 function App() {
@@ -20,6 +21,7 @@ function App() {
               <Route path="collector" element={<Collector />} />
               <Route path="search" element={<Search />} />
               <Route path="export" element={<Export />} />
+              <Route path="data-management" element={<DataManagement />} />
             </Route>
           </Routes>
         </BrowserRouter>
@@ -29,4 +31,3 @@ function App() {
 }
 
 export default App;
-
