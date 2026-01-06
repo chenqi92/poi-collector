@@ -108,10 +108,29 @@ function createColoredIcon(color: string) {
     });
 }
 
+// 选中标记时居中显示
+function CenterOnSelected({ selectedId, pois }: { selectedId: number | null | undefined; pois: POI[] }) {
+    const map = useMap();
+
+    useEffect(() => {
+        if (selectedId == null) return;
+        const poi = pois.find(p => p.id === selectedId);
+        if (poi) {
+            map.setView([poi.lat, poi.lon], Math.max(map.getZoom(), 14), { animate: true });
+        }
+    }, [selectedId, pois, map]);
+
+    return null;
+}
+
+// 选中状态的高亮颜色
+const SELECTED_COLOR = '#f97316'; // orange-500
+
 export function POIMap({
     pois,
     center = [33.78, 119.8], // 默认中心：阜宁
     zoom = 10,
+    selectedId,
     onMarkerClick
 }: POIMapProps) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -131,38 +150,45 @@ export function POIMap({
 
                 <FitBounds pois={pois} />
                 <ResizeHandler />
+                <CenterOnSelected selectedId={selectedId} pois={pois} />
 
-                {pois.map((poi) => (
-                    <Marker
-                        key={poi.id}
-                        position={[poi.lat, poi.lon]}
-                        icon={createColoredIcon(platformColors[poi.platform] || '#3b82f6')}
-                        eventHandlers={{
-                            click: () => onMarkerClick?.(poi),
-                        }}
-                    >
-                        <Popup>
-                            <div className="text-sm">
-                                <div className="font-semibold text-gray-900">{poi.name}</div>
-                                <div className="text-gray-500 mt-1">{poi.address || '暂无地址'}</div>
-                                <div className="flex items-center gap-2 mt-2 text-xs">
-                                    <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                                        {poi.category || '未分类'}
-                                    </span>
-                                    <span
-                                        className="px-2 py-0.5 rounded text-white"
-                                        style={{ backgroundColor: platformColors[poi.platform] || '#3b82f6' }}
-                                    >
-                                        {poi.platform}
-                                    </span>
+                {pois.map((poi) => {
+                    const isSelected = poi.id === selectedId;
+                    const color = isSelected ? SELECTED_COLOR : (platformColors[poi.platform] || '#3b82f6');
+
+                    return (
+                        <Marker
+                            key={poi.id}
+                            position={[poi.lat, poi.lon]}
+                            icon={createColoredIcon(color)}
+                            zIndexOffset={isSelected ? 1000 : 0}
+                            eventHandlers={{
+                                click: () => onMarkerClick?.(poi),
+                            }}
+                        >
+                            <Popup>
+                                <div className="text-sm">
+                                    <div className="font-semibold text-gray-900">{poi.name}</div>
+                                    <div className="text-gray-500 mt-1">{poi.address || '暂无地址'}</div>
+                                    <div className="flex items-center gap-2 mt-2 text-xs">
+                                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                                            {poi.category || '未分类'}
+                                        </span>
+                                        <span
+                                            className="px-2 py-0.5 rounded text-white"
+                                            style={{ backgroundColor: platformColors[poi.platform] || '#3b82f6' }}
+                                        >
+                                            {poi.platform}
+                                        </span>
+                                    </div>
+                                    <div className="text-gray-400 mt-1 text-xs">
+                                        {poi.lon.toFixed(6)}, {poi.lat.toFixed(6)}
+                                    </div>
                                 </div>
-                                <div className="text-gray-400 mt-1 text-xs">
-                                    {poi.lon.toFixed(6)}, {poi.lat.toFixed(6)}
-                                </div>
-                            </div>
-                        </Popup>
-                    </Marker>
-                ))}
+                            </Popup>
+                        </Marker>
+                    );
+                })}
             </MapContainer>
         </div>
     );

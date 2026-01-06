@@ -315,6 +315,8 @@ fn run_collector(
         }
     };
 
+    // 保存区域代码用于数据库插入（region 会被 move）
+    let region_code = region.admin_code.clone();
     collector.set_region(region);
 
     let mut total_collected: i64 = 0;
@@ -371,6 +373,7 @@ fn run_collector(
                                         &poi.address,
                                         &poi.phone,
                                         &poi.platform,
+                                        &region_code,
                                         &poi.raw_data,
                                     ) {
                                         Ok(true) => count += 1,
@@ -624,4 +627,33 @@ pub fn export_poi_to_file(
     }
 
     Ok(count)
+}
+
+/// 修复缺失的 region_code 数据
+#[tauri::command]
+pub fn fix_region_codes() -> Result<(i64, i64), String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    db.fix_region_codes().map_err(|e| e.to_string())
+}
+
+/// 获取按 region_code 分组的 POI 统计
+#[tauri::command]
+pub fn get_poi_stats_by_region() -> Result<Vec<(String, i64)>, String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    db.get_poi_stats_by_region().map_err(|e| e.to_string())
+}
+
+/// 根据 region_code 列表删除 POI
+#[tauri::command]
+pub fn delete_poi_by_regions(codes: Vec<String>) -> Result<usize, String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    db.delete_poi_by_region_codes(&codes)
+        .map_err(|e| e.to_string())
+}
+
+/// 清空所有 POI 数据
+#[tauri::command]
+pub fn clear_all_poi() -> Result<usize, String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    db.clear_all_poi().map_err(|e| e.to_string())
 }

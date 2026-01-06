@@ -23,6 +23,7 @@ interface ExportPOI {
     phone: string;
     category: string;
     platform: string;
+    region_code: string;
 }
 
 interface Region {
@@ -63,6 +64,7 @@ export default function Export() {
 
     // 搜索过滤
     const [searchQuery, setSearchQuery] = useState('');
+    const [showAll, setShowAll] = useState(false); // 显示全部数据（跳过地区筛选）
 
     // 数据
     const [allData, setAllData] = useState<ExportPOI[]>([]);
@@ -70,8 +72,8 @@ export default function Export() {
     const [page, setPage] = useState(1);
     const pageSize = 100;
 
-    // 是否已选择地区 - 作为显示表格的前提条件
-    const hasRegionSelected = selectedRegions.size > 0;
+    // 是否显示表格（选择了地区或开启了显示全部）
+    const hasRegionSelected = selectedRegions.size > 0 || showAll;
 
     useEffect(() => {
         loadProvinces();
@@ -172,6 +174,9 @@ export default function Export() {
     const loadAllData = async () => {
         setLoading(true);
         try {
+            // 先修复缺失的 region_code
+            await invoke<[number, number]>('fix_region_codes');
+
             const data = await invoke<ExportPOI[]>('get_all_poi_data', {
                 platform: platform === 'all' ? null : platform,
             });
@@ -188,31 +193,31 @@ export default function Export() {
     const filteredData = useMemo(() => {
         if (!hasRegionSelected) return [];
 
-        // 收集所有要匹配的地区名称（包括选中地区及其子地区）
-        const matchNames = new Set<string>();
+        let data = allData;
 
-        for (const code of selectedRegions) {
-            const name = regionNames.get(code);
-            if (name) matchNames.add(name);
+        // 如果不是"显示全部"模式，则按地区代码筛选
+        if (!showAll && selectedRegions.size > 0) {
+            // 收集所有要匹配的地区代码（包括选中地区及其子地区）
+            const matchCodes = new Set<string>();
 
-            // 添加子地区名称
-            const childRegions = children[code] || [];
-            for (const child of childRegions) {
-                matchNames.add(child.name);
-                // 如果是市级，还要添加区县
-                const grandchildren = children[child.code] || [];
-                for (const gc of grandchildren) {
-                    matchNames.add(gc.name);
+            for (const code of selectedRegions) {
+                matchCodes.add(code);
+
+                // 添加子地区代码
+                const childRegions = children[code] || [];
+                for (const child of childRegions) {
+                    matchCodes.add(child.code);
+                    // 如果是市级，还要添加区县代码
+                    const grandchildren = children[child.code] || [];
+                    for (const gc of grandchildren) {
+                        matchCodes.add(gc.code);
+                    }
                 }
             }
+
+            // 按 region_code 精确匹配筛选
+            data = data.filter(poi => matchCodes.has(poi.region_code));
         }
-
-        const nameArray = Array.from(matchNames);
-
-        let data = allData.filter(poi => {
-            const searchText = `${poi.address || ''} ${poi.name || ''}`;
-            return nameArray.some(regionName => searchText.includes(regionName));
-        });
 
         // 按搜索词进一步过滤
         if (searchQuery.trim()) {
@@ -224,7 +229,7 @@ export default function Export() {
         }
 
         return data;
-    }, [allData, selectedRegions, regionNames, children, searchQuery, hasRegionSelected]);
+    }, [allData, selectedRegions, children, searchQuery, hasRegionSelected, showAll]);
 
     const handleExport = async () => {
         if (filteredData.length === 0) {
@@ -340,6 +345,27 @@ export default function Export() {
                         </div>
                     </CardHeader>
                     <CardContent className="flex-1 overflow-y-auto p-1">
+                        {/* 显示全部选项 */}
+                        <div
+                            className={`flex items-center gap-2 py-2 px-2 mb-1 rounded text-xs border transition-colors cursor-pointer
+                                      ${showAll ? 'bg-primary/10 border-primary' : 'border-border hover:bg-accent'}`}
+                            onClick={() => { setShowAll(!showAll); setPage(1); }}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={showAll}
+                                onChange={() => { }}
+                                className="w-3 h-3 cursor-pointer"
+                            />
+                            <span className="font-medium">显示全部数据</span>
+                        </div>
+
+                        {!showAll && (
+                            <div className="text-[10px] text-muted-foreground px-2 mb-2">
+                                按地区筛选（勾选上方可跳过）
+                            </div>
+                        )}
+
                         {provinces.map(p => renderRegion(p))}
                     </CardContent>
                 </Card>

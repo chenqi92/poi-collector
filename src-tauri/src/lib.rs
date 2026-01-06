@@ -42,6 +42,7 @@ pub fn run() {
             // 导出
             get_all_poi_data,
             export_poi_to_file,
+            fix_region_codes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
