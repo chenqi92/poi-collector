@@ -124,16 +124,42 @@ export default function Export() {
         setExpanded(newExpanded);
     };
 
-    const toggleSelectRegion = (code: string, name: string, e: React.MouseEvent) => {
+    const toggleSelectRegion = async (code: string, name: string, e: React.MouseEvent) => {
         e.stopPropagation();
         const newSelected = new Set(selectedRegions);
+        const newNames = new Map(regionNames);
+        newNames.set(code, name);
+
         if (newSelected.has(code)) {
+            // 取消选中：同时移除所有子级和孙级
             newSelected.delete(code);
+            const childData = children[code] || [];
+            for (const child of childData) {
+                newSelected.delete(child.code);
+                const grandchildren = children[child.code] || [];
+                for (const gc of grandchildren) {
+                    newSelected.delete(gc.code);
+                }
+            }
         } else {
+            // 选中：同时选中所有子级和孙级
             newSelected.add(code);
+            const childData = await loadChildren(code);
+            for (const child of childData) {
+                newSelected.add(child.code);
+                newNames.set(child.code, child.name);
+                if (child.level === 'city') {
+                    const grandchildren = await loadChildren(child.code);
+                    for (const gc of grandchildren) {
+                        newSelected.add(gc.code);
+                        newNames.set(gc.code, gc.name);
+                    }
+                }
+            }
         }
+
         setSelectedRegions(newSelected);
-        setRegionNames(prev => new Map(prev).set(code, name));
+        setRegionNames(newNames);
         setPage(1);
     };
 
@@ -157,17 +183,35 @@ export default function Export() {
         }
     };
 
-    // 根据选中的地区名称过滤数据（匹配地址或名称中包含地区名）
+    // 根据选中的地区过滤数据
+    // 选择省级时，匹配该省所有市县；选择市级时，匹配该市所有区县
     const filteredData = useMemo(() => {
         if (!hasRegionSelected) return [];
 
-        const selectedNames = Array.from(selectedRegions)
-            .map(code => regionNames.get(code) || '')
-            .filter(Boolean);
+        // 收集所有要匹配的地区名称（包括选中地区及其子地区）
+        const matchNames = new Set<string>();
+
+        for (const code of selectedRegions) {
+            const name = regionNames.get(code);
+            if (name) matchNames.add(name);
+
+            // 添加子地区名称
+            const childRegions = children[code] || [];
+            for (const child of childRegions) {
+                matchNames.add(child.name);
+                // 如果是市级，还要添加区县
+                const grandchildren = children[child.code] || [];
+                for (const gc of grandchildren) {
+                    matchNames.add(gc.name);
+                }
+            }
+        }
+
+        const nameArray = Array.from(matchNames);
 
         let data = allData.filter(poi => {
             const searchText = `${poi.address || ''} ${poi.name || ''}`;
-            return selectedNames.some(regionName => searchText.includes(regionName));
+            return nameArray.some(regionName => searchText.includes(regionName));
         });
 
         // 按搜索词进一步过滤
@@ -180,7 +224,7 @@ export default function Export() {
         }
 
         return data;
-    }, [allData, selectedRegions, regionNames, searchQuery, hasRegionSelected]);
+    }, [allData, selectedRegions, regionNames, children, searchQuery, hasRegionSelected]);
 
     const handleExport = async () => {
         if (filteredData.length === 0) {
@@ -204,10 +248,13 @@ export default function Export() {
         setExporting(true);
 
         try {
+            // 传递筛选后的 ID 列表，确保导出数据与预览一致
+            const filteredIds = filteredData.map(poi => poi.id);
             const count = await invoke<number>('export_poi_to_file', {
                 path: filePath,
                 format: format,
                 platform: platform === 'all' ? null : platform,
+                ids: filteredIds,
             });
 
             showSuccess('导出成功', `已导出 ${count.toLocaleString()} 条数据`);

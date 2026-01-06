@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Square, RotateCcw, Loader2, MapPin, Settings2 } from 'lucide-react';
+import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -133,17 +133,29 @@ export default function Collector() {
         }
     };
 
-    const stopCollector = async (platform: string) => {
+    const pauseCollector = async (platform: string) => {
         try {
             await invoke('stop_collector', { platform });
+            success('已暂停', `${platformNames[platform]} 采集已暂停，可稍后继续`);
+            loadStatuses();
+        } catch (e) { console.error(e); }
+    };
+
+    const fullStopCollector = async (platform: string) => {
+        if (!confirm('停止后需要从头开始采集，确定要停止吗？')) return;
+        try {
+            await invoke('stop_collector', { platform });
+            await invoke('reset_collector', { platform });
+            success('已停止', `${platformNames[platform]} 采集已完全停止`);
             loadStatuses();
         } catch (e) { console.error(e); }
     };
 
     const resetCollector = async (platform: string) => {
-        if (!confirm('确定要重置采集进度吗？')) return;
+        if (!confirm('确定要重置采集进度吗？将清空已采集的类别记录。')) return;
         try {
             await invoke('reset_collector', { platform });
+            success('已重置', `${platformNames[platform]} 采集进度已重置`);
             loadStatuses();
         } catch (e) { console.error(e); }
     };
@@ -272,33 +284,63 @@ export default function Collector() {
 
                                 {/* 操作按钮 */}
                                 <div className="flex gap-2">
-                                    <Button
-                                        className="flex-1"
-                                        onClick={() => startCollector(platform)}
-                                        disabled={status.status === 'running'}
-                                    >
-                                        {status.status === 'running' ? (
-                                            <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                                        ) : (
-                                            <Play className="w-4 h-4 mr-2" />
-                                        )}
-                                        {status.status === 'running' ? '采集中' : '开始'}
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="icon"
-                                        onClick={() => stopCollector(platform)}
-                                        disabled={status.status !== 'running'}
-                                    >
-                                        <Square className="w-4 h-4" />
-                                    </Button>
-                                    <Button
-                                        variant="destructive"
-                                        size="icon"
-                                        onClick={() => resetCollector(platform)}
-                                    >
-                                        <RotateCcw className="w-4 h-4" />
-                                    </Button>
+                                    {status.status === 'running' ? (
+                                        <>
+                                            {/* 采集中：显示暂停和停止 */}
+                                            <Button
+                                                className="flex-1"
+                                                variant="outline"
+                                                onClick={() => pauseCollector(platform)}
+                                            >
+                                                <Pause className="w-4 h-4 mr-2" />
+                                                暂停
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                onClick={() => fullStopCollector(platform)}
+                                            >
+                                                <Square className="w-4 h-4 mr-2" />
+                                                停止
+                                            </Button>
+                                        </>
+                                    ) : status.status === 'paused' ? (
+                                        <>
+                                            {/* 已暂停：显示继续和停止 */}
+                                            <Button
+                                                className="flex-1"
+                                                onClick={() => startCollector(platform)}
+                                            >
+                                                <Play className="w-4 h-4 mr-2" />
+                                                继续
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                onClick={() => fullStopCollector(platform)}
+                                            >
+                                                <Square className="w-4 h-4 mr-2" />
+                                                停止
+                                            </Button>
+                                        </>
+                                    ) : (
+                                        <>
+                                            {/* 未开始/已完成/出错：显示开始和重置 */}
+                                            <Button
+                                                className="flex-1"
+                                                onClick={() => startCollector(platform)}
+                                            >
+                                                <Play className="w-4 h-4 mr-2" />
+                                                {status.status === 'completed' ? '重新开始' : '开始采集'}
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => resetCollector(platform)}
+                                                disabled={status.status === 'idle' || status.total_collected === 0}
+                                            >
+                                                <RotateCcw className="w-4 h-4 mr-2" />
+                                                重置
+                                            </Button>
+                                        </>
+                                    )}
                                 </div>
 
                                 {status.error_message && (

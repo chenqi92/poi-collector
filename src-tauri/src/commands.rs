@@ -539,13 +539,20 @@ pub fn export_poi_to_file(
     path: String,
     format: String,
     platform: Option<String>,
+    ids: Option<Vec<i64>>,
 ) -> Result<usize, String> {
     let db = DB.lock().map_err(|e| e.to_string())?;
     let platform_filter = platform
         .as_ref()
         .filter(|p| p.as_str() != "all")
         .map(|s| s.as_str());
-    let data = db.get_all_poi(platform_filter).map_err(|e| e.to_string())?;
+    let mut data = db.get_all_poi(platform_filter).map_err(|e| e.to_string())?;
+
+    // 如果指定了 IDs，只导出这些 IDs 的数据
+    if let Some(ref id_list) = ids {
+        let id_set: std::collections::HashSet<i64> = id_list.iter().copied().collect();
+        data.retain(|poi| id_set.contains(&poi.id));
+    }
 
     let count = data.len();
 
