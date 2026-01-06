@@ -1,9 +1,9 @@
-mod commands;
-mod database;
-mod config;
 mod collectors;
-mod regions;
+mod commands;
+mod config;
 mod coords;
+mod database;
+mod regions;
 
 use commands::*;
 
@@ -13,6 +13,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             // Stats
             get_stats,
@@ -38,6 +39,9 @@ pub fn run() {
             get_region_children,
             search_regions,
             get_district_codes_for_region,
+            // 导出
+            get_all_poi_data,
+            export_poi_to_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

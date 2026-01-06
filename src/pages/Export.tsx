@@ -1,29 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Download, FileSpreadsheet, FileJson, Database, Loader2, CheckCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { save } from '@tauri-apps/plugin-dialog';
+import { Download, FileSpreadsheet, FileJson, Database, Loader2, CheckCircle, ChevronDown, ChevronRight, AlertCircle, MapPin, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/toast';
 
-interface ExportStats {
-    total: number;
-    by_platform: Record<string, number>;
-    by_category: Record<string, number>;
-}
-
-interface POI {
+interface ExportPOI {
     id: number;
-    platform: string;
     name: string;
     lon: number;
     lat: number;
-    address?: string;
-    category?: string;
+    address: string;
+    phone: string;
+    category: string;
+    platform: string;
 }
 
 interface Region {
     code: string;
     name: string;
-    level: string; // "province", "city", "district"
+    level: string;
     parent_code: string | null;
 }
 
@@ -35,58 +40,76 @@ const platformNames: Record<string, string> = {
 };
 
 const formats = [
-    { id: 'excel', icon: FileSpreadsheet, label: 'Excel', desc: '.xlsx' },
-    { id: 'json', icon: FileJson, label: 'JSON', desc: '.json' },
-    { id: 'mysql', icon: Database, label: 'MySQL', desc: '.sql' },
+    { id: 'excel', icon: FileSpreadsheet, label: 'CSV (Excel)', desc: '.csv', ext: 'csv' },
+    { id: 'json', icon: FileJson, label: 'JSON', desc: '.json', ext: 'json' },
+    { id: 'mysql', icon: Database, label: 'MySQL', desc: '.sql', ext: 'sql' },
 ];
 
 export default function Export() {
-    const [stats, setStats] = useState<ExportStats | null>(null);
-    const [format, setFormat] = useState('excel');
     const [platform, setPlatform] = useState('all');
+    const { success: showSuccess, error: showError } = useToast();
+
+    // 导出弹框
+    const [showExportDialog, setShowExportDialog] = useState(false);
+    const [format, setFormat] = useState('excel');
     const [exporting, setExporting] = useState(false);
-    const [success, setSuccess] = useState(false);
 
     // 地区筛选
     const [provinces, setProvinces] = useState<Region[]>([]);
     const [children, setChildren] = useState<Record<string, Region[]>>({});
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
-    const [selectedRegions, setSelectedRegions] = useState<string[]>([]);
+    const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
+    const [regionNames, setRegionNames] = useState<Map<string, string>>(new Map());
 
-    // 数据预览
-    const [previewData, setPreviewData] = useState<POI[]>([]);
-    const [loadingPreview, setLoadingPreview] = useState(false);
+    // 搜索过滤
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // 数据
+    const [allData, setAllData] = useState<ExportPOI[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [page, setPage] = useState(1);
+    const pageSize = 100;
+
+    // 是否已选择地区 - 作为显示表格的前提条件
+    const hasRegionSelected = selectedRegions.size > 0;
 
     useEffect(() => {
-        loadStats();
         loadProvinces();
     }, []);
 
-    const loadStats = async () => {
-        try {
-            const data = await invoke<ExportStats>('get_stats');
-            setStats(data);
-        } catch (e) {
-            console.error('加载统计失败:', e);
+    // 当选择地区后加载数据
+    useEffect(() => {
+        if (hasRegionSelected) {
+            loadAllData();
         }
-    };
+    }, [platform, hasRegionSelected]);
 
     const loadProvinces = async () => {
         try {
             const data = await invoke<Region[]>('get_provinces');
             setProvinces(data);
+            const names = new Map<string, string>();
+            data.forEach(p => names.set(p.code, p.name));
+            setRegionNames(names);
         } catch (e) {
             console.error('加载省份失败:', e);
         }
     };
 
     const loadChildren = async (parentCode: string) => {
-        if (children[parentCode]) return;
+        if (children[parentCode]) return children[parentCode];
         try {
             const data = await invoke<Region[]>('get_region_children', { parentCode });
             setChildren(prev => ({ ...prev, [parentCode]: data }));
+            setRegionNames(prev => {
+                const newMap = new Map(prev);
+                data.forEach(r => newMap.set(r.code, r.name));
+                return newMap;
+            });
+            return data;
         } catch (e) {
             console.error('加载子区域失败:', e);
+            return [];
         }
     };
 
@@ -101,70 +124,124 @@ export default function Export() {
         setExpanded(newExpanded);
     };
 
-    const toggleSelectRegion = (code: string) => {
-        setSelectedRegions(prev =>
-            prev.includes(code)
-                ? prev.filter(c => c !== code)
-                : [...prev, code]
-        );
+    const toggleSelectRegion = (code: string, name: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        const newSelected = new Set(selectedRegions);
+        if (newSelected.has(code)) {
+            newSelected.delete(code);
+        } else {
+            newSelected.add(code);
+        }
+        setSelectedRegions(newSelected);
+        setRegionNames(prev => new Map(prev).set(code, name));
+        setPage(1);
     };
 
-    const loadPreview = async () => {
-        setLoadingPreview(true);
+    const clearSelectedRegions = () => {
+        setSelectedRegions(new Set());
+        setAllData([]);
+        setPage(1);
+    };
+
+    const loadAllData = async () => {
+        setLoading(true);
         try {
-            // 模拟加载预览数据
-            const data = await invoke<POI[]>('search_poi', {
-                query: '',
+            const data = await invoke<ExportPOI[]>('get_all_poi_data', {
                 platform: platform === 'all' ? null : platform,
-                mode: 'contains',
             });
-            setPreviewData(data.slice(0, 50));
+            setAllData(data);
         } catch (e) {
-            console.error('加载预览失败:', e);
+            console.error('加载数据失败:', e);
         } finally {
-            setLoadingPreview(false);
+            setLoading(false);
         }
     };
 
-    useEffect(() => {
-        loadPreview();
-    }, [platform]);
+    // 根据选中的地区名称过滤数据（匹配地址或名称中包含地区名）
+    const filteredData = useMemo(() => {
+        if (!hasRegionSelected) return [];
+
+        const selectedNames = Array.from(selectedRegions)
+            .map(code => regionNames.get(code) || '')
+            .filter(Boolean);
+
+        let data = allData.filter(poi => {
+            const searchText = `${poi.address || ''} ${poi.name || ''}`;
+            return selectedNames.some(regionName => searchText.includes(regionName));
+        });
+
+        // 按搜索词进一步过滤
+        if (searchQuery.trim()) {
+            const query = searchQuery.trim().toLowerCase();
+            data = data.filter(poi =>
+                poi.name.toLowerCase().includes(query) ||
+                (poi.address && poi.address.toLowerCase().includes(query))
+            );
+        }
+
+        return data;
+    }, [allData, selectedRegions, regionNames, searchQuery, hasRegionSelected]);
 
     const handleExport = async () => {
+        if (filteredData.length === 0) {
+            showError('无数据', '没有可导出的数据');
+            return;
+        }
+
+        const formatInfo = formats.find(f => f.id === format);
+        if (!formatInfo) return;
+
+        const filePath = await save({
+            defaultPath: `poi_data_${platform}_${new Date().toISOString().split('T')[0]}.${formatInfo.ext}`,
+            filters: [{
+                name: formatInfo.label,
+                extensions: [formatInfo.ext]
+            }]
+        });
+
+        if (!filePath) return;
+
         setExporting(true);
-        setSuccess(false);
+
         try {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            setSuccess(true);
-            setTimeout(() => setSuccess(false), 3000);
+            const count = await invoke<number>('export_poi_to_file', {
+                path: filePath,
+                format: format,
+                platform: platform === 'all' ? null : platform,
+            });
+
+            showSuccess('导出成功', `已导出 ${count.toLocaleString()} 条数据`);
+            setShowExportDialog(false);
+        } catch (e) {
+            showError('导出失败', String(e));
         } finally {
             setExporting(false);
         }
     };
 
-    const selectedCount = platform === 'all'
-        ? stats?.total || 0
-        : stats?.by_platform[platform] || 0;
+    // 分页数据
+    const pagedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
+    const totalPages = Math.ceil(filteredData.length / pageSize);
 
     const renderRegion = (region: Region, indent: number = 0) => {
         const hasChildren = region.level !== 'district';
         const isExpanded = expanded.has(region.code);
-        const isSelected = selectedRegions.includes(region.code);
+        const isSelected = selectedRegions.has(region.code);
         const regionChildren = children[region.code] || [];
 
         return (
             <div key={region.code}>
                 <div
-                    className={`flex items-center gap-1.5 py-1 px-2 rounded cursor-pointer text-sm transition-colors
-                              ${isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-accent'}`}
-                    style={{ paddingLeft: `${indent * 16 + 8}px` }}
+                    className={`flex items-center gap-1 py-1 px-1 rounded text-xs transition-colors
+                              ${isSelected ? 'bg-primary/10' : 'hover:bg-accent'}`}
+                    style={{ paddingLeft: `${indent * 12 + 4}px` }}
                 >
                     {hasChildren ? (
                         <button
-                            onClick={(e) => { e.stopPropagation(); toggleExpand(region.code); }}
-                            className="p-0.5"
+                            onClick={() => toggleExpand(region.code)}
+                            className="p-0.5 hover:bg-accent rounded"
                         >
-                            {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
                         </button>
                     ) : (
                         <span className="w-4" />
@@ -172,10 +249,16 @@ export default function Export() {
                     <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => toggleSelectRegion(region.code)}
-                        className="w-3.5 h-3.5"
+                        onChange={() => { }}
+                        onClick={(e) => toggleSelectRegion(region.code, region.name, e)}
+                        className="w-3 h-3 cursor-pointer"
                     />
-                    <span className="flex-1" onClick={() => toggleSelectRegion(region.code)}>{region.name}</span>
+                    <span
+                        className="flex-1 truncate cursor-pointer"
+                        onClick={(e) => toggleSelectRegion(region.code, region.name, e)}
+                    >
+                        {region.name}
+                    </span>
                 </div>
                 {isExpanded && regionChildren.map(child => renderRegion(child, indent + 1))}
             </div>
@@ -184,182 +267,217 @@ export default function Export() {
 
     return (
         <div className="h-full flex flex-col gap-4">
-            <div>
-                <h1 className="text-2xl font-bold text-foreground">数据导出</h1>
-                <p className="text-muted-foreground">选择数据范围并导出为各种格式</p>
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">数据导出</h1>
+                    <p className="text-muted-foreground">先选择地区，然后查看和导出对应数据</p>
+                </div>
             </div>
 
-            {/* 统计概览 */}
-            <div className="grid grid-cols-4 gap-4 shrink-0">
-                <Card>
-                    <CardContent className="pt-4">
-                        <div className="text-2xl font-bold text-foreground">
-                            {stats?.total?.toLocaleString() || 0}
-                        </div>
-                        <div className="text-sm text-muted-foreground">总数据量</div>
-                    </CardContent>
-                </Card>
-                {Object.entries(stats?.by_platform || {}).map(([p, count]) => (
-                    <Card key={p}>
-                        <CardContent className="pt-4">
-                            <div className="text-xl font-bold text-foreground">
-                                {count.toLocaleString()}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                                {platformNames[p] || p}
-                            </div>
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
-
-            <div className="flex-1 min-h-0 grid grid-cols-3 gap-4">
+            <div className="flex-1 min-h-0 flex gap-4">
                 {/* 左侧: 地区筛选 */}
-                <Card className="overflow-hidden flex flex-col">
-                    <CardHeader className="pb-2 shrink-0">
-                        <CardTitle className="text-base">按地区筛选</CardTitle>
-                        <CardDescription>选择要导出的地区</CardDescription>
+                <Card className="w-52 shrink-0 overflow-hidden flex flex-col">
+                    <CardHeader className="py-2 px-3 shrink-0 border-b">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-sm">选择地区</CardTitle>
+                            {selectedRegions.size > 0 && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 px-2 text-xs"
+                                    onClick={clearSelectedRegions}
+                                >
+                                    清空({selectedRegions.size})
+                                </Button>
+                            )}
+                        </div>
                     </CardHeader>
-                    <CardContent className="flex-1 overflow-y-auto p-2">
+                    <CardContent className="flex-1 overflow-y-auto p-1">
                         {provinces.map(p => renderRegion(p))}
                     </CardContent>
-                    {selectedRegions.length > 0 && (
-                        <div className="p-2 border-t text-xs text-muted-foreground">
-                            已选择 {selectedRegions.length} 个地区
-                            <Button variant="link" size="sm" className="ml-2 h-auto p-0 text-xs" onClick={() => setSelectedRegions([])}>
-                                清空
-                            </Button>
-                        </div>
+                </Card>
+
+                {/* 右侧: 数据表格 */}
+                <Card className="flex-1 overflow-hidden flex flex-col">
+                    {hasRegionSelected ? (
+                        <>
+                            <CardHeader className="py-2 px-4 shrink-0 border-b">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <CardTitle className="text-base">数据预览</CardTitle>
+                                        <select
+                                            value={platform}
+                                            onChange={(e) => setPlatform(e.target.value)}
+                                            className="px-2 py-1 text-sm border border-input bg-background rounded"
+                                        >
+                                            {Object.entries(platformNames).map(([key, name]) => (
+                                                <option key={key} value={key}>{name}</option>
+                                            ))}
+                                        </select>
+                                        <div className="relative">
+                                            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                            <input
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                                                placeholder="搜索名称或地址..."
+                                                className="pl-8 pr-3 py-1 text-sm border border-input bg-background rounded w-48
+                                                         focus:outline-none focus:ring-1 focus:ring-ring"
+                                            />
+                                        </div>
+                                        <span className="text-sm text-muted-foreground">
+                                            {filteredData.length.toLocaleString()} 条
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {totalPages > 1 && (
+                                            <div className="flex items-center gap-1 text-sm mr-2">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-7 px-2"
+                                                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                                                    disabled={page === 1}
+                                                >
+                                                    上一页
+                                                </Button>
+                                                <span className="text-muted-foreground px-1">
+                                                    {page}/{totalPages}
+                                                </span>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-7 px-2"
+                                                    onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                                    disabled={page === totalPages}
+                                                >
+                                                    下一页
+                                                </Button>
+                                            </div>
+                                        )}
+                                        <Button
+                                            onClick={() => setShowExportDialog(true)}
+                                            disabled={filteredData.length === 0}
+                                        >
+                                            <Download className="w-4 h-4 mr-2" />
+                                            导出数据
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="flex-1 overflow-auto p-0">
+                                {loading ? (
+                                    <div className="flex items-center justify-center h-32">
+                                        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                                    </div>
+                                ) : filteredData.length > 0 ? (
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-muted sticky top-0">
+                                            <tr>
+                                                <th className="text-left p-2 font-medium w-12">ID</th>
+                                                <th className="text-left p-2 font-medium">名称</th>
+                                                <th className="text-left p-2 font-medium">地址</th>
+                                                <th className="text-left p-2 font-medium w-20">类别</th>
+                                                <th className="text-left p-2 font-medium w-20">经度</th>
+                                                <th className="text-left p-2 font-medium w-20">纬度</th>
+                                                <th className="text-left p-2 font-medium w-16">平台</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {pagedData.map((poi) => (
+                                                <tr key={poi.id} className="border-b border-border hover:bg-accent/50">
+                                                    <td className="p-2 text-muted-foreground">{poi.id}</td>
+                                                    <td className="p-2 truncate max-w-[200px]" title={poi.name}>{poi.name}</td>
+                                                    <td className="p-2 truncate max-w-[200px] text-muted-foreground" title={poi.address}>
+                                                        {poi.address || '-'}
+                                                    </td>
+                                                    <td className="p-2 text-muted-foreground">{poi.category || '-'}</td>
+                                                    <td className="p-2 text-muted-foreground text-xs">{poi.lon.toFixed(4)}</td>
+                                                    <td className="p-2 text-muted-foreground text-xs">{poi.lat.toFixed(4)}</td>
+                                                    <td className="p-2">
+                                                        <span className="px-1.5 py-0.5 bg-muted rounded text-xs">
+                                                            {platformNames[poi.platform]?.substring(0, 2) || poi.platform}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+                                        <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
+                                        <p>所选地区暂无匹配数据</p>
+                                        <p className="text-xs mt-1">请尝试选择其他地区或平台</p>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </>
+                    ) : (
+                        <CardContent className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+                            <MapPin className="w-16 h-16 mb-4 opacity-20" />
+                            <p className="text-lg font-medium mb-2">请先选择地区</p>
+                            <p className="text-sm">在左侧地区列表中勾选要导出的地区</p>
+                        </CardContent>
                     )}
                 </Card>
+            </div>
 
-                {/* 中间: 数据预览表格 */}
-                <Card className="overflow-hidden flex flex-col">
-                    <CardHeader className="pb-2 shrink-0">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle className="text-base">数据预览</CardTitle>
-                                <CardDescription>前 50 条记录</CardDescription>
-                            </div>
-                            <select
-                                value={platform}
-                                onChange={(e) => setPlatform(e.target.value)}
-                                className="px-2 py-1 text-sm border border-input bg-background rounded"
-                            >
-                                {Object.entries(platformNames).map(([key, name]) => (
-                                    <option key={key} value={key}>{name}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </CardHeader>
-                    <CardContent className="flex-1 overflow-auto p-0">
-                        {loadingPreview ? (
-                            <div className="flex items-center justify-center h-32">
-                                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                            </div>
-                        ) : previewData.length > 0 ? (
-                            <table className="w-full text-sm">
-                                <thead className="bg-muted sticky top-0">
-                                    <tr>
-                                        <th className="text-left p-2 font-medium">名称</th>
-                                        <th className="text-left p-2 font-medium">地址</th>
-                                        <th className="text-left p-2 font-medium">平台</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {previewData.map((poi) => (
-                                        <tr key={poi.id} className="border-b border-border hover:bg-accent/50">
-                                            <td className="p-2 truncate max-w-[150px]" title={poi.name}>{poi.name}</td>
-                                            <td className="p-2 truncate max-w-[150px] text-muted-foreground" title={poi.address}>
-                                                {poi.address || '-'}
-                                            </td>
-                                            <td className="p-2">
-                                                <span className="px-1.5 py-0.5 bg-muted rounded text-xs">
-                                                    {platformNames[poi.platform] || poi.platform}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        ) : (
-                            <div className="flex items-center justify-center h-32 text-muted-foreground">
-                                暂无数据
-                            </div>
-                        )}
-                    </CardContent>
-                </Card>
+            {/* 导出弹框 */}
+            <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Download className="w-5 h-5" />
+                            导出数据
+                        </DialogTitle>
+                        <DialogDescription>
+                            选择导出格式，将导出 {filteredData.length.toLocaleString()} 条数据
+                        </DialogDescription>
+                    </DialogHeader>
 
-                {/* 右侧: 导出配置 */}
-                <Card className="flex flex-col">
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-base">导出设置</CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex-1 space-y-4">
-                        {/* 格式选择 */}
-                        <div>
-                            <label className="block text-sm text-muted-foreground mb-2">选择格式</label>
-                            <div className="space-y-2">
-                                {formats.map((f) => {
-                                    const Icon = f.icon;
-                                    return (
-                                        <button
-                                            key={f.id}
-                                            onClick={() => setFormat(f.id)}
-                                            className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all
-                                                      ${format === f.id
-                                                    ? 'border-primary bg-primary/5'
-                                                    : 'border-border hover:border-primary/50'
-                                                }`}
-                                        >
-                                            <Icon className={`w-5 h-5 ${format === f.id ? 'text-primary' : 'text-muted-foreground'}`} />
-                                            <span className={format === f.id ? 'text-foreground font-medium' : 'text-muted-foreground'}>
-                                                {f.label}
-                                            </span>
-                                            <span className="ml-auto text-xs text-muted-foreground">{f.desc}</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                    <div className="space-y-2 py-4">
+                        {formats.map((f) => {
+                            const Icon = f.icon;
+                            return (
+                                <button
+                                    key={f.id}
+                                    onClick={() => setFormat(f.id)}
+                                    className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all
+                                              ${format === f.id
+                                            ? 'border-primary bg-primary/5'
+                                            : 'border-border hover:border-primary/50'
+                                        }`}
+                                >
+                                    <Icon className={`w-5 h-5 ${format === f.id ? 'text-primary' : 'text-muted-foreground'}`} />
+                                    <span className={format === f.id ? 'text-foreground font-medium' : 'text-muted-foreground'}>
+                                        {f.label}
+                                    </span>
+                                    <span className="ml-auto text-xs text-muted-foreground">{f.desc}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
 
-                        {/* 导出数量 */}
-                        <div className="p-3 bg-muted rounded-lg">
-                            <div className="flex items-center justify-between">
-                                <span className="text-muted-foreground">即将导出</span>
-                                <span className="text-xl font-bold text-foreground">
-                                    {selectedCount.toLocaleString()} 条
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* 导出按钮 */}
-                        <Button
-                            className="w-full"
-                            size="lg"
-                            onClick={handleExport}
-                            disabled={exporting || selectedCount === 0}
-                        >
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowExportDialog(false)}>
+                            取消
+                        </Button>
+                        <Button onClick={handleExport} disabled={exporting}>
                             {exporting ? (
                                 <>
                                     <Loader2 className="w-4 h-4 animate-spin mr-2" />
                                     导出中...
                                 </>
-                            ) : success ? (
-                                <>
-                                    <CheckCircle className="w-4 h-4 mr-2" />
-                                    导出成功！
-                                </>
                             ) : (
                                 <>
-                                    <Download className="w-4 h-4 mr-2" />
-                                    开始导出
+                                    <CheckCircle className="w-4 h-4 mr-2" />
+                                    选择位置导出
                                 </>
                             )}
                         </Button>
-                    </CardContent>
-                </Card>
-            </div>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

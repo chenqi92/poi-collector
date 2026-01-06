@@ -1,10 +1,11 @@
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Square, RotateCcw, Loader2, MapPin, ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
+import { Play, Square, RotateCcw, Loader2, MapPin, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
+import { CategoryConfigDialog } from '@/components/CategoryConfigDialog';
 import { useToast } from '@/components/ui/toast';
 
 interface SelectedRegion {
@@ -48,7 +49,7 @@ export default function Collector() {
     const [selectedCategories, setSelectedCategories] = useState<Record<string, string[]>>({});
     const [logs, setLogs] = useState<string[]>([]);
     const [selectedRegions, setSelectedRegions] = useState<SelectedRegion[]>([]);
-    const [expandedPlatform, setExpandedPlatform] = useState<string | null>(null);
+    const [categoryDialogPlatform, setCategoryDialogPlatform] = useState<string | null>(null);
     const [showSettings, setShowSettings] = useState(false);
     const [apiKeys, setApiKeys] = useState<Record<string, { id: number; api_key: string }[]>>({});
     const { warning, error: showError, success } = useToast();
@@ -147,23 +148,7 @@ export default function Collector() {
         } catch (e) { console.error(e); }
     };
 
-    const toggleCategory = (platform: string, categoryId: string) => {
-        setSelectedCategories(prev => {
-            const current = prev[platform] || [];
-            if (current.includes(categoryId)) {
-                return { ...prev, [platform]: current.filter(id => id !== categoryId) };
-            } else {
-                return { ...prev, [platform]: [...current, categoryId] };
-            }
-        });
-    };
 
-    const toggleAllCategories = (platform: string, selectAll: boolean) => {
-        setSelectedCategories(prev => ({
-            ...prev,
-            [platform]: selectAll ? categories.map(c => c.id) : [],
-        }));
-    };
 
     const overallStats = useMemo(() => {
         let totalCollected = 0;
@@ -241,7 +226,7 @@ export default function Collector() {
                     const progress = selectedCount > 0
                         ? (status.completed_categories?.length || 0) / selectedCount * 100
                         : 0;
-                    const isExpanded = expandedPlatform === platform;
+
 
                     return (
                         <Card key={platform}>
@@ -272,58 +257,18 @@ export default function Collector() {
                                 </div>
 
                                 {/* 类别配置 */}
-                                <div className="border rounded-lg">
-                                    <button
-                                        onClick={() => setExpandedPlatform(isExpanded ? null : platform)}
-                                        className="w-full flex items-center justify-between p-3 hover:bg-accent transition-colors"
-                                    >
-                                        <span className="flex items-center gap-2 text-sm">
-                                            <Settings2 className="w-4 h-4" />
-                                            类别配置
-                                            <span className="text-muted-foreground">
-                                                ({selectedCategories[platform]?.length || 0}/{categories.length})
-                                            </span>
+                                <button
+                                    onClick={() => setCategoryDialogPlatform(platform)}
+                                    className="w-full flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors"
+                                >
+                                    <span className="flex items-center gap-2 text-sm">
+                                        <Settings2 className="w-4 h-4" />
+                                        类别配置
+                                        <span className="text-muted-foreground">
+                                            ({selectedCategories[platform]?.length || 0}/{categories.length})
                                         </span>
-                                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                                    </button>
-
-                                    {isExpanded && (
-                                        <div className="p-3 border-t bg-muted/30">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <span className="text-xs text-muted-foreground">选择采集类别</span>
-                                                <label className="flex items-center gap-1 text-xs text-primary cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={selectedCategories[platform]?.length === categories.length}
-                                                        onChange={(e) => toggleAllCategories(platform, e.target.checked)}
-                                                        className="rounded"
-                                                    />
-                                                    全选
-                                                </label>
-                                            </div>
-                                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-                                                {categories.map((cat) => (
-                                                    <label
-                                                        key={cat.id}
-                                                        className={`flex items-center gap-1 px-2 py-1 rounded text-xs 
-                                                                  cursor-pointer transition-colors border ${selectedCategories[platform]?.includes(cat.id)
-                                                                ? 'bg-primary/10 text-primary border-primary/30'
-                                                                : 'bg-background text-muted-foreground border-border hover:border-primary/50'
-                                                            }`}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            className="hidden"
-                                                            checked={selectedCategories[platform]?.includes(cat.id)}
-                                                            onChange={() => toggleCategory(platform, cat.id)}
-                                                        />
-                                                        {cat.name}
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                    </span>
+                                </button>
 
                                 {/* 操作按钮 */}
                                 <div className="flex gap-2">
@@ -391,6 +336,23 @@ export default function Collector() {
 
             {/* Settings Dialog */}
             <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
+
+            {/* Category Config Dialog */}
+            <CategoryConfigDialog
+                open={categoryDialogPlatform !== null}
+                platformName={categoryDialogPlatform ? platformNames[categoryDialogPlatform] : ''}
+                categories={categories}
+                selectedCategories={selectedCategories[categoryDialogPlatform || ''] || []}
+                onClose={() => setCategoryDialogPlatform(null)}
+                onChange={(ids) => {
+                    if (categoryDialogPlatform) {
+                        setSelectedCategories(prev => ({
+                            ...prev,
+                            [categoryDialogPlatform]: ids
+                        }));
+                    }
+                }}
+            />
         </div>
     );
 }

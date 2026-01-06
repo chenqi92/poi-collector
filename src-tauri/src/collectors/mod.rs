@@ -85,6 +85,8 @@ pub trait Collector: Send + Sync {
         &self,
         keyword: &str,
         page: usize,
+        category_name: &str,
+        category_id: &str,
     ) -> Result<(Vec<POIData>, bool), String>;
 
     /// 检查是否是配额错误
