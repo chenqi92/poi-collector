@@ -93,7 +93,7 @@ impl Collector for AmapCollector {
         self.region = Some(region);
     }
 
-    fn search_poi(&self, keyword: &str, page: usize) -> Result<(Vec<POIData>, bool), String> {
+    fn search_poi(&self, keyword: &str, page: usize, category_name: &str, category_id: &str) -> Result<(Vec<POIData>, bool), String> {
         let region = self.region.as_ref().ok_or("未设置区域配置")?;
 
         let response = self.client
@@ -133,7 +133,7 @@ impl Collector for AmapCollector {
             .unwrap_or(0);
 
         let parsed: Vec<POIData> = pois.iter()
-            .filter_map(|raw| self.parse_poi_from_json(raw, "", ""))
+            .filter_map(|raw| self.parse_poi_from_json(raw, category_name, category_id))
             .collect();
 
         let has_more = (page as i64 * Self::PAGE_SIZE as i64) < total 

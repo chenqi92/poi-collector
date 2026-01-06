@@ -92,7 +92,7 @@ impl Collector for TianDiTuCollector {
         self.region = Some(region);
     }
 
-    fn search_poi(&self, keyword: &str, page: usize) -> Result<(Vec<POIData>, bool), String> {
+    fn search_poi(&self, keyword: &str, page: usize, category_name: &str, category_id: &str) -> Result<(Vec<POIData>, bool), String> {
         let region = self.region.as_ref().ok_or("未设置区域配置")?;
         let bounds = &region.bounds;
 
@@ -145,7 +145,7 @@ impl Collector for TianDiTuCollector {
         let pois = data.get("pois").and_then(|p| p.as_array()).cloned().unwrap_or_default();
 
         let parsed: Vec<POIData> = pois.iter()
-            .filter_map(|raw| self.parse_poi_from_json(raw, "", ""))
+            .filter_map(|raw| self.parse_poi_from_json(raw, category_name, category_id))
             .collect();
 
         let has_more = pois.len() >= Self::PAGE_SIZE as usize;

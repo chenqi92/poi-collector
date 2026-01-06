@@ -305,7 +305,7 @@ fn run_collector(
                 // 限流：每次请求间隔 500ms
                 thread::sleep(Duration::from_millis(500));
 
-                match collector.search_poi(keyword, page) {
+                match collector.search_poi(keyword, page, &cat.name, &cat.id) {
                     Ok((pois, has_more)) => {
                         if pois.is_empty() {
                             break;
