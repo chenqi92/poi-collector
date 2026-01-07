@@ -7,6 +7,7 @@ import Collector from '@/pages/Collector';
 import Search from '@/pages/Search';
 import Export from '@/pages/Export';
 import DataManagement from '@/pages/DataManagement';
+import TileDownloader from '@/pages/TileDownloader';
 import '@/index.css';
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
               <Route path="search" element={<Search />} />
               <Route path="export" element={<Export />} />
               <Route path="data-management" element={<DataManagement />} />
+              <Route path="tile-downloader" element={<TileDownloader />} />
             </Route>
           </Routes>
         </BrowserRouter>

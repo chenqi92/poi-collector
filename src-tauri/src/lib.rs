@@ -4,8 +4,10 @@ mod config;
 mod coords;
 mod database;
 mod regions;
+mod tile_downloader;
 
 use commands::*;
+use tile_downloader::commands as tile_commands;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -47,6 +49,19 @@ pub fn run() {
             get_poi_stats_by_region,
             delete_poi_by_regions,
             clear_all_poi,
+            // 瓦片下载
+            tile_commands::get_tile_platforms,
+            tile_commands::calculate_tiles_count,
+            tile_commands::create_tile_task,
+            tile_commands::get_tile_tasks,
+            tile_commands::get_tile_task,
+            tile_commands::start_tile_download,
+            tile_commands::pause_tile_download,
+            tile_commands::cancel_tile_download,
+            tile_commands::delete_tile_task,
+            tile_commands::set_tile_thread_count,
+            tile_commands::retry_failed_tiles,
+            tile_commands::convert_tile_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
