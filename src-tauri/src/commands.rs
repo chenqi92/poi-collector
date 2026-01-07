@@ -188,8 +188,10 @@ pub fn start_collector(
         }
     }
 
-    // 获取 API Key
-    let api_key = {
+    // 获取 API Key (OSM 不需要，使用免费的 Overpass API)
+    let api_key = if platform == "osm" {
+        String::new()
+    } else {
         let db = DB.lock().map_err(|e| e.to_string())?;
         let keys = db.get_all_api_keys().map_err(|e| e.to_string())?;
         let platform_keys = keys.get(&platform).cloned().unwrap_or_default();

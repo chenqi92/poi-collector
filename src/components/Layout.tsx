@@ -9,6 +9,7 @@ import {
     Settings,
     Map,
 } from 'lucide-react';
+import SimpleBar from 'simplebar-react';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -73,9 +74,9 @@ export default function Layout() {
                 </header>
 
                 {/* Content */}
-                <main className="flex-1 overflow-y-auto p-6">
+                <SimpleBar className="flex-1 p-6">
                     <Outlet />
-                </main>
+                </SimpleBar>
             </div>
 
             {/* Settings Dialog */}

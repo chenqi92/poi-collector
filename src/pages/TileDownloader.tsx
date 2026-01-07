@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+// HMR trigger: 2026-01-07T21:57:00
 import { listen } from '@tauri-apps/api/event';
 import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
 import {
@@ -10,11 +11,12 @@ import {
     Trash2,
     FolderOpen,
     RefreshCw,
-    MapPin,
     Layers,
     HardDrive,
     FileArchive,
     Search,
+    X,
+    Download,
 } from 'lucide-react';
 import { TileBoundsMap } from '@/components/TileBoundsMap';
 import { Button } from '@/components/ui/button';
@@ -38,8 +40,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import SimpleBar from 'simplebar-react';
 
 // 类型定义
 interface Bounds {
@@ -134,7 +136,7 @@ export default function TileDownloader() {
     const [tasks, setTasks] = useState<TaskInfo[]>([]);
     const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
     const [selectedTask, setSelectedTask] = useState<TaskInfo | null>(null);
-    const [showCreateDialog, setShowCreateDialog] = useState(false);
+    const [isCreating, setIsCreating] = useState(false);
     const [showConvertDialog, setShowConvertDialog] = useState(false);
     const [loading, setLoading] = useState(false);
 
@@ -157,11 +159,23 @@ export default function TileDownloader() {
     const [selectedRegionCode, setSelectedRegionCode] = useState<string | null>(null);
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
     const [regionSearchResults, setRegionSearchResults] = useState<{ code: string; name: string; level: string }[]>([]);
+    // 多边形选区坐标（可选）
+    const [polygonCoords, setPolygonCoords] = useState<[number, number][] | null>(null);
 
     // 加载平台列表
     useEffect(() => {
         invoke<PlatformInfo[]>('get_tile_platforms').then(setPlatforms);
     }, []);
+
+    // 当平台切换时，自动调整地图类型（如果当前类型不支持）
+    useEffect(() => {
+        if (platforms.length === 0) return;
+        const selectedPlatform = platforms.find((p) => p.id === platform);
+        if (selectedPlatform && !selectedPlatform.map_types.includes(mapType)) {
+            // 当前地图类型不被新平台支持，切换到第一个支持的类型
+            setMapType(selectedPlatform.map_types[0] || 'street');
+        }
+    }, [platform, platforms, mapType]);
 
     // 加载任务列表
     const loadTasks = useCallback(async () => {
@@ -263,7 +277,7 @@ export default function TileDownloader() {
                 },
             });
 
-            setShowCreateDialog(false);
+            setIsCreating(false);
             resetForm();
             loadTasks();
         } catch (e) {
@@ -280,6 +294,7 @@ export default function TileDownloader() {
         setPlatform('amap');
         setMapType('street');
         setBounds({ north: 31.5, south: 30.7, east: 122.0, west: 121.0 });
+        setPolygonCoords(null);
         setZoomLevels([10, 11, 12, 13, 14]);
         setThreadCount(8);
         setOutputFormat('folder');
@@ -392,533 +407,466 @@ export default function TileDownloader() {
     const currentPlatform = platforms.find((p) => p.id === platform);
     const availableMapTypes = currentPlatform?.map_types || ['street'];
 
+    // 切换到创建模式
+    const handleStartCreating = () => {
+        setSelectedTask(null);
+        setIsCreating(true);
+    };
+
+    // 取消创建
+    const handleCancelCreating = () => {
+        setIsCreating(false);
+        resetForm();
+    };
+
     return (
-        <div className="h-full flex gap-4">
-            {/* 左侧任务列表 */}
-            <div className="w-80 flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-semibold">下载任务</h2>
-                    <div className="flex gap-1">
-                        <Button size="sm" onClick={() => setShowCreateDialog(true)}>
-                            <Plus className="h-4 w-4 mr-1" />
-                            新建
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setShowConvertDialog(true)}>
-                            <FileArchive className="h-4 w-4" />
-                        </Button>
-                    </div>
+        <div className="h-full flex flex-col gap-4">
+            {/* 页面标题 */}
+            <div className="flex items-center justify-between shrink-0">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">瓦片下载</h1>
+                    <p className="text-muted-foreground">下载地图瓦片用于离线使用</p>
                 </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2">
-                    {tasks.length === 0 ? (
-                        <div className="text-center text-muted-foreground py-8">
-                            暂无下载任务
-                        </div>
-                    ) : (
-                        tasks.map((task) => (
-                            <Card
-                                key={task.id}
-                                className={cn(
-                                    'cursor-pointer transition-colors',
-                                    selectedTask?.id === task.id && 'ring-2 ring-primary'
-                                )}
-                                onClick={() => setSelectedTask(task)}
-                            >
-                                <CardContent className="p-3">
-                                    <div className="flex items-start justify-between mb-2">
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="font-medium truncate">{task.name}</h3>
-                                            <p className="text-xs text-muted-foreground">
-                                                {platformNames[task.platform] || task.platform} ·{' '}
-                                                {mapTypeNames[task.map_type] || task.map_type}
-                                            </p>
-                                        </div>
-                                        <span
-                                            className={cn(
-                                                'text-xs font-medium',
-                                                statusInfo[task.status]?.color
-                                            )}
-                                        >
-                                            {statusInfo[task.status]?.name || task.status}
-                                        </span>
-                                    </div>
-
-                                    <Progress
-                                        value={
-                                            task.total_tiles > 0
-                                                ? ((task.completed_tiles + task.failed_tiles) /
-                                                    task.total_tiles) *
-                                                100
-                                                : 0
-                                        }
-                                        className="h-1.5 mb-2"
-                                    />
-
-                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                        <span>
-                                            {task.completed_tiles}/{task.total_tiles}
-                                            {task.failed_tiles > 0 && (
-                                                <span className="text-red-500 ml-1">
-                                                    ({task.failed_tiles} 失败)
-                                                </span>
-                                            )}
-                                        </span>
-                                        {task.status === 'downloading' && (
-                                            <span>{formatSpeed(task.download_speed)}</span>
-                                        )}
-                                    </div>
-
-                                    <div className="flex gap-1 mt-2">
-                                        {(task.status === 'pending' || task.status === 'paused') && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-7 px-2"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleStart(task.id);
-                                                }}
-                                            >
-                                                <Play className="h-3 w-3" />
-                                            </Button>
-                                        )}
-                                        {task.status === 'downloading' && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-7 px-2"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handlePause(task.id);
-                                                }}
-                                            >
-                                                <Pause className="h-3 w-3" />
-                                            </Button>
-                                        )}
-                                        {(task.status === 'downloading' || task.status === 'paused') && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-7 px-2"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleCancel(task.id);
-                                                }}
-                                            >
-                                                <Square className="h-3 w-3" />
-                                            </Button>
-                                        )}
-                                        {task.failed_tiles > 0 && task.status !== 'downloading' && (
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                className="h-7 px-2"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleRetry(task.id);
-                                                }}
-                                            >
-                                                <RefreshCw className="h-3 w-3" />
-                                            </Button>
-                                        )}
-                                        <Button
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-7 px-2 text-destructive"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDelete(task.id, false);
-                                            }}
-                                        >
-                                            <Trash2 className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ))
+                <div className="flex gap-2">
+                    {!isCreating && (
+                        <Button onClick={handleStartCreating}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            新建任务
+                        </Button>
                     )}
+                    <Button variant="outline" onClick={() => setShowConvertDialog(true)}>
+                        <FileArchive className="h-4 w-4 mr-2" />
+                        格式转换
+                    </Button>
                 </div>
             </div>
 
-            {/* 右侧详情 */}
-            <div className="flex-1 flex flex-col gap-4">
-                {selectedTask ? (
-                    <>
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="flex items-center justify-between">
-                                    <span>{selectedTask.name}</span>
-                                    <span
-                                        className={cn(
-                                            'text-sm font-medium',
-                                            statusInfo[selectedTask.status]?.color
-                                        )}
-                                    >
-                                        {statusInfo[selectedTask.status]?.name}
-                                    </span>
-                                </CardTitle>
+            {/* 主内容区 */}
+            <div className="flex-1 flex gap-4 min-h-0">
+                {/* 左侧面板 */}
+                <div className="w-80 flex flex-col gap-4 shrink-0">
+                    {isCreating ? (
+                        /* 创建任务表单 */
+                        <Card className="flex-1 flex flex-col">
+                            <CardHeader className="pb-3 shrink-0">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-base">新建下载任务</CardTitle>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCancelCreating}>
+                                        <X className="h-4 w-4" />
+                                    </Button>
+                                </div>
                             </CardHeader>
-                            <CardContent>
-                                <div className="grid grid-cols-2 gap-4 text-sm">
+                            <CardContent className="flex-1 overflow-hidden p-0">
+                                <SimpleBar className="h-full px-6 pb-6">
+                                    <div className="space-y-4">
+                                        {/* 任务名称 */}
+                                        <div className="space-y-2">
+                                            <Label>任务名称</Label>
+                                            <Input
+                                                value={taskName}
+                                                onChange={(e) => setTaskName(e.target.value)}
+                                                placeholder="输入任务名称"
+                                            />
+                                        </div>
+
+                                        {/* 平台和类型 */}
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-2">
+                                                <Label>地图平台</Label>
+                                                <Select value={platform} onValueChange={setPlatform}>
+                                                    <SelectTrigger className="h-9">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {platforms.map((p) => (
+                                                            <SelectItem key={p.id} value={p.id}>
+                                                                {p.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <Label>地图类型</Label>
+                                                <Select value={mapType} onValueChange={setMapType}>
+                                                    <SelectTrigger className="h-9">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {availableMapTypes.map((t) => (
+                                                            <SelectItem key={t} value={t}>
+                                                                {mapTypeNames[t] || t}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+
+                                        {/* 输出格式 */}
+                                        <div className="space-y-2">
+                                            <Label>输出格式</Label>
+                                            <Select value={outputFormat} onValueChange={setOutputFormat}>
+                                                <SelectTrigger className="h-9">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="folder">
+                                                        <div className="flex items-center gap-2">
+                                                            <FolderOpen className="h-4 w-4" />
+                                                            文件夹 (Z/X/Y.png)
+                                                        </div>
+                                                    </SelectItem>
+                                                    <SelectItem value="mbtiles">
+                                                        <div className="flex items-center gap-2">
+                                                            <HardDrive className="h-4 w-4" />
+                                                            MBTiles (SQLite)
+                                                        </div>
+                                                    </SelectItem>
+                                                    <SelectItem value="zip">
+                                                        <div className="flex items-center gap-2">
+                                                            <FileArchive className="h-4 w-4" />
+                                                            ZIP 压缩包
+                                                        </div>
+                                                    </SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        {/* API Key */}
+                                        {currentPlatform?.requires_key && (
+                                            <div className="space-y-2">
+                                                <Label>API Key <span className="text-red-500">*</span></Label>
+                                                <Input
+                                                    value={apiKey}
+                                                    onChange={(e) => setApiKey(e.target.value)}
+                                                    placeholder={`输入 ${currentPlatform.name} API Key`}
+                                                    className="h-9"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* 行政区搜索（仅在 region 模式） */}
+                                        {selectionMode === 'region' && (
+                                            <div className="space-y-2">
+                                                <Label>行政区域</Label>
+                                                <div className="relative">
+                                                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                                    <Input
+                                                        value={regionSearchQuery}
+                                                        onChange={(e) => handleRegionSearch(e.target.value)}
+                                                        placeholder="搜索行政区域..."
+                                                        className="pl-8 h-9"
+                                                    />
+                                                </div>
+                                                {regionSearchResults.length > 0 && (
+                                                    <div className="border rounded-md max-h-32 overflow-y-auto">
+                                                        {regionSearchResults.map((region) => (
+                                                            <button
+                                                                key={region.code}
+                                                                className={cn(
+                                                                    'w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center justify-between',
+                                                                    selectedRegionCode === region.code && 'bg-accent'
+                                                                )}
+                                                                onClick={() => setSelectedRegionCode(region.code)}
+                                                            >
+                                                                <span className="truncate">{region.name}</span>
+                                                                <span className="text-xs text-muted-foreground">
+                                                                    {region.level === 'province' ? '省' :
+                                                                     region.level === 'city' ? '市' : '区/县'}
+                                                                </span>
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* 线程数 */}
+                                        <div className="space-y-2">
+                                            <Label>下载线程: {threadCount}</Label>
+                                            <Slider
+                                                value={[threadCount]}
+                                                min={1}
+                                                max={32}
+                                                step={1}
+                                                onValueChange={([value]) => setThreadCount(value)}
+                                            />
+                                        </div>
+
+                                        {/* 估算信息 */}
+                                        {estimate && (
+                                            <Card className="bg-muted/50">
+                                                <CardContent className="p-3">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <Layers className="h-4 w-4" />
+                                                        <span className="font-medium text-sm">预估信息</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                                        <div>瓦片: <strong>{estimate.total_tiles.toLocaleString()}</strong></div>
+                                                        <div>大小: <strong>{formatSize(estimate.estimated_size_mb)}</strong></div>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        )}
+
+                                        {/* 创建按钮 */}
+                                        <Button className="w-full" onClick={handleCreateTask} disabled={loading}>
+                                            <Download className="h-4 w-4 mr-2" />
+                                            {loading ? '创建中...' : '创建并选择保存位置'}
+                                        </Button>
+                                    </div>
+                                </SimpleBar>
+                            </CardContent>
+                        </Card>
+                    ) : (
+                        /* 任务列表 */
+                        <>
+                            <div className="text-sm text-muted-foreground">
+                                {tasks.length > 0 ? `${tasks.length} 个任务` : '暂无任务'}
+                            </div>
+                            <div className="flex-1 overflow-hidden">
+                                <SimpleBar className="h-full">
+                                    <div className="space-y-2 pr-2">
+                                        {tasks.map((task) => (
+                                            <Card
+                                                key={task.id}
+                                                className={cn(
+                                                    'cursor-pointer transition-all hover:shadow-md',
+                                                    selectedTask?.id === task.id && 'ring-2 ring-primary'
+                                                )}
+                                                onClick={() => setSelectedTask(task)}
+                                            >
+                                                <CardContent className="p-3">
+                                                    <div className="flex items-start justify-between mb-2">
+                                                        <div className="flex-1 min-w-0">
+                                                            <h3 className="font-medium truncate">{task.name}</h3>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {platformNames[task.platform] || task.platform} ·{' '}
+                                                                {mapTypeNames[task.map_type] || task.map_type}
+                                                            </p>
+                                                        </div>
+                                                        <span
+                                                            className={cn(
+                                                                'text-xs font-medium shrink-0 ml-2',
+                                                                statusInfo[task.status]?.color
+                                                            )}
+                                                        >
+                                                            {statusInfo[task.status]?.name || task.status}
+                                                        </span>
+                                                    </div>
+
+                                                    <Progress
+                                                        value={
+                                                            task.total_tiles > 0
+                                                                ? ((task.completed_tiles + task.failed_tiles) /
+                                                                    task.total_tiles) *
+                                                                100
+                                                                : 0
+                                                        }
+                                                        className="h-1.5 mb-2"
+                                                    />
+
+                                                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                                                        <span>
+                                                            {task.completed_tiles}/{task.total_tiles}
+                                                            {task.failed_tiles > 0 && (
+                                                                <span className="text-red-500 ml-1">
+                                                                    ({task.failed_tiles} 失败)
+                                                                </span>
+                                                            )}
+                                                        </span>
+                                                        {task.status === 'downloading' && (
+                                                            <span>{formatSpeed(task.download_speed)}</span>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex gap-1 mt-2">
+                                                        {(task.status === 'pending' || task.status === 'paused') && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-7 px-2"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleStart(task.id);
+                                                                }}
+                                                            >
+                                                                <Play className="h-3 w-3" />
+                                                            </Button>
+                                                        )}
+                                                        {task.status === 'downloading' && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-7 px-2"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handlePause(task.id);
+                                                                }}
+                                                            >
+                                                                <Pause className="h-3 w-3" />
+                                                            </Button>
+                                                        )}
+                                                        {(task.status === 'downloading' || task.status === 'paused') && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-7 px-2"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleCancel(task.id);
+                                                                }}
+                                                            >
+                                                                <Square className="h-3 w-3" />
+                                                            </Button>
+                                                        )}
+                                                        {task.failed_tiles > 0 && task.status !== 'downloading' && (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="h-7 px-2"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleRetry(task.id);
+                                                                }}
+                                                            >
+                                                                <RefreshCw className="h-3 w-3" />
+                                                            </Button>
+                                                        )}
+                                                        <Button
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            className="h-7 px-2 text-destructive"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDelete(task.id, false);
+                                                            }}
+                                                        >
+                                                            <Trash2 className="h-3 w-3" />
+                                                        </Button>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        ))}
+                                    </div>
+                                </SimpleBar>
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                {/* 右侧主区域：地图 + 详情 */}
+                <div className="flex-1 flex flex-col gap-4 min-w-0">
+                    {/* 地图区域 - 占据主要空间 */}
+                    <div className="flex-1 min-h-0 rounded-lg overflow-hidden border">
+                        <TileBoundsMap
+                            platform={platform}
+                            mapType={mapType}
+                            apiKey={apiKey || undefined}
+                            bounds={bounds}
+                            onBoundsChange={setBounds}
+                            polygonCoords={polygonCoords}
+                            onPolygonChange={setPolygonCoords}
+                            selectedRegionCode={selectedRegionCode}
+                            selectionMode={selectionMode}
+                            onSelectionModeChange={setSelectionMode}
+                        />
+                    </div>
+
+                    {/* 层级选择（创建模式）或任务详情 */}
+                    {isCreating ? (
+                        <Card className="shrink-0">
+                            <CardContent className="p-4">
+                                <div className="flex items-center gap-4">
+                                    <Label className="shrink-0">层级选择:</Label>
+                                    <div className="flex flex-wrap gap-1 flex-1">
+                                        {Array.from({ length: 19 }, (_, i) => i + 1).map((z) => (
+                                            <Button
+                                                key={z}
+                                                size="sm"
+                                                variant={zoomLevels.includes(z) ? 'default' : 'outline'}
+                                                className="w-8 h-8 text-xs"
+                                                onClick={() => {
+                                                    if (zoomLevels.includes(z)) {
+                                                        setZoomLevels(zoomLevels.filter((l) => l !== z));
+                                                    } else {
+                                                        setZoomLevels([...zoomLevels, z].sort((a, b) => a - b));
+                                                    }
+                                                }}
+                                            >
+                                                {z}
+                                            </Button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ) : selectedTask ? (
+                        <Card className="shrink-0">
+                            <CardContent className="p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                        <h3 className="font-medium">{selectedTask.name}</h3>
+                                        <span className={cn('text-sm', statusInfo[selectedTask.status]?.color)}>
+                                            {statusInfo[selectedTask.status]?.name}
+                                        </span>
+                                    </div>
+                                    {selectedTask.status === 'downloading' && (
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <span>线程:</span>
+                                            <Slider
+                                                value={[selectedTask.thread_count]}
+                                                min={1}
+                                                max={32}
+                                                step={1}
+                                                className="w-24"
+                                                onValueChange={([value]) => handleThreadChange(selectedTask.id, value)}
+                                            />
+                                            <span className="w-6">{selectedTask.thread_count}</span>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="grid grid-cols-4 gap-4 text-sm">
                                     <div>
                                         <span className="text-muted-foreground">平台：</span>
-                                        {platformNames[selectedTask.platform] || selectedTask.platform}
-                                    </div>
-                                    <div>
-                                        <span className="text-muted-foreground">类型：</span>
-                                        {mapTypeNames[selectedTask.map_type] || selectedTask.map_type}
+                                        {platformNames[selectedTask.platform]}
                                     </div>
                                     <div>
                                         <span className="text-muted-foreground">层级：</span>
                                         {selectedTask.zoom_levels.join(', ')}
                                     </div>
                                     <div>
-                                        <span className="text-muted-foreground">格式：</span>
-                                        {selectedTask.output_format}
+                                        <span className="text-muted-foreground">进度：</span>
+                                        {selectedTask.completed_tiles}/{selectedTask.total_tiles}
+                                        {selectedTask.failed_tiles > 0 && (
+                                            <span className="text-red-500 ml-1">({selectedTask.failed_tiles} 失败)</span>
+                                        )}
                                     </div>
-                                    <div className="col-span-2">
-                                        <span className="text-muted-foreground">区域：</span>
-                                        {selectedTask.bounds.south.toFixed(4)}° ~ {selectedTask.bounds.north.toFixed(4)}°N,{' '}
-                                        {selectedTask.bounds.west.toFixed(4)}° ~ {selectedTask.bounds.east.toFixed(4)}°E
-                                    </div>
-                                    <div className="col-span-2">
-                                        <span className="text-muted-foreground">保存路径：</span>
-                                        <span className="break-all">{selectedTask.output_path}</span>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <Card className="flex-1">
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-base">下载进度</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="space-y-4">
-                                    <div>
-                                        <div className="flex justify-between text-sm mb-1">
-                                            <span>
-                                                已完成: {selectedTask.completed_tiles} / {selectedTask.total_tiles}
-                                            </span>
-                                            <span>
-                                                {selectedTask.total_tiles > 0
-                                                    ? (
-                                                        (selectedTask.completed_tiles / selectedTask.total_tiles) *
-                                                        100
-                                                    ).toFixed(1)
-                                                    : 0}
-                                                %
-                                            </span>
-                                        </div>
-                                        <Progress
-                                            value={
-                                                selectedTask.total_tiles > 0
-                                                    ? (selectedTask.completed_tiles / selectedTask.total_tiles) * 100
-                                                    : 0
-                                            }
-                                            className="h-2"
-                                        />
-                                    </div>
-
-                                    {selectedTask.failed_tiles > 0 && (
-                                        <div className="text-sm text-red-500">
-                                            失败: {selectedTask.failed_tiles} 个瓦片
-                                        </div>
-                                    )}
-
                                     {selectedTask.status === 'downloading' && (
-                                        <div className="space-y-2">
-                                            <div className="text-sm">
-                                                下载速度: {formatSpeed(selectedTask.download_speed)}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-sm">线程数:</span>
-                                                <Slider
-                                                    value={[selectedTask.thread_count]}
-                                                    min={1}
-                                                    max={32}
-                                                    step={1}
-                                                    className="flex-1"
-                                                    onValueChange={([value]) =>
-                                                        handleThreadChange(selectedTask.id, value)
-                                                    }
-                                                />
-                                                <span className="text-sm w-8">{selectedTask.thread_count}</span>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {selectedTask.error_message && (
-                                        <div className="text-sm text-red-500">
-                                            错误: {selectedTask.error_message}
+                                        <div>
+                                            <span className="text-muted-foreground">速度：</span>
+                                            {formatSpeed(selectedTask.download_speed)}
                                         </div>
                                     )}
                                 </div>
-                            </CardContent>
-                        </Card>
-                    </>
-                ) : (
-                    <div className="flex-1 flex items-center justify-center text-muted-foreground">
-                        <div className="text-center">
-                            <MapPin className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                            <p>选择一个任务查看详情</p>
-                            <p className="text-sm mt-2">或点击"新建"创建下载任务</p>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* 新建任务对话框 */}
-            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>新建下载任务</DialogTitle>
-                        <DialogDescription>配置瓦片下载参数</DialogDescription>
-                    </DialogHeader>
-
-                    <Tabs defaultValue="basic" className="mt-4">
-                        <TabsList className="grid w-full grid-cols-3">
-                            <TabsTrigger value="basic">基本设置</TabsTrigger>
-                            <TabsTrigger value="region">区域选择</TabsTrigger>
-                            <TabsTrigger value="advanced">高级设置</TabsTrigger>
-                        </TabsList>
-
-                        <TabsContent value="basic" className="space-y-4 mt-4">
-                            <div className="space-y-2">
-                                <Label>任务名称</Label>
-                                <Input
-                                    value={taskName}
-                                    onChange={(e) => setTaskName(e.target.value)}
-                                    placeholder="输入任务名称"
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>地图平台</Label>
-                                    <Select value={platform} onValueChange={setPlatform}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {platforms.map((p) => (
-                                                <SelectItem key={p.id} value={p.id}>
-                                                    {p.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label>地图类型</Label>
-                                    <Select value={mapType} onValueChange={setMapType}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {availableMapTypes.map((t) => (
-                                                <SelectItem key={t} value={t}>
-                                                    {mapTypeNames[t] || t}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-
-                            <div className="space-y-2">
-                                <Label>输出格式</Label>
-                                <Select value={outputFormat} onValueChange={setOutputFormat}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="folder">
-                                            <div className="flex items-center gap-2">
-                                                <FolderOpen className="h-4 w-4" />
-                                                文件夹 (Z/X/Y.png)
-                                            </div>
-                                        </SelectItem>
-                                        <SelectItem value="mbtiles">
-                                            <div className="flex items-center gap-2">
-                                                <HardDrive className="h-4 w-4" />
-                                                MBTiles (SQLite)
-                                            </div>
-                                        </SelectItem>
-                                        <SelectItem value="zip">
-                                            <div className="flex items-center gap-2">
-                                                <FileArchive className="h-4 w-4" />
-                                                ZIP 压缩包
-                                            </div>
-                                        </SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            {currentPlatform?.requires_key && (
-                                <div className="space-y-2">
-                                    <Label>API Key <span className="text-red-500">*</span></Label>
-                                    <Input
-                                        value={apiKey}
-                                        onChange={(e) => setApiKey(e.target.value)}
-                                        placeholder={`输入 ${currentPlatform.name} API Key`}
-                                    />
-                                    <p className="text-xs text-muted-foreground">
-                                        此平台需要 API Key 才能下载瓦片
-                                    </p>
-                                </div>
-                            )}
-                        </TabsContent>
-
-                        <TabsContent value="region" className="space-y-4 mt-4">
-                            {/* 地图和区域选择 */}
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                                {/* 地图区域 */}
-                                <div className="lg:col-span-2 h-[350px]">
-                                    <TileBoundsMap
-                                        platform={platform}
-                                        mapType={mapType}
-                                        apiKey={apiKey || undefined}
-                                        bounds={bounds}
-                                        onBoundsChange={setBounds}
-                                        selectedRegionCode={selectedRegionCode}
-                                        selectionMode={selectionMode}
-                                        onSelectionModeChange={setSelectionMode}
-                                    />
-                                </div>
-
-                                {/* 行政区域搜索（仅在行政区模式下显示） */}
-                                {selectionMode === 'region' && (
-                                    <div className="h-[350px] border rounded-lg overflow-hidden flex flex-col">
-                                        <div className="p-2 border-b">
-                                            <div className="relative">
-                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                                <Input
-                                                    value={regionSearchQuery}
-                                                    onChange={(e) => handleRegionSearch(e.target.value)}
-                                                    placeholder="搜索行政区域..."
-                                                    className="pl-8 h-8"
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="flex-1 overflow-y-auto p-2">
-                                            {regionSearchResults.length > 0 ? (
-                                                <div className="space-y-1">
-                                                    {regionSearchResults.map((region) => (
-                                                        <Button
-                                                            key={region.code}
-                                                            variant={selectedRegionCode === region.code ? 'default' : 'ghost'}
-                                                            size="sm"
-                                                            className="w-full justify-start h-auto py-2"
-                                                            onClick={() => setSelectedRegionCode(region.code)}
-                                                        >
-                                                            <MapPin className="h-3 w-3 mr-2 flex-shrink-0" />
-                                                            <span className="truncate">{region.name}</span>
-                                                            <span className="ml-auto text-xs text-muted-foreground">
-                                                                {region.level === 'province' ? '省' :
-                                                                 region.level === 'city' ? '市' : '区/县'}
-                                                            </span>
-                                                        </Button>
-                                                    ))}
-                                                </div>
-                                            ) : regionSearchQuery ? (
-                                                <div className="text-center text-muted-foreground py-8 text-sm">
-                                                    未找到匹配的行政区域
-                                                </div>
-                                            ) : (
-                                                <div className="text-center text-muted-foreground py-8 text-sm">
-                                                    输入名称搜索行政区域
-                                                    <br />
-                                                    如：阜宁、盐城、江苏
-                                                </div>
-                                            )}
-                                        </div>
+                                {selectedTask.error_message && (
+                                    <div className="mt-2 text-sm text-red-500">
+                                        错误: {selectedTask.error_message}
                                     </div>
                                 )}
-                            </div>
-
-                            {/* 层级选择 */}
-                            <div className="space-y-2">
-                                <Label>层级选择 (当前: {zoomLevels.join(', ')})</Label>
-                                <div className="flex flex-wrap gap-1">
-                                    {Array.from({ length: 19 }, (_, i) => i + 1).map((z) => (
-                                        <Button
-                                            key={z}
-                                            size="sm"
-                                            variant={zoomLevels.includes(z) ? 'default' : 'outline'}
-                                            className="w-9 h-9"
-                                            onClick={() => {
-                                                if (zoomLevels.includes(z)) {
-                                                    setZoomLevels(zoomLevels.filter((l) => l !== z));
-                                                } else {
-                                                    setZoomLevels([...zoomLevels, z].sort((a, b) => a - b));
-                                                }
-                                            }}
-                                        >
-                                            {z}
-                                        </Button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* 估算信息 */}
-                            {estimate && (
-                                <Card className="bg-muted/50">
-                                    <CardContent className="p-4">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <Layers className="h-4 w-4" />
-                                            <span className="font-medium">预估信息</span>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                            <div>
-                                                瓦片总数: <strong>{estimate.total_tiles.toLocaleString()}</strong>
-                                            </div>
-                                            <div>
-                                                预估大小: <strong>{formatSize(estimate.estimated_size_mb)}</strong>
-                                            </div>
-                                        </div>
-                                        <div className="mt-2 text-xs text-muted-foreground">
-                                            {estimate.tiles_per_level.map(([z, count]) => (
-                                                <span key={z} className="mr-2">
-                                                    L{z}: {count.toLocaleString()}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            )}
-                        </TabsContent>
-
-                        <TabsContent value="advanced" className="space-y-4 mt-4">
-                            <div className="space-y-2">
-                                <Label>下载线程数: {threadCount}</Label>
-                                <Slider
-                                    value={[threadCount]}
-                                    min={1}
-                                    max={32}
-                                    step={1}
-                                    onValueChange={([value]) => setThreadCount(value)}
-                                />
-                            </div>
-
-                            <div className="text-sm text-muted-foreground">
-                                <p>更多线程可以加快下载速度，但可能会触发服务器限流。</p>
-                                <p>建议值：8-16</p>
-                            </div>
-                        </TabsContent>
-                    </Tabs>
-
-                    <DialogFooter className="mt-4">
-                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
-                            取消
-                        </Button>
-                        <Button onClick={handleCreateTask} disabled={loading}>
-                            {loading ? '创建中...' : '创建任务'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                            </CardContent>
+                        </Card>
+                    ) : (
+                        <Card className="shrink-0">
+                            <CardContent className="p-4 text-center text-muted-foreground">
+                                <p>选择一个任务查看详情，或点击「新建任务」创建下载任务</p>
+                            </CardContent>
+                        </Card>
+                    )}
+                </div>
+            </div>
 
             {/* 转换对话框 */}
             <ConvertDialog open={showConvertDialog} onOpenChange={setShowConvertDialog} />

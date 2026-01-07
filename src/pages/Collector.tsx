@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2 } from 'lucide-react';
+import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2, Globe, Map, Navigation, MapPinned } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -29,12 +29,17 @@ interface Category {
     keywords: string[];
 }
 
-const platformNames: Record<string, string> = {
-    tianditu: '天地图',
-    amap: '高德地图',
-    baidu: '百度地图',
-    osm: 'OpenStreetMap',
-};
+// Platform configuration with metadata
+const platforms = [
+    { id: 'tianditu', name: '天地图', needsApiKey: true, icon: MapPinned, color: 'text-blue-500' },
+    { id: 'amap', name: '高德地图', needsApiKey: true, icon: Map, color: 'text-green-500' },
+    { id: 'baidu', name: '百度地图', needsApiKey: true, icon: Navigation, color: 'text-red-500' },
+    { id: 'osm', name: 'OpenStreetMap', needsApiKey: false, icon: Globe, color: 'text-emerald-500' },
+];
+
+const platformNames: Record<string, string> = Object.fromEntries(
+    platforms.map(p => [p.id, p.name])
+);
 
 const statusConfig = {
     idle: { text: '未开始', variant: 'secondary' as const },
@@ -85,8 +90,8 @@ export default function Collector() {
             setCategories(categoriesData);
             setApiKeys(apiKeysData);
             const initial: Record<string, string[]> = {};
-            ['tianditu', 'amap', 'baidu'].forEach(p => {
-                initial[p] = categoriesData.map(c => c.id);
+            platforms.forEach(p => {
+                initial[p.id] = categoriesData.map(c => c.id);
             });
             setSelectedCategories(initial);
         } catch (e) { console.error(e); }
@@ -100,12 +105,15 @@ export default function Collector() {
     };
 
     const startCollector = async (platform: string) => {
-        // 检查 API Key
-        const platformKeys = apiKeys[platform] || [];
-        if (platformKeys.length === 0) {
-            warning('未配置 API Key', `请先在设置中配置 ${platformNames[platform]} 的 API Key`);
-            setShowSettings(true);
-            return;
+        // 检查 API Key (OSM 不需要)
+        const platformConfig = platforms.find(p => p.id === platform);
+        if (platformConfig?.needsApiKey) {
+            const platformKeys = apiKeys[platform] || [];
+            if (platformKeys.length === 0) {
+                warning('未配置 API Key', `请先在设置中配置 ${platformNames[platform]} 的 API Key`);
+                setShowSettings(true);
+                return;
+            }
         }
 
         // 检查地区
@@ -230,8 +238,10 @@ export default function Collector() {
             </Card>
 
             {/* 平台采集卡片 */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {['tianditu', 'amap', 'baidu'].map((platform) => {
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                {platforms.map((platformConfig) => {
+                    const platform = platformConfig.id;
+                    const PlatformIcon = platformConfig.icon;
                     const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
                     const config = statusConfig[status.status] || statusConfig.idle;
                     // 使用选中的类别数量计算进度，而非全部类别数量
@@ -239,13 +249,17 @@ export default function Collector() {
                     const progress = selectedCount > 0
                         ? (status.completed_categories?.length || 0) / selectedCount * 100
                         : 0;
+                    const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
 
 
                     return (
-                        <Card key={platform}>
+                        <Card key={platform} className={!hasApiKey ? 'opacity-75' : ''}>
                             <CardHeader className="pb-2">
                                 <div className="flex items-center justify-between">
-                                    <CardTitle className="text-lg">{platformNames[platform]}</CardTitle>
+                                    <div className="flex items-center gap-2">
+                                        <PlatformIcon className={`w-5 h-5 ${platformConfig.color}`} />
+                                        <CardTitle className="text-base">{platformConfig.name}</CardTitle>
+                                    </div>
                                     <span className={`px-2 py-1 rounded text-xs font-medium 
                                         ${status.status === 'running' ? 'bg-primary/10 text-primary' :
                                             status.status === 'error' ? 'bg-destructive/10 text-destructive' :
@@ -253,6 +267,9 @@ export default function Collector() {
                                         {config.text}
                                     </span>
                                 </div>
+                                {!platformConfig.needsApiKey && (
+                                    <span className="text-xs text-emerald-600 dark:text-emerald-400">免费 · 无需 API Key</span>
+                                )}
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 {/* 进度条 */}
