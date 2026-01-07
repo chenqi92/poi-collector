@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import 'simplebar-react/dist/simplebar.min.css';
 
 @tailwind base;
 @tailwind components;
@@ -72,4 +73,107 @@
   body {
     @apply bg-background text-foreground antialiased;
   }
+}
+/* ============================================
+   VS Code Style Scrollbar
+   ============================================ */
+
+/* Force hide ALL native scrollbars globally */
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+*::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent !important;
+}
+
+/* SimpleBar container styles */
+.simplebar-wrapper {
+  overflow: hidden !important;
+}
+
+.simplebar-content-wrapper {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  overflow: auto !important;
+}
+
+.simplebar-content-wrapper::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+/* SimpleBar scrollbar track - fully transparent */
+.simplebar-track {
+  background: transparent !important;
+  pointer-events: all !important;
+  z-index: 10 !important;
+}
+
+.simplebar-track.simplebar-vertical {
+  width: 10px !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+}
+
+.simplebar-track.simplebar-horizontal {
+  height: 10px !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+}
+
+/* SimpleBar scrollbar thumb - VS Code style */
+.simplebar-scrollbar {
+  right: 0 !important;
+  left: auto !important;
+}
+
+.simplebar-scrollbar::before {
+  background: #5a5a5a !important;
+  border-radius: 5px !important;
+  opacity: 1 !important;
+  left: 2px !important;
+  right: 2px !important;
+  top: 2px !important;
+  bottom: 2px !important;
+  transition: background 0.15s ease !important;
+}
+
+.simplebar-scrollbar.simplebar-visible::before {
+  opacity: 1 !important;
+}
+
+.simplebar-scrollbar:hover::before,
+.simplebar-track:hover .simplebar-scrollbar::before {
+  background: #808080 !important;
+}
+
+/* Dark mode - semi-transparent white scrollbar */
+.dark .simplebar-scrollbar::before,
+html.dark .simplebar-scrollbar::before {
+  background: rgba(255, 255, 255, 0.3) !important;
+}
+
+.dark .simplebar-scrollbar:hover::before,
+.dark .simplebar-track:hover .simplebar-scrollbar::before,
+html.dark .simplebar-scrollbar:hover::before,
+html.dark .simplebar-track:hover .simplebar-scrollbar::before {
+  background: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Utility: hide scrollbar completely */
+.scrollbar-hidden {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none !important;
 }
