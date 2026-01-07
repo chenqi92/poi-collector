@@ -4,7 +4,8 @@
       "WebSearch",
       "Bash(cargo check:*)",
       "Bash(npm install:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(ls -la \"E:\\\\workspace-freq\\\\poi-collector-app\\\\src\\\\components\"\" | grep -i \"map|region|boundary \")"
     ]
   }
 }

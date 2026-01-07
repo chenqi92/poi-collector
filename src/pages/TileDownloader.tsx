@@ -14,7 +14,9 @@ import {
     Layers,
     HardDrive,
     FileArchive,
+    Search,
 } from 'lucide-react';
+import { TileBoundsMap } from '@/components/TileBoundsMap';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -151,6 +153,10 @@ export default function TileDownloader() {
     const [outputFormat, setOutputFormat] = useState('folder');
     const [apiKey, setApiKey] = useState('');
     const [estimate, setEstimate] = useState<TileEstimate | null>(null);
+    const [selectionMode, setSelectionMode] = useState<'draw' | 'region'>('draw');
+    const [selectedRegionCode, setSelectedRegionCode] = useState<string | null>(null);
+    const [regionSearchQuery, setRegionSearchQuery] = useState('');
+    const [regionSearchResults, setRegionSearchResults] = useState<{ code: string; name: string; level: string }[]>([]);
 
     // 加载平台列表
     useEffect(() => {
@@ -278,7 +284,29 @@ export default function TileDownloader() {
         setThreadCount(8);
         setOutputFormat('folder');
         setApiKey('');
+        setSelectionMode('draw');
+        setSelectedRegionCode(null);
+        setRegionSearchQuery('');
+        setRegionSearchResults([]);
     };
+
+    // 搜索行政区域
+    const handleRegionSearch = useCallback(async (query: string) => {
+        setRegionSearchQuery(query);
+        if (!query.trim()) {
+            setRegionSearchResults([]);
+            return;
+        }
+        try {
+            const results = await invoke<{ code: string; name: string; level: string }[]>(
+                'search_regions',
+                { query: query.trim() }
+            );
+            setRegionSearchResults(results);
+        } catch (e) {
+            console.error('搜索行政区失败:', e);
+        }
+    }, []);
 
     // 开始下载
     const handleStart = async (taskId: string) => {
@@ -744,53 +772,73 @@ export default function TileDownloader() {
                         </TabsContent>
 
                         <TabsContent value="region" className="space-y-4 mt-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>北纬 (°)</Label>
-                                    <Input
-                                        type="number"
-                                        step="0.0001"
-                                        value={bounds.north}
-                                        onChange={(e) =>
-                                            setBounds({ ...bounds, north: parseFloat(e.target.value) || 0 })
-                                        }
+                            {/* 地图和区域选择 */}
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                                {/* 地图区域 */}
+                                <div className="lg:col-span-2 h-[350px]">
+                                    <TileBoundsMap
+                                        platform={platform}
+                                        mapType={mapType}
+                                        apiKey={apiKey || undefined}
+                                        bounds={bounds}
+                                        onBoundsChange={setBounds}
+                                        selectedRegionCode={selectedRegionCode}
+                                        selectionMode={selectionMode}
+                                        onSelectionModeChange={setSelectionMode}
                                     />
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>南纬 (°)</Label>
-                                    <Input
-                                        type="number"
-                                        step="0.0001"
-                                        value={bounds.south}
-                                        onChange={(e) =>
-                                            setBounds({ ...bounds, south: parseFloat(e.target.value) || 0 })
-                                        }
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>东经 (°)</Label>
-                                    <Input
-                                        type="number"
-                                        step="0.0001"
-                                        value={bounds.east}
-                                        onChange={(e) =>
-                                            setBounds({ ...bounds, east: parseFloat(e.target.value) || 0 })
-                                        }
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>西经 (°)</Label>
-                                    <Input
-                                        type="number"
-                                        step="0.0001"
-                                        value={bounds.west}
-                                        onChange={(e) =>
-                                            setBounds({ ...bounds, west: parseFloat(e.target.value) || 0 })
-                                        }
-                                    />
-                                </div>
+
+                                {/* 行政区域搜索（仅在行政区模式下显示） */}
+                                {selectionMode === 'region' && (
+                                    <div className="h-[350px] border rounded-lg overflow-hidden flex flex-col">
+                                        <div className="p-2 border-b">
+                                            <div className="relative">
+                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                                <Input
+                                                    value={regionSearchQuery}
+                                                    onChange={(e) => handleRegionSearch(e.target.value)}
+                                                    placeholder="搜索行政区域..."
+                                                    className="pl-8 h-8"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-2">
+                                            {regionSearchResults.length > 0 ? (
+                                                <div className="space-y-1">
+                                                    {regionSearchResults.map((region) => (
+                                                        <Button
+                                                            key={region.code}
+                                                            variant={selectedRegionCode === region.code ? 'default' : 'ghost'}
+                                                            size="sm"
+                                                            className="w-full justify-start h-auto py-2"
+                                                            onClick={() => setSelectedRegionCode(region.code)}
+                                                        >
+                                                            <MapPin className="h-3 w-3 mr-2 flex-shrink-0" />
+                                                            <span className="truncate">{region.name}</span>
+                                                            <span className="ml-auto text-xs text-muted-foreground">
+                                                                {region.level === 'province' ? '省' :
+                                                                 region.level === 'city' ? '市' : '区/县'}
+                                                            </span>
+                                                        </Button>
+                                                    ))}
+                                                </div>
+                                            ) : regionSearchQuery ? (
+                                                <div className="text-center text-muted-foreground py-8 text-sm">
+                                                    未找到匹配的行政区域
+                                                </div>
+                                            ) : (
+                                                <div className="text-center text-muted-foreground py-8 text-sm">
+                                                    输入名称搜索行政区域
+                                                    <br />
+                                                    如：阜宁、盐城、江苏
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
+                            {/* 层级选择 */}
                             <div className="space-y-2">
                                 <Label>层级选择 (当前: {zoomLevels.join(', ')})</Label>
                                 <div className="flex flex-wrap gap-1">
@@ -814,6 +862,7 @@ export default function TileDownloader() {
                                 </div>
                             </div>
 
+                            {/* 估算信息 */}
                             {estimate && (
                                 <Card className="bg-muted/50">
                                     <CardContent className="p-4">

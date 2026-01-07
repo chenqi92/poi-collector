@@ -7,7 +7,9 @@ mod regions;
 mod tile_downloader;
 
 use commands::*;
+use tile_downloader::boundaries;
 use tile_downloader::commands as tile_commands;
+use tile_downloader::tile_proxy;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -62,6 +64,9 @@ pub fn run() {
             tile_commands::set_tile_thread_count,
             tile_commands::retry_failed_tiles,
             tile_commands::convert_tile_file,
+            tile_proxy::proxy_tile_request,
+            boundaries::get_region_boundary,
+            boundaries::clear_boundary_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
