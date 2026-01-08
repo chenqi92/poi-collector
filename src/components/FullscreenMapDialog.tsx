@@ -16,7 +16,7 @@ import {
     DialogFooter,
 } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Map, Square, MapPin, Loader2, Trash2, Check, X, Pencil, Hand } from 'lucide-react';
+import { Map, Square, MapPin, Trash2, Check, X, Pencil, Hand } from 'lucide-react';
 
 // Fix Leaflet default icons
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -110,10 +110,11 @@ export function FullscreenMapDialog({
     onSelectionModeChange,
 }: FullscreenMapDialogProps) {
     const [localBounds, setLocalBounds] = useState<Bounds>(initialBounds);
-    const [usePreview, setUsePreview] = useState(false);
-    const [previewLoading, setPreviewLoading] = useState(false);
     const [shouldFitBounds, setShouldFitBounds] = useState(false);
     const [isDrawingMode, setIsDrawingMode] = useState(false);
+
+    // 是否使用 OSM 底图 (当平台为 osm 时使用 OSM 底图)
+    const useOsmTiles = platform === 'osm';
 
     // 检查是否有有效边界
     const hasValidBounds = localBounds.north > localBounds.south && localBounds.east > localBounds.west;
@@ -155,15 +156,6 @@ export function FullscreenMapDialog({
     // 取消
     const handleCancel = () => {
         onOpenChange(false);
-    };
-
-    // 切换到预览模式
-    const togglePreview = () => {
-        if (!usePreview) {
-            setPreviewLoading(true);
-            setTimeout(() => setPreviewLoading(false), 1000);
-        }
-        setUsePreview(!usePreview);
     };
 
     return (
@@ -233,21 +225,6 @@ export function FullscreenMapDialog({
                             </Button>
                         )}
                     </div>
-
-                    <Button
-                        variant={usePreview ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-8"
-                        onClick={togglePreview}
-                        disabled={previewLoading}
-                    >
-                        {previewLoading ? (
-                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                        ) : (
-                            <Map className="h-4 w-4 mr-1" />
-                        )}
-                        {usePreview ? '平台瓦片' : 'OSM 底图'}
-                    </Button>
                 </div>
 
                 {/* 地图容器 */}
@@ -260,16 +237,16 @@ export function FullscreenMapDialog({
                         attributionControl={false}
                     >
                         {/* 底图层 */}
-                        {usePreview ? (
+                        {useOsmTiles ? (
+                            <TileLayer
+                                attribution="&copy; OpenStreetMap"
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            />
+                        ) : (
                             <TilePreviewLayer
                                 platform={platform}
                                 mapType={mapType}
                                 apiKey={apiKey}
-                            />
-                        ) : (
-                            <TileLayer
-                                attribution="&copy; OpenStreetMap"
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             />
                         )}
 

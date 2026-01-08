@@ -47,17 +47,25 @@ pub async fn get_region_boundary(region_code: String) -> Result<BoundaryResult, 
         }
     }
 
-    // 根据代码长度确定 URL
-    // 省级(2位)、市级(4位)用 _full.json，区县级(6位)用 .json
-    let url = if region_code.len() <= 4 {
+    // 根据代码长度补全并确定 URL
+    // 省级(2位) -> 补全为 6 位后加 0000，使用 _full.json
+    // 市级(4位) -> 补全为 6 位后加 00，使用 _full.json
+    // 区县级(6位) -> 直接使用 .json
+    let (padded_code, use_full) = match region_code.len() {
+        2 => (format!("{}0000", region_code), true), // 省级: 11 -> 110000
+        4 => (format!("{}00", region_code), true),   // 市级: 1101 -> 110100
+        _ => (region_code.clone(), false),           // 区县级: 110101
+    };
+
+    let url = if use_full {
         format!(
             "https://geo.datav.aliyun.com/areas_v3/bound/{}_full.json",
-            region_code
+            padded_code
         )
     } else {
         format!(
             "https://geo.datav.aliyun.com/areas_v3/bound/{}.json",
-            region_code
+            padded_code
         )
     };
 
@@ -104,10 +112,7 @@ fn extract_bounds(geojson: &Value) -> RegionBounds {
             Value::Array(arr) => {
                 // 检查是否是坐标对 [lon, lat]
                 if arr.len() == 2 {
-                    if let (Some(lon), Some(lat)) = (
-                        arr[0].as_f64(),
-                        arr[1].as_f64(),
-                    ) {
+                    if let (Some(lon), Some(lat)) = (arr[0].as_f64(), arr[1].as_f64()) {
                         // 看起来像坐标对
                         if lon >= -180.0 && lon <= 180.0 && lat >= -90.0 && lat <= 90.0 {
                             coords.push((lon, lat));

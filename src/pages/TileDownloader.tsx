@@ -448,8 +448,8 @@ export default function TileDownloader() {
             {/* 主内容区 */}
             <div className="flex-1 flex gap-4 min-h-0 isolate">
                 {/* 左侧面板 - 始终显示创建表单 */}
-                <div className="w-80 flex flex-col gap-4 shrink-0">
-                    <Card className="flex-1 flex flex-col">
+                <div className="w-80 flex flex-col gap-4 shrink-0 min-h-0">
+                    <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
                         <CardHeader className="pb-3 shrink-0">
                             <CardTitle className="text-base">新建下载任务</CardTitle>
                         </CardHeader>
