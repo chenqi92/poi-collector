@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Key, Plus, Trash2, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Key, Plus, Trash2, Eye, EyeOff, Loader2, Shield, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
@@ -13,9 +13,9 @@ interface ApiKey {
 }
 
 const platforms = [
-    { id: 'tianditu', name: '天地图', hint: 'console.tianditu.gov.cn' },
-    { id: 'amap', name: '高德地图', hint: 'console.amap.com' },
-    { id: 'baidu', name: '百度地图', hint: 'lbsyun.baidu.com' },
+    { id: 'tianditu', name: '天地图', hint: 'console.tianditu.gov.cn', gradient: 'from-cyan-500 to-cyan-600' },
+    { id: 'amap', name: '高德地图', hint: 'console.amap.com', gradient: 'from-indigo-500 to-indigo-600' },
+    { id: 'baidu', name: '百度地图', hint: 'lbsyun.baidu.com', gradient: 'from-red-500 to-red-600' },
 ];
 
 export default function Settings() {
@@ -75,7 +75,10 @@ export default function Settings() {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                    <span className="text-sm text-muted-foreground">加载设置...</span>
+                </div>
             </div>
         );
     }
@@ -87,9 +90,9 @@ export default function Settings() {
                     <h1 className="text-2xl font-bold text-foreground">API Key 设置</h1>
                     <p className="text-muted-foreground">配置各平台的 API Key 用于数据采集</p>
                 </div>
-                <div className="text-right">
-                    <div className="text-2xl font-bold text-foreground">{getTotalKeys()}</div>
-                    <div className="text-xs text-muted-foreground">已配置 Key</div>
+                <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 border border-primary/20">
+                    <Key className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-medium text-primary">{getTotalKeys()} 个 Key</span>
                 </div>
             </div>
 
@@ -99,16 +102,24 @@ export default function Settings() {
                     const isAdding = addingKey === platform.id;
 
                     return (
-                        <Card key={platform.id}>
+                        <Card key={platform.id} className="overflow-hidden relative hover-lift transition-all">
+                            {/* Gradient top border */}
+                            <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${platform.gradient}`} />
+
                             <CardHeader>
                                 <div className="flex items-center gap-2">
-                                    <Key className="w-5 h-5 text-primary" />
+                                    <div className={`w-8 h-8 rounded-lg bg-gradient-to-r ${platform.gradient} flex items-center justify-center`}>
+                                        <Key className="w-4 h-4 text-white" />
+                                    </div>
                                     <CardTitle className="text-lg">{platform.name}</CardTitle>
-                                    <span className="ml-auto text-sm text-muted-foreground">
+                                    <span className="ml-auto px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground">
                                         {platformKeys.length} 个
                                     </span>
                                 </div>
-                                <CardDescription>{platform.hint}</CardDescription>
+                                <CardDescription className="flex items-center gap-1">
+                                    <ExternalLink className="w-3 h-3" />
+                                    {platform.hint}
+                                </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 {/* Key 列表 */}
@@ -117,7 +128,7 @@ export default function Settings() {
                                         platformKeys.map((k) => (
                                             <div
                                                 key={k.id}
-                                                className="flex items-center gap-2 p-3 bg-muted rounded-lg"
+                                                className="flex items-center gap-2 p-3 bg-muted/50 rounded-xl border border-border/50"
                                             >
                                                 <div className="flex-1 min-w-0">
                                                     <div className="font-medium text-foreground truncate">
@@ -133,6 +144,7 @@ export default function Settings() {
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
+                                                    className="h-8 w-8"
                                                     onClick={() => setShowKeys({
                                                         ...showKeys,
                                                         [`${platform.id}-${k.id}`]: !showKeys[`${platform.id}-${k.id}`]
@@ -146,28 +158,29 @@ export default function Settings() {
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
+                                                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                                                     onClick={() => deleteKey(platform.id, k.id)}
-                                                    className="text-destructive hover:text-destructive"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
                                                 </Button>
                                             </div>
                                         ))
                                     ) : (
-                                        <div className="text-center py-4 text-muted-foreground text-sm">
+                                        <div className="text-center py-6 text-muted-foreground text-sm">
+                                            <Shield className="w-8 h-8 mx-auto mb-2 opacity-30" />
                                             尚未配置 API Key
                                         </div>
                                     )}
                                 </div>
 
                                 {/* 添加新 Key */}
-                                <div className="pt-4 border-t space-y-2">
+                                <div className="pt-4 border-t border-border/50 space-y-2">
                                     <input
                                         type="text"
                                         placeholder="备注名称（可选）"
-                                        className="w-full px-3 py-2 border border-input bg-background rounded-md 
+                                        className="w-full px-3 py-2 border border-input bg-background rounded-lg 
                                                  text-foreground placeholder:text-muted-foreground text-sm 
-                                                 focus:outline-none focus:ring-2 focus:ring-ring"
+                                                 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                                         value={newKey[platform.id]?.name || ''}
                                         onChange={(e) => setNewKey({
                                             ...newKey,
@@ -180,8 +193,8 @@ export default function Settings() {
                                                 type={showKeys[`new-${platform.id}`] ? 'text' : 'password'}
                                                 placeholder="API Key"
                                                 className="w-full px-3 py-2 pr-10 border border-input bg-background 
-                                                         rounded-md text-foreground placeholder:text-muted-foreground 
-                                                         text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                                         rounded-lg text-foreground placeholder:text-muted-foreground 
+                                                         text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                                                 value={newKey[platform.id]?.key || ''}
                                                 onChange={(e) => setNewKey({
                                                     ...newKey,
@@ -191,7 +204,7 @@ export default function Settings() {
                                             />
                                             <button
                                                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground 
-                                                         hover:text-foreground"
+                                                         hover:text-foreground transition-colors"
                                                 onClick={() => setShowKeys({
                                                     ...showKeys,
                                                     [`new-${platform.id}`]: !showKeys[`new-${platform.id}`]
@@ -206,6 +219,7 @@ export default function Settings() {
                                         <Button
                                             onClick={() => addKey(platform.id)}
                                             disabled={isAdding || !newKey[platform.id]?.key}
+                                            className="gradient-primary text-white border-0 hover:opacity-90"
                                         >
                                             {isAdding ? (
                                                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -221,15 +235,29 @@ export default function Settings() {
                 })}
             </div>
 
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-sm">使用说明</CardTitle>
+            <Card className="overflow-hidden">
+                <CardHeader className="border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-primary/20 flex items-center justify-center">
+                            <Shield className="w-3 h-3 text-primary" />
+                        </div>
+                        使用说明
+                    </CardTitle>
                 </CardHeader>
-                <CardContent>
-                    <ul className="text-sm text-muted-foreground space-y-1">
-                        <li>• 每个平台可以配置多个 API Key，系统会自动轮换使用</li>
-                        <li>• 当某个 Key 配额耗尽时，会自动切换到下一个可用 Key</li>
-                        <li>• 建议为每个平台配置至少 2-3 个 Key 以确保采集稳定性</li>
+                <CardContent className="pt-4">
+                    <ul className="text-sm text-muted-foreground space-y-2">
+                        <li className="flex items-start gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0" />
+                            每个平台可以配置多个 API Key，系统会自动轮换使用
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0" />
+                            当某个 Key 配额耗尽时，会自动切换到下一个可用 Key
+                        </li>
+                        <li className="flex items-start gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0" />
+                            建议为每个平台配置至少 2-3 个 Key 以确保采集稳定性
+                        </li>
                     </ul>
                 </CardContent>
             </Card>

@@ -13,6 +13,7 @@ import {
   AlertCircle,
   MapPin,
   Search,
+  FolderTree,
 } from "lucide-react";
 import SimpleBar from "simplebar-react";
 import { Button } from "@/components/ui/button";
@@ -53,6 +54,12 @@ const platformNames: Record<string, string> = {
   baidu: "百度地图",
 };
 
+const platformColors: Record<string, string> = {
+  tianditu: 'bg-cyan-500/20 text-cyan-500',
+  amap: 'bg-indigo-500/20 text-indigo-500',
+  baidu: 'bg-red-500/20 text-red-500',
+};
+
 const formats = [
   {
     id: "excel",
@@ -60,9 +67,10 @@ const formats = [
     label: "CSV (Excel)",
     desc: ".csv",
     ext: "csv",
+    gradient: "from-emerald-500 to-emerald-600",
   },
-  { id: "json", icon: FileJson, label: "JSON", desc: ".json", ext: "json" },
-  { id: "mysql", icon: Database, label: "MySQL", desc: ".sql", ext: "sql" },
+  { id: "json", icon: FileJson, label: "JSON", desc: ".json", ext: "json", gradient: "from-amber-500 to-amber-600" },
+  { id: "mysql", icon: Database, label: "MySQL", desc: ".sql", ext: "sql", gradient: "from-blue-500 to-blue-600" },
 ];
 
 export default function Export() {
@@ -218,7 +226,6 @@ export default function Export() {
   };
 
   // 根据选中的地区过滤数据
-  // 选择省级时，匹配该省所有市县；选择市级时，匹配该市所有区县
   const filteredData = useMemo(() => {
     if (!hasRegionSelected) return [];
 
@@ -226,17 +233,14 @@ export default function Export() {
 
     // 如果不是"显示全部"模式，则按地区代码筛选
     if (!showAll && selectedRegions.size > 0) {
-      // 收集所有要匹配的地区代码（包括选中地区及其子地区）
       const matchCodes = new Set<string>();
 
       for (const code of selectedRegions) {
         matchCodes.add(code);
 
-        // 添加子地区代码
         const childRegions = children[code] || [];
         for (const child of childRegions) {
           matchCodes.add(child.code);
-          // 如果是市级，还要添加区县代码
           const grandchildren = children[child.code] || [];
           for (const gc of grandchildren) {
             matchCodes.add(gc.code);
@@ -244,7 +248,6 @@ export default function Export() {
         }
       }
 
-      // 按 region_code 精确匹配筛选
       data = data.filter((poi) => matchCodes.has(poi.region_code));
     }
 
@@ -278,9 +281,8 @@ export default function Export() {
     if (!formatInfo) return;
 
     const filePath = await save({
-      defaultPath: `poi_data_${platform}_${
-        new Date().toISOString().split("T")[0]
-      }.${formatInfo.ext}`,
+      defaultPath: `poi_data_${platform}_${new Date().toISOString().split("T")[0]
+        }.${formatInfo.ext}`,
       filters: [
         {
           name: formatInfo.label,
@@ -294,7 +296,6 @@ export default function Export() {
     setExporting(true);
 
     try {
-      // 传递筛选后的 ID 列表，确保导出数据与预览一致
       const filteredIds = filteredData.map((poi) => poi.id);
       const count = await invoke<number>("export_poi_to_file", {
         path: filePath,
@@ -325,16 +326,19 @@ export default function Export() {
     return (
       <div key={region.code}>
         <div
-          className={`flex items-center gap-1 py-1 px-1 rounded text-xs transition-colors
-                              ${
-                                isSelected ? "bg-primary/10" : "hover:bg-accent"
-                              }`}
-          style={{ paddingLeft: `${indent * 12 + 4}px` }}
+          className={`flex items-center gap-1.5 py-1.5 px-2 rounded-lg text-xs transition-all cursor-pointer
+                              ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-accent"
+            }`}
+          style={{ paddingLeft: `${indent * 12 + 8}px` }}
+          onClick={(e) => toggleSelectRegion(region.code, region.name, e)}
         >
           {hasChildren ? (
             <button
-              onClick={() => toggleExpand(region.code)}
-              className="p-0.5 hover:bg-accent rounded"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleExpand(region.code);
+              }}
+              className="p-0.5 hover:bg-accent rounded transition-colors"
             >
               {isExpanded ? (
                 <ChevronDown className="w-3 h-3" />
@@ -348,14 +352,11 @@ export default function Export() {
           <input
             type="checkbox"
             checked={isSelected}
-            onChange={() => {}}
+            onChange={() => { }}
             onClick={(e) => toggleSelectRegion(region.code, region.name, e)}
-            className="w-3 h-3 cursor-pointer"
+            className="w-3.5 h-3.5 cursor-pointer accent-primary"
           />
-          <span
-            className="flex-1 truncate cursor-pointer"
-            onClick={(e) => toggleSelectRegion(region.code, region.name, e)}
-          >
+          <span className="flex-1 truncate font-medium">
             {region.name}
           </span>
         </div>
@@ -378,10 +379,13 @@ export default function Export() {
 
       <div className="flex-1 min-h-0 flex gap-4">
         {/* 左侧: 地区筛选 */}
-        <Card className="w-52 shrink-0 overflow-hidden flex flex-col">
-          <CardHeader className="py-2 px-3 shrink-0 border-b">
+        <Card className="w-56 shrink-0 overflow-hidden flex flex-col">
+          <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">选择地区</CardTitle>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <FolderTree className="w-4 h-4 text-primary" />
+                选择地区
+              </CardTitle>
               {selectedRegions.size > 0 && (
                 <Button
                   variant="ghost"
@@ -395,15 +399,14 @@ export default function Export() {
             </div>
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden p-0">
-            <SimpleBar className="h-full p-1">
+            <SimpleBar className="h-full p-2">
               {/* 显示全部选项 */}
               <div
-                className={`flex items-center gap-2 py-2 px-2 mb-1 rounded text-xs border transition-colors cursor-pointer
-                                          ${
-                                            showAll
-                                              ? "bg-primary/10 border-primary"
-                                              : "border-border hover:bg-accent"
-                                          }`}
+                className={`flex items-center gap-2 py-2.5 px-3 mb-2 rounded-xl text-xs border transition-all cursor-pointer
+                                          ${showAll
+                    ? "bg-primary/10 border-primary/30 text-primary"
+                    : "border-border hover:bg-accent"
+                  }`}
                 onClick={() => {
                   setShowAll(!showAll);
                   setPage(1);
@@ -412,8 +415,8 @@ export default function Export() {
                 <input
                   type="checkbox"
                   checked={showAll}
-                  onChange={() => {}}
-                  className="w-3 h-3 cursor-pointer"
+                  onChange={() => { }}
+                  className="w-3.5 h-3.5 cursor-pointer accent-primary"
                 />
                 <span className="font-medium">显示全部数据</span>
               </div>
@@ -433,14 +436,14 @@ export default function Export() {
         <Card className="flex-1 overflow-hidden flex flex-col">
           {hasRegionSelected ? (
             <>
-              <CardHeader className="py-2 px-4 shrink-0 border-b">
+              <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <CardTitle className="text-base">数据预览</CardTitle>
                     <select
                       value={platform}
                       onChange={(e) => setPlatform(e.target.value)}
-                      className="px-2 py-1 text-sm border border-input bg-background rounded"
+                      className="px-3 py-1.5 text-sm border border-input bg-background rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50"
                     >
                       {Object.entries(platformNames).map(([key, name]) => (
                         <option key={key} value={key}>
@@ -449,7 +452,7 @@ export default function Export() {
                       ))}
                     </select>
                     <div className="relative">
-                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <input
                         type="text"
                         value={searchQuery}
@@ -458,12 +461,12 @@ export default function Export() {
                           setPage(1);
                         }}
                         placeholder="搜索名称或地址..."
-                        className="pl-8 pr-3 py-1 text-sm border border-input bg-background rounded w-48
-                                                         focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="pl-8 pr-3 py-1.5 text-sm border border-input bg-background rounded-lg w-48
+                                                         focus:outline-none focus:ring-2 focus:ring-primary/50"
                       />
                     </div>
                     <span className="text-sm text-muted-foreground">
-                      {filteredData.length.toLocaleString()} 条
+                      <span className="text-primary font-medium">{filteredData.length.toLocaleString()}</span> 条
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -478,7 +481,7 @@ export default function Export() {
                         >
                           上一页
                         </Button>
-                        <span className="text-muted-foreground px-1">
+                        <span className="text-muted-foreground px-2">
                           {page}/{totalPages}
                         </span>
                         <Button
@@ -497,6 +500,7 @@ export default function Export() {
                     <Button
                       onClick={() => setShowExportDialog(true)}
                       disabled={filteredData.length === 0}
+                      className="gradient-primary text-white border-0 hover:opacity-90"
                     >
                       <Download className="w-4 h-4 mr-2" />
                       导出数据
@@ -507,53 +511,53 @@ export default function Export() {
               <CardContent className="flex-1 overflow-auto p-0">
                 {loading ? (
                   <div className="flex items-center justify-center h-32">
-                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
                   </div>
                 ) : filteredData.length > 0 ? (
                   <table className="w-full text-sm">
-                    <thead className="bg-muted sticky top-0">
+                    <thead className="bg-muted/50 sticky top-0">
                       <tr>
-                        <th className="text-left p-2 font-medium w-12">ID</th>
-                        <th className="text-left p-2 font-medium">名称</th>
-                        <th className="text-left p-2 font-medium">地址</th>
-                        <th className="text-left p-2 font-medium w-20">类别</th>
-                        <th className="text-left p-2 font-medium w-20">经度</th>
-                        <th className="text-left p-2 font-medium w-20">纬度</th>
-                        <th className="text-left p-2 font-medium w-16">平台</th>
+                        <th className="text-left p-3 font-medium w-12">ID</th>
+                        <th className="text-left p-3 font-medium">名称</th>
+                        <th className="text-left p-3 font-medium">地址</th>
+                        <th className="text-left p-3 font-medium w-20">类别</th>
+                        <th className="text-left p-3 font-medium w-20">经度</th>
+                        <th className="text-left p-3 font-medium w-20">纬度</th>
+                        <th className="text-left p-3 font-medium w-16">平台</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {pagedData.map((poi) => (
+                      {pagedData.map((poi, idx) => (
                         <tr
                           key={poi.id}
-                          className="border-b border-border hover:bg-accent/50"
+                          className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}
                         >
-                          <td className="p-2 text-muted-foreground">
+                          <td className="p-3 text-muted-foreground">
                             {poi.id}
                           </td>
                           <td
-                            className="p-2 truncate max-w-[200px]"
+                            className="p-3 truncate max-w-[200px] font-medium"
                             title={poi.name}
                           >
                             {poi.name}
                           </td>
                           <td
-                            className="p-2 truncate max-w-[200px] text-muted-foreground"
+                            className="p-3 truncate max-w-[200px] text-muted-foreground"
                             title={poi.address}
                           >
                             {poi.address || "-"}
                           </td>
-                          <td className="p-2 text-muted-foreground">
+                          <td className="p-3 text-muted-foreground">
                             {poi.category || "-"}
                           </td>
-                          <td className="p-2 text-muted-foreground text-xs">
+                          <td className="p-3 text-muted-foreground text-xs font-mono">
                             {poi.lon.toFixed(4)}
                           </td>
-                          <td className="p-2 text-muted-foreground text-xs">
+                          <td className="p-3 text-muted-foreground text-xs font-mono">
                             {poi.lat.toFixed(4)}
                           </td>
-                          <td className="p-2">
-                            <span className="px-1.5 py-0.5 bg-muted rounded text-xs">
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded-full text-xs ${platformColors[poi.platform] || 'bg-muted text-muted-foreground'}`}>
                               {platformNames[poi.platform]?.substring(0, 2) ||
                                 poi.platform}
                             </span>
@@ -565,7 +569,7 @@ export default function Export() {
                 ) : (
                   <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
                     <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
-                    <p>所选地区暂无匹配数据</p>
+                    <p className="font-medium">所选地区暂无匹配数据</p>
                     <p className="text-xs mt-1">请尝试选择其他地区或平台</p>
                   </div>
                 )}
@@ -573,7 +577,9 @@ export default function Export() {
             </>
           ) : (
             <CardContent className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
-              <MapPin className="w-16 h-16 mb-4 opacity-20" />
+              <div className="w-20 h-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
+                <MapPin className="w-10 h-10 opacity-30" />
+              </div>
               <p className="text-lg font-medium mb-2">请先选择地区</p>
               <p className="text-sm">在左侧地区列表中勾选要导出的地区</p>
             </CardContent>
@@ -586,36 +592,36 @@ export default function Export() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Download className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg gradient-primary flex items-center justify-center">
+                <Download className="w-4 h-4 text-white" />
+              </div>
               导出数据
             </DialogTitle>
             <DialogDescription>
-              选择导出格式，将导出 {filteredData.length.toLocaleString()} 条数据
+              选择导出格式，将导出 <span className="text-primary font-medium">{filteredData.length.toLocaleString()}</span> 条数据
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2 py-4">
             {formats.map((f) => {
               const Icon = f.icon;
+              const isSelected = format === f.id;
               return (
                 <button
                   key={f.id}
                   onClick={() => setFormat(f.id)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-all
-                                              ${
-                                                format === f.id
-                                                  ? "border-primary bg-primary/5"
-                                                  : "border-border hover:border-primary/50"
-                                              }`}
-                >
-                  <Icon
-                    className={`w-5 h-5 ${
-                      format === f.id ? "text-primary" : "text-muted-foreground"
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer hover-lift
+                                              ${isSelected
+                      ? "border-primary/50 bg-primary/5"
+                      : "border-border hover:border-primary/30"
                     }`}
-                  />
+                >
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isSelected ? `bg-gradient-to-r ${f.gradient}` : 'bg-muted'}`}>
+                    <Icon className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-muted-foreground'}`} />
+                  </div>
                   <span
                     className={
-                      format === f.id
+                      isSelected
                         ? "text-foreground font-medium"
                         : "text-muted-foreground"
                     }
@@ -637,7 +643,7 @@ export default function Export() {
             >
               取消
             </Button>
-            <Button onClick={handleExport} disabled={exporting}>
+            <Button onClick={handleExport} disabled={exporting} className="gradient-primary text-white border-0 hover:opacity-90">
               {exporting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />

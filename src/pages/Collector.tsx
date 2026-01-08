@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2, Globe, Map, Navigation, MapPinned } from 'lucide-react';
+import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2, Globe, Map, Navigation, MapPinned, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -31,10 +31,10 @@ interface Category {
 
 // Platform configuration with metadata
 const platforms = [
-    { id: 'tianditu', name: '天地图', needsApiKey: true, icon: MapPinned, color: 'text-blue-500' },
-    { id: 'amap', name: '高德地图', needsApiKey: true, icon: Map, color: 'text-green-500' },
-    { id: 'baidu', name: '百度地图', needsApiKey: true, icon: Navigation, color: 'text-red-500' },
-    { id: 'osm', name: 'OpenStreetMap', needsApiKey: false, icon: Globe, color: 'text-emerald-500' },
+    { id: 'tianditu', name: '天地图', needsApiKey: true, icon: MapPinned, gradient: 'from-cyan-500 to-cyan-600', bgGradient: 'from-cyan-500/10 to-cyan-600/5' },
+    { id: 'amap', name: '高德地图', needsApiKey: true, icon: Map, gradient: 'from-indigo-500 to-indigo-600', bgGradient: 'from-indigo-500/10 to-indigo-600/5' },
+    { id: 'baidu', name: '百度地图', needsApiKey: true, icon: Navigation, gradient: 'from-red-500 to-red-600', bgGradient: 'from-red-500/10 to-red-600/5' },
+    { id: 'osm', name: 'OpenStreetMap', needsApiKey: false, icon: Globe, gradient: 'from-emerald-500 to-emerald-600', bgGradient: 'from-emerald-500/10 to-emerald-600/5' },
 ];
 
 const platformNames: Record<string, string> = Object.fromEntries(
@@ -42,11 +42,11 @@ const platformNames: Record<string, string> = Object.fromEntries(
 );
 
 const statusConfig = {
-    idle: { text: '未开始', variant: 'secondary' as const },
-    running: { text: '采集中', variant: 'default' as const },
-    paused: { text: '已暂停', variant: 'outline' as const },
-    completed: { text: '已完成', variant: 'secondary' as const },
-    error: { text: '出错', variant: 'destructive' as const },
+    idle: { text: '未开始', color: 'text-muted-foreground', bg: 'bg-muted' },
+    running: { text: '采集中', color: 'text-primary', bg: 'bg-primary/10' },
+    paused: { text: '已暂停', color: 'text-amber-500', bg: 'bg-amber-500/10' },
+    completed: { text: '已完成', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+    error: { text: '出错', color: 'text-destructive', bg: 'bg-destructive/10' },
 };
 
 export default function Collector() {
@@ -183,6 +183,7 @@ export default function Collector() {
 
     return (
         <div className="space-y-6">
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">数据采集</h1>
@@ -196,9 +197,9 @@ export default function Collector() {
                         <div className="text-xs text-muted-foreground">总采集量</div>
                     </div>
                     {overallStats.runningCount > 0 && (
-                        <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 rounded-lg">
+                        <div className="flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-xl border border-primary/20 animate-pulse-glow">
                             <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                            <span className="text-primary text-sm">
+                            <span className="text-primary text-sm font-medium">
                                 {overallStats.runningCount} 个任务运行中
                             </span>
                         </div>
@@ -207,12 +208,16 @@ export default function Collector() {
             </div>
 
             {/* 地区配置提示 */}
-            <Card className={selectedRegions.length > 0 ? 'border-primary/30' : 'border-destructive/30'}>
+            <Card className={`overflow-hidden ${selectedRegions.length > 0 ? 'border-primary/30' : 'border-destructive/30'}`}>
+                <div className={`absolute top-0 left-0 right-0 h-1 ${selectedRegions.length > 0 ? 'bg-gradient-to-r from-primary to-indigo-500' : 'bg-gradient-to-r from-destructive to-red-400'}`} />
                 <CardContent className="py-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <MapPin className={`w-5 h-5 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'
-                                }`} />
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${selectedRegions.length > 0 ? 'bg-primary/20' : 'bg-destructive/20'
+                                }`}>
+                                <MapPin className={`w-5 h-5 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'
+                                    }`} />
+                            </div>
                             <div>
                                 <div className={`font-medium ${selectedRegions.length > 0 ? 'text-foreground' : 'text-destructive'
                                     }`}>
@@ -230,7 +235,7 @@ export default function Collector() {
                                 </div>
                             </div>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => setShowSettings(true)}>
+                        <Button variant="outline" size="sm" onClick={() => setShowSettings(true)} className="hover-lift">
                             管理地区
                         </Button>
                     </div>
@@ -250,33 +255,42 @@ export default function Collector() {
                         ? (status.completed_categories?.length || 0) / selectedCount * 100
                         : 0;
                     const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
+                    const isRunning = status.status === 'running';
 
 
                     return (
-                        <Card key={platform} className={!hasApiKey ? 'opacity-75' : ''}>
-                            <CardHeader className="pb-2">
+                        <Card
+                            key={platform}
+                            className={`overflow-hidden relative hover-lift transition-all duration-300 ${!hasApiKey ? 'opacity-75' : ''} ${isRunning ? 'animate-pulse-glow' : ''}`}
+                        >
+                            {/* Gradient top border */}
+                            <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${platformConfig.gradient}`} />
+
+                            {/* Background gradient */}
+                            <div className={`absolute inset-0 bg-gradient-to-br ${platformConfig.bgGradient} pointer-events-none`} />
+
+                            <CardHeader className="pb-2 relative">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <PlatformIcon className={`w-5 h-5 ${platformConfig.color}`} />
+                                        <div className={`w-8 h-8 rounded-lg bg-gradient-to-r ${platformConfig.gradient} flex items-center justify-center`}>
+                                            <PlatformIcon className="w-4 h-4 text-white" />
+                                        </div>
                                         <CardTitle className="text-base">{platformConfig.name}</CardTitle>
                                     </div>
-                                    <span className={`px-2 py-1 rounded text-xs font-medium 
-                                        ${status.status === 'running' ? 'bg-primary/10 text-primary' :
-                                            status.status === 'error' ? 'bg-destructive/10 text-destructive' :
-                                                'bg-muted text-muted-foreground'}`}>
+                                    <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${config.bg} ${config.color}`}>
                                         {config.text}
                                     </span>
                                 </div>
                                 {!platformConfig.needsApiKey && (
-                                    <span className="text-xs text-emerald-600 dark:text-emerald-400">免费 · 无需 API Key</span>
+                                    <span className="text-xs text-emerald-500 dark:text-emerald-400 mt-1">免费 · 无需 API Key</span>
                                 )}
                             </CardHeader>
-                            <CardContent className="space-y-4">
+                            <CardContent className="space-y-4 relative">
                                 {/* 进度条 */}
                                 <div>
                                     <div className="h-2 bg-muted rounded-full overflow-hidden">
                                         <div
-                                            className="h-full bg-primary transition-all duration-300"
+                                            className={`h-full bg-gradient-to-r ${platformConfig.gradient} transition-all duration-300 ${isRunning ? 'progress-bar-striped' : ''}`}
                                             style={{ width: `${progress}%` }}
                                         />
                                     </div>
@@ -289,10 +303,10 @@ export default function Collector() {
                                 {/* 类别配置 */}
                                 <button
                                     onClick={() => setCategoryDialogPlatform(platform)}
-                                    className="w-full flex items-center justify-between p-3 border rounded-lg hover:bg-accent transition-colors"
+                                    className="w-full flex items-center justify-between p-3 border border-border/50 rounded-xl hover:bg-accent/50 transition-all cursor-pointer group"
                                 >
                                     <span className="flex items-center gap-2 text-sm">
-                                        <Settings2 className="w-4 h-4" />
+                                        <Settings2 className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
                                         类别配置
                                         <span className="text-muted-foreground">
                                             ({selectedCategories[platform]?.length || 0}/{categories.length})
@@ -325,7 +339,7 @@ export default function Collector() {
                                         <>
                                             {/* 已暂停：显示继续和停止 */}
                                             <Button
-                                                className="flex-1"
+                                                className="flex-1 gradient-primary text-white border-0"
                                                 onClick={() => startCollector(platform)}
                                             >
                                                 <Play className="w-4 h-4 mr-2" />
@@ -343,7 +357,7 @@ export default function Collector() {
                                         <>
                                             {/* 未开始/已完成/出错：显示开始和重置 */}
                                             <Button
-                                                className="flex-1"
+                                                className="flex-1 gradient-primary text-white border-0 hover:opacity-90"
                                                 onClick={() => startCollector(platform)}
                                             >
                                                 <Play className="w-4 h-4 mr-2" />
@@ -362,7 +376,7 @@ export default function Collector() {
                                 </div>
 
                                 {status.error_message && (
-                                    <div className="p-2 bg-destructive/10 border border-destructive/30 rounded text-destructive text-sm">
+                                    <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-xl text-destructive text-sm">
                                         {status.error_message}
                                     </div>
                                 )}
@@ -372,21 +386,28 @@ export default function Collector() {
                 })}
             </div>
 
-            {/* 采集日志 */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>采集日志</CardTitle>
+            {/* 采集日志 - Terminal Style */}
+            <Card className="overflow-hidden">
+                <CardHeader className="border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
+                    <CardTitle className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                            <Terminal className="w-4 h-4 text-primary" />
+                        </div>
+                        采集日志
+                    </CardTitle>
                 </CardHeader>
-                <CardContent>
-                    <div className="bg-muted rounded-lg p-4 h-48 overflow-y-auto font-mono text-sm">
+                <CardContent className="p-0">
+                    <div className="terminal-bg rounded-b-lg p-4 h-48 overflow-y-auto font-mono text-sm">
                         {logs.length > 0 ? (
                             logs.map((log, i) => (
-                                <div key={i} className="text-muted-foreground py-0.5 hover:bg-accent/50">
+                                <div key={i} className="text-gray-400 py-0.5 hover:bg-white/5 px-2 -mx-2 rounded">
+                                    <span className="text-gray-600 mr-2">{String(i + 1).padStart(3, '0')}</span>
                                     {log}
                                 </div>
                             ))
                         ) : (
-                            <div className="text-muted-foreground flex items-center gap-2">
+                            <div className="text-gray-500 flex items-center gap-2">
+                                <span className="inline-block w-2 h-4 bg-primary/50 animate-pulse" />
                                 等待采集开始...
                             </div>
                         )}

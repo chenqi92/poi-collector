@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw } from 'lucide-react';
+import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw, HardDrive, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
@@ -126,6 +126,13 @@ export default function DataManagement() {
     };
 
     const totalCount = stats.reduce((sum, [, count]) => sum + count, 0);
+    const gradients = [
+        'from-cyan-500 to-cyan-400',
+        'from-indigo-500 to-indigo-400',
+        'from-violet-500 to-violet-400',
+        'from-pink-500 to-pink-400',
+        'from-orange-500 to-orange-400'
+    ];
 
     return (
         <div className="h-full flex flex-col gap-4">
@@ -134,23 +141,31 @@ export default function DataManagement() {
                     <h1 className="text-2xl font-bold text-foreground">数据管理</h1>
                     <p className="text-muted-foreground">管理已采集的 POI 数据</p>
                 </div>
-                <Button variant="outline" onClick={loadStats} disabled={loading}>
-                    <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                    刷新
-                </Button>
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 border border-primary/20">
+                        <HardDrive className="w-4 h-4 text-primary" />
+                        <span className="text-sm font-medium text-primary">{totalCount.toLocaleString()} 条记录</span>
+                    </div>
+                    <Button variant="outline" onClick={loadStats} disabled={loading} className="hover-lift">
+                        <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                        刷新
+                    </Button>
+                </div>
             </div>
 
             <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* POI 数据统计 */}
                 <Card className="overflow-hidden flex flex-col">
-                    <CardHeader className="shrink-0 border-b">
+                    <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <Database className="w-5 h-5 text-primary" />
+                                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                                    <Database className="w-4 h-4 text-primary" />
+                                </div>
                                 <CardTitle>POI 数据</CardTitle>
                             </div>
                             <span className="text-sm text-muted-foreground">
-                                共 <span className="font-medium text-foreground">{totalCount.toLocaleString()}</span> 条
+                                共 <span className="font-medium text-primary">{stats.length}</span> 个地区
                             </span>
                         </div>
                         <CardDescription>按采集地区分组显示</CardDescription>
@@ -158,43 +173,62 @@ export default function DataManagement() {
                     <CardContent className="flex-1 overflow-y-auto p-4">
                         {stats.length === 0 ? (
                             <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                                <FolderTree className="w-12 h-12 mb-4 opacity-20" />
-                                <p>暂无采集数据</p>
+                                <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
+                                    <FolderTree className="w-8 h-8 opacity-30" />
+                                </div>
+                                <p className="font-medium">暂无采集数据</p>
+                                <p className="text-sm mt-1">开始采集后将在此显示</p>
                             </div>
                         ) : (
-                            <div className="space-y-1">
-                                {stats.map(([code, count]) => (
-                                    <div
-                                        key={code}
-                                        className={`flex items-center justify-between p-3 rounded-lg border transition-colors
-                                                  ${selected.has(code) ? 'bg-primary/10 border-primary' : 'border-border hover:bg-accent'}`}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                checked={selected.has(code)}
-                                                onChange={() => toggleSelect(code)}
-                                                className="w-4 h-4 cursor-pointer"
-                                            />
-                                            <div>
-                                                <div className="font-medium">
-                                                    {regionNames.get(code) || code}
+                            <div className="space-y-2">
+                                {stats.map(([code, count], index) => {
+                                    const isSelected = selected.has(code);
+                                    const percent = totalCount > 0 ? (count / totalCount) * 100 : 0;
+                                    return (
+                                        <div
+                                            key={code}
+                                            className={`p-3 rounded-xl border transition-all cursor-pointer hover-lift
+                                                      ${isSelected ? 'bg-primary/10 border-primary/30' : 'border-border/50 hover:bg-accent/50'}`}
+                                            onClick={() => toggleSelect(code)}
+                                        >
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => { }}
+                                                        className="w-4 h-4 cursor-pointer accent-primary"
+                                                    />
+                                                    <div>
+                                                        <div className="font-medium">
+                                                            {regionNames.get(code) || code}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {code} · {count.toLocaleString()} 条 ({percent.toFixed(1)}%)
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div className="text-xs text-muted-foreground">
-                                                    {code} · {count.toLocaleString()} 条
-                                                </div>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        deleteRegion(code);
+                                                    }}
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </Button>
+                                            </div>
+                                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full rounded-full bg-gradient-to-r ${gradients[index % gradients.length]} transition-all duration-500`}
+                                                    style={{ width: `${percent}%` }}
+                                                />
                                             </div>
                                         </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                            onClick={() => deleteRegion(code)}
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </Button>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </CardContent>
@@ -202,17 +236,22 @@ export default function DataManagement() {
 
                 {/* 操作面板 */}
                 <Card className="overflow-hidden flex flex-col">
-                    <CardHeader className="shrink-0 border-b">
+                    <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-amber-500/10 to-transparent">
                         <div className="flex items-center gap-2">
-                            <AlertTriangle className="w-5 h-5 text-orange-500" />
+                            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                                <Shield className="w-4 h-4 text-amber-500" />
+                            </div>
                             <CardTitle>数据操作</CardTitle>
                         </div>
                         <CardDescription>批量删除和清空操作</CardDescription>
                     </CardHeader>
                     <CardContent className="flex-1 p-4 space-y-6">
                         {/* 批量删除 */}
-                        <div className="p-4 border border-border rounded-lg">
-                            <h3 className="font-medium mb-2">批量删除</h3>
+                        <div className="p-4 border border-border/50 rounded-xl bg-muted/20">
+                            <h3 className="font-medium mb-2 flex items-center gap-2">
+                                <Trash2 className="w-4 h-4 text-muted-foreground" />
+                                批量删除
+                            </h3>
                             <p className="text-sm text-muted-foreground mb-4">
                                 在左侧勾选要删除的地区，然后点击删除按钮
                             </p>
@@ -220,6 +259,7 @@ export default function DataManagement() {
                                 variant="destructive"
                                 disabled={selected.size === 0}
                                 onClick={deleteSelected}
+                                className="w-full"
                             >
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 删除选中 ({selected.size})
@@ -227,7 +267,7 @@ export default function DataManagement() {
                         </div>
 
                         {/* 清空全部 */}
-                        <div className="p-4 border border-destructive/30 bg-destructive/5 rounded-lg">
+                        <div className="p-4 border border-destructive/30 bg-destructive/5 rounded-xl">
                             <h3 className="font-medium text-destructive mb-2 flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4" />
                                 危险区域
@@ -239,6 +279,7 @@ export default function DataManagement() {
                                 variant="destructive"
                                 onClick={clearAll}
                                 disabled={totalCount === 0}
+                                className="w-full"
                             >
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 清空全部数据
@@ -246,8 +287,10 @@ export default function DataManagement() {
                         </div>
 
                         {/* 预留: 瓦片管理 */}
-                        <div className="p-4 border border-dashed border-border rounded-lg">
-                            <h3 className="font-medium text-muted-foreground mb-2">🗺️ 地图瓦片管理</h3>
+                        <div className="p-4 border border-dashed border-border rounded-xl bg-muted/10">
+                            <h3 className="font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                                🗺️ 地图瓦片管理
+                            </h3>
                             <p className="text-sm text-muted-foreground">
                                 功能开发中，敬请期待...
                             </p>

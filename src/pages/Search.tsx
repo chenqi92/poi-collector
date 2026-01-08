@@ -14,6 +14,13 @@ const platformNames: Record<string, string> = {
     baidu: '百度',
 };
 
+const platformColors: Record<string, string> = {
+    tianditu: 'bg-cyan-500/20 text-cyan-500',
+    amap: 'bg-indigo-500/20 text-indigo-500',
+    baidu: 'bg-red-500/20 text-red-500',
+    osm: 'bg-emerald-500/20 text-emerald-500',
+};
+
 const modeOptions = [
     { value: 'contains', label: '包含' },
     { value: 'exact', label: '精确' },
@@ -57,28 +64,29 @@ export default function Search() {
     return (
         <div className="h-full flex flex-col gap-4">
             {/* 搜索栏 */}
-            <Card className="shrink-0">
+            <Card className="shrink-0 overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500" />
                 <CardContent className="py-4">
                     <div className="flex items-center gap-3">
-                        <div className="relative flex-1">
-                            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                        <div className="relative flex-1 group">
+                            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
                             <input
                                 type="text"
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                                 placeholder="输入名称搜索 POI..."
-                                className="w-full pl-10 pr-4 py-2.5 border border-input bg-background rounded-lg
+                                className="w-full pl-10 pr-4 py-2.5 border border-input bg-background rounded-xl
                                          text-foreground placeholder:text-muted-foreground focus:outline-none
-                                         focus:ring-2 focus:ring-ring"
+                                         focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                             />
                         </div>
 
                         <select
                             value={platform}
                             onChange={(e) => setPlatform(e.target.value)}
-                            className="px-4 py-2.5 border border-input bg-background rounded-lg text-foreground
-                                     focus:outline-none focus:ring-2 focus:ring-ring"
+                            className="px-4 py-2.5 border border-input bg-background rounded-xl text-foreground
+                                     focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer transition-all"
                         >
                             {Object.entries(platformNames).map(([key, name]) => (
                                 <option key={key} value={key}>{name}</option>
@@ -88,15 +96,15 @@ export default function Search() {
                         <select
                             value={mode}
                             onChange={(e) => setMode(e.target.value)}
-                            className="px-4 py-2.5 border border-input bg-background rounded-lg text-foreground
-                                     focus:outline-none focus:ring-2 focus:ring-ring"
+                            className="px-4 py-2.5 border border-input bg-background rounded-xl text-foreground
+                                     focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer transition-all"
                         >
                             {modeOptions.map((opt) => (
                                 <option key={opt.value} value={opt.value}>{opt.label}</option>
                             ))}
                         </select>
 
-                        <Button onClick={handleSearch} disabled={loading}>
+                        <Button onClick={handleSearch} disabled={loading} className="gradient-primary text-white border-0 hover:opacity-90 px-6">
                             {loading ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
@@ -104,11 +112,11 @@ export default function Search() {
                             )}
                         </Button>
 
-                        <div className="flex border border-input rounded-lg overflow-hidden">
+                        <div className="flex border border-input rounded-xl overflow-hidden">
                             <button
                                 onClick={() => setViewMode('list')}
-                                className={`p-2.5 transition-colors ${viewMode === 'list'
-                                    ? 'bg-primary text-primary-foreground'
+                                className={`p-2.5 transition-all cursor-pointer ${viewMode === 'list'
+                                    ? 'gradient-primary text-white'
                                     : 'bg-background text-muted-foreground hover:bg-accent'
                                     }`}
                                 title="列表视图"
@@ -117,8 +125,8 @@ export default function Search() {
                             </button>
                             <button
                                 onClick={() => setViewMode('split')}
-                                className={`p-2.5 border-x border-input transition-colors ${viewMode === 'split'
-                                    ? 'bg-primary text-primary-foreground'
+                                className={`p-2.5 border-x border-input transition-all cursor-pointer ${viewMode === 'split'
+                                    ? 'gradient-primary text-white'
                                     : 'bg-background text-muted-foreground hover:bg-accent'
                                     }`}
                                 title="分屏视图"
@@ -127,8 +135,8 @@ export default function Search() {
                             </button>
                             <button
                                 onClick={() => setViewMode('map')}
-                                className={`p-2.5 transition-colors ${viewMode === 'map'
-                                    ? 'bg-primary text-primary-foreground'
+                                className={`p-2.5 transition-all cursor-pointer ${viewMode === 'map'
+                                    ? 'gradient-primary text-white'
                                     : 'bg-background text-muted-foreground hover:bg-accent'
                                     }`}
                                 title="地图视图"
@@ -140,13 +148,13 @@ export default function Search() {
 
                     {results.length > 0 && (
                         <div className="mt-3 text-sm text-muted-foreground">
-                            找到 <span className="font-medium text-foreground">{results.length}</span> 条结果
+                            找到 <span className="font-medium text-primary">{results.length}</span> 条结果
                         </div>
                     )}
                 </CardContent>
             </Card>
 
-            {/* 结果区域 - 修复地图铺满问题 */}
+            {/* 结果区域 */}
             <div className={`flex-1 min-h-0 grid gap-4 ${showList && showMap ? 'grid-cols-2' : 'grid-cols-1'
                 }`}>
                 {/* 列表 */}
@@ -159,21 +167,23 @@ export default function Search() {
                                         <div
                                             key={poi.id}
                                             onClick={() => setSelectedId(poi.id)}
-                                            className={`p-4 border-b border-border cursor-pointer transition-colors ${selectedId === poi.id
-                                                    ? 'bg-primary/10 border-l-2 border-l-primary'
-                                                    : 'hover:bg-accent'
+                                            className={`p-4 border-b border-border/50 cursor-pointer transition-all ${selectedId === poi.id
+                                                ? 'bg-primary/10 border-l-2 border-l-primary'
+                                                : 'hover:bg-accent/50'
                                                 }`}
                                         >
                                             <div className="flex items-start gap-3">
-                                                <MapPin className={`w-4 h-4 mt-1 ${selectedId === poi.id ? 'text-primary' : 'text-muted-foreground'
-                                                    }`} />
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedId === poi.id ? 'bg-primary/20' : 'bg-muted'}`}>
+                                                    <MapPin className={`w-4 h-4 ${selectedId === poi.id ? 'text-primary' : 'text-muted-foreground'
+                                                        }`} />
+                                                </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="font-medium text-foreground truncate">{poi.name}</div>
                                                     <div className="text-sm text-muted-foreground truncate">
                                                         {poi.address || '无地址'}
                                                     </div>
-                                                    <div className="flex items-center gap-2 mt-1">
-                                                        <span className="text-xs bg-muted px-2 py-0.5 rounded">
+                                                    <div className="flex items-center gap-2 mt-1.5">
+                                                        <span className={`text-xs px-2 py-0.5 rounded-full ${platformColors[poi.platform] || 'bg-muted text-muted-foreground'}`}>
                                                             {platformNames[poi.platform] || poi.platform}
                                                         </span>
                                                         {poi.category && (
@@ -189,15 +199,18 @@ export default function Search() {
                                 </div>
                             ) : (
                                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                                    <SearchIcon className="w-12 h-12 mb-4 opacity-20" />
-                                    <p>输入关键词搜索 POI</p>
+                                    <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
+                                        <SearchIcon className="w-8 h-8 opacity-30" />
+                                    </div>
+                                    <p className="font-medium">输入关键词搜索 POI</p>
+                                    <p className="text-sm mt-1">支持名称模糊搜索</p>
                                 </div>
                             )}
                         </CardContent>
                     </Card>
                 )}
 
-                {/* 地图 - 使用 h-full 确保铺满 */}
+                {/* 地图 */}
                 {showMap && (
                     <Card className="overflow-hidden h-full">
                         <CardContent className="p-0 h-full">
