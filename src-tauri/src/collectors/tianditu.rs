@@ -1,9 +1,9 @@
 //! 天地图 POI 采集器
 
-use super::{Bounds, Collector, POIData, RegionConfig};
+use super::{Collector, POIData, RegionConfig};
 use reqwest::blocking::Client;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::Value;
 
 pub struct TianDiTuCollector {
     api_key: String,

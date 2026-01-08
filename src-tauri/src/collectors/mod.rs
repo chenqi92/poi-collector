@@ -8,7 +8,6 @@ pub mod osm;
 pub mod tianditu;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 pub use amap::AmapCollector;
 pub use baidu::BaiduCollector;

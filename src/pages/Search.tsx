@@ -64,6 +64,14 @@ export default function Search() {
 
     return (
         <div className="h-full flex flex-col gap-4 overflow-hidden">
+            {/* 页面标题 */}
+            <div className="shrink-0 flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">POI 搜索</h1>
+                    <p className="text-muted-foreground">从已采集的本地数据中搜索兴趣点</p>
+                </div>
+            </div>
+
             {/* 搜索栏 */}
             <Card className="shrink-0 overflow-visible relative">
                 <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500" />

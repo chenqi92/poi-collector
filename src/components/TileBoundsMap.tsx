@@ -12,7 +12,7 @@ import { FullscreenMapDialog } from './FullscreenMapDialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
-import { Map, Square, MapPin, Loader2, Trash2, Maximize2, Pencil, Hand, Search, X } from 'lucide-react';
+import { Square, MapPin, Trash2, Maximize2, Pencil, Hand, Search, X } from 'lucide-react';
 
 // Fix Leaflet default icons
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -114,10 +114,11 @@ export function TileBoundsMap({
     selectionMode,
     onSelectionModeChange,
 }: TileBoundsMapProps) {
-    const [usePreview, setUsePreview] = useState(false);
-    const [previewLoading, setPreviewLoading] = useState(false);
     const [showFullscreen, setShowFullscreen] = useState(false);
     const [isDrawingMode, setIsDrawingMode] = useState(false);
+
+    // 是否使用 OSM 底图 (当平台为 osm 时使用 OSM 底图)
+    const useOsmTiles = platform === 'osm';
 
     // 行政区域搜索状态
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
@@ -186,15 +187,6 @@ export function TileBoundsMap({
     const clearBounds = () => {
         onBoundsChange({ north: 0, south: 0, east: 0, west: 0 });
         setIsDrawingMode(false);
-    };
-
-    // 切换到预览模式
-    const togglePreview = () => {
-        if (!usePreview) {
-            setPreviewLoading(true);
-            setTimeout(() => setPreviewLoading(false), 1000);
-        }
-        setUsePreview(!usePreview);
     };
 
     // 切换绘制模式
@@ -337,21 +329,6 @@ export function TileBoundsMap({
                             <Maximize2 className="h-3 w-3 mr-1" />
                             大图编辑
                         </Button>
-
-                        <Button
-                            variant={usePreview ? 'default' : 'outline'}
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={togglePreview}
-                            disabled={previewLoading}
-                        >
-                            {previewLoading ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                            ) : (
-                                <Map className="h-3 w-3 mr-1" />
-                            )}
-                            {usePreview ? '平台瓦片' : 'OSM 底图'}
-                        </Button>
                     </div>
                 </div>
 
@@ -362,18 +339,19 @@ export function TileBoundsMap({
                         zoom={8}
                         className="w-full h-full"
                         style={{ height: '100%', width: '100%' }}
+                        attributionControl={false}
                     >
                         {/* 底图层 */}
-                        {usePreview ? (
+                        {useOsmTiles ? (
+                            <TileLayer
+                                attribution="&copy; OpenStreetMap"
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            />
+                        ) : (
                             <TilePreviewLayer
                                 platform={platform}
                                 mapType={mapType}
                                 apiKey={apiKey}
-                            />
-                        ) : (
-                            <TileLayer
-                                attribution="&copy; OpenStreetMap"
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                             />
                         )}
 

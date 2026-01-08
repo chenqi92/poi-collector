@@ -142,6 +142,7 @@ export function POIMap({
                 zoom={zoom}
                 className="w-full h-full rounded-lg"
                 style={{ height: '100%', width: '100%' }}
+                attributionControl={false}
             >
                 <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

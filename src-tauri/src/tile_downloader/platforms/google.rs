@@ -24,15 +24,15 @@ impl TilePlatform for GooglePlatform {
         let s = self.get_subdomain(x, y);
 
         let lyrs = match map_type {
-            MapType::Street => "m",       // 街道图
-            MapType::Satellite => "s",    // 卫星图
-            MapType::Hybrid => "y",       // 混合图
-            MapType::Terrain => "t",      // 地形图
+            MapType::Street => "m",    // 街道图
+            MapType::Satellite => "s", // 卫星图
+            MapType::Hybrid => "y",    // 混合图
+            MapType::Terrain => "t",   // 地形图
             _ => return None,
         };
 
         Some(format!(
-            "http://mt{}.google.cn/vt/lyrs={}&x={}&y={}&z={}",
+            "https://mt{}.google.com/vt/lyrs={}&x={}&y={}&z={}",
             s, lyrs, x, y, z
         ))
     }
@@ -46,7 +46,12 @@ impl TilePlatform for GooglePlatform {
     }
 
     fn supported_map_types(&self) -> Vec<MapType> {
-        vec![MapType::Street, MapType::Satellite, MapType::Hybrid, MapType::Terrain]
+        vec![
+            MapType::Street,
+            MapType::Satellite,
+            MapType::Hybrid,
+            MapType::Terrain,
+        ]
     }
 
     fn requires_api_key(&self) -> bool {
