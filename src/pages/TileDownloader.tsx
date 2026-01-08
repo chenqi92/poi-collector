@@ -446,7 +446,7 @@ export default function TileDownloader() {
             </div>
 
             {/* 主内容区 */}
-            <div className="flex-1 flex gap-4 min-h-0">
+            <div className="flex-1 flex gap-4 min-h-0 isolate">
                 {/* 左侧面板 - 始终显示创建表单 */}
                 <div className="w-80 flex flex-col gap-4 shrink-0">
                     <Card className="flex-1 flex flex-col">
@@ -673,7 +673,7 @@ export default function TileDownloader() {
                 {/* 右侧主区域：地图 + 详情 */}
                 <div className="flex-1 flex flex-col gap-4 min-w-0">
                     {/* 地图区域 - 占据主要空间 */}
-                    <div className="flex-1 min-h-0 rounded-lg overflow-hidden border">
+                    <div className="flex-1 min-h-0 rounded-lg overflow-hidden border relative z-0">
                         <TileBoundsMap
                             platform={platform}
                             mapType={mapType}
@@ -719,8 +719,17 @@ function ConvertDialog({
     onOpenChange: (open: boolean) => void;
 }) {
     const [inputPath, setInputPath] = useState('');
-    const [outputFormat, setOutputFormat] = useState('folder');
     const [loading, setLoading] = useState(false);
+
+    // 根据输入文件自动检测格式
+    const inputFormat = inputPath.toLowerCase().endsWith('.mbtiles')
+        ? 'mbtiles'
+        : inputPath.toLowerCase().endsWith('.zip')
+            ? 'zip'
+            : null;
+
+    // 输出格式：反向转换
+    const outputFormat = inputFormat === 'mbtiles' ? 'zip' : inputFormat === 'zip' ? 'mbtiles' : null;
 
     const handleBrowseFile = async () => {
         try {
@@ -739,18 +748,18 @@ function ConvertDialog({
     };
 
     const handleConvert = async () => {
-        if (!inputPath) {
-            alert('请选择输入文件');
+        if (!inputPath || !outputFormat) {
+            alert('请选择有效的输入文件');
             return;
         }
 
         setLoading(true);
         try {
-            const ext = outputFormat === 'mbtiles' ? 'mbtiles' : outputFormat === 'zip' ? 'zip' : '';
+            const ext = outputFormat;
             const outputPath = await save({
                 title: '选择输出位置',
-                defaultPath: ext ? `output.${ext}` : 'output',
-                filters: ext ? [{ name: '输出文件', extensions: [ext] }] : undefined,
+                defaultPath: `output.${ext}`,
+                filters: [{ name: '输出文件', extensions: [ext] }],
             });
 
             if (!outputPath) {
@@ -776,9 +785,9 @@ function ConvertDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="z-[100]">
+            <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>解压/转换瓦片文件</DialogTitle>
+                    <DialogTitle>转换瓦片文件</DialogTitle>
                     <DialogDescription>支持 ZIP 和 MBTiles 格式互转</DialogDescription>
                 </DialogHeader>
 
@@ -789,7 +798,7 @@ function ConvertDialog({
                             <Input
                                 value={inputPath}
                                 onChange={(e) => setInputPath(e.target.value)}
-                                placeholder="选择或输入文件路径"
+                                placeholder="选择 ZIP 或 MBTiles 文件"
                                 className="flex-1"
                             />
                             <Button variant="outline" onClick={handleBrowseFile}>
@@ -798,26 +807,27 @@ function ConvertDialog({
                         </div>
                     </div>
 
-                    <div className="space-y-2">
-                        <Label>输出格式</Label>
-                        <Select value={outputFormat} onValueChange={setOutputFormat}>
-                            <SelectTrigger>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="folder">文件夹</SelectItem>
-                                <SelectItem value="mbtiles">MBTiles</SelectItem>
-                                <SelectItem value="zip">ZIP</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    {inputPath && (
+                        <div className="p-3 bg-muted rounded-lg text-sm">
+                            {inputFormat ? (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-muted-foreground">转换方向：</span>
+                                    <span className="font-medium">{inputFormat.toUpperCase()}</span>
+                                    <span className="text-muted-foreground">→</span>
+                                    <span className="font-medium">{outputFormat?.toUpperCase()}</span>
+                                </div>
+                            ) : (
+                                <span className="text-destructive">请选择 .zip 或 .mbtiles 文件</span>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <DialogFooter className="mt-4">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                         取消
                     </Button>
-                    <Button onClick={handleConvert} disabled={loading}>
+                    <Button onClick={handleConvert} disabled={loading || !inputFormat}>
                         {loading ? '转换中...' : '开始转换'}
                     </Button>
                 </DialogFooter>
@@ -854,7 +864,7 @@ function TasksDialog({
 }) {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col z-[100]">
+            <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
                 <DialogHeader>
                     <DialogTitle>历史下载任务</DialogTitle>
                     <DialogDescription>

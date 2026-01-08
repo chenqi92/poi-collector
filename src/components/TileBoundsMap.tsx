@@ -333,7 +333,7 @@ export function TileBoundsMap({
                 </div>
 
                 {/* 地图容器 */}
-                <div className="flex-1 relative" style={{ minHeight: '300px' }}>
+                <div className="flex-1 relative isolate" style={{ minHeight: '300px' }}>
                     <MapContainer
                         center={[33.78, 119.8]}
                         zoom={8}

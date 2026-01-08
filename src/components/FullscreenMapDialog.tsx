@@ -168,7 +168,7 @@ export function FullscreenMapDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-[95vw] w-[1400px] max-h-[95vh] h-[900px] flex flex-col p-0 z-[100]">
+            <DialogContent className="max-w-[95vw] w-[1400px] max-h-[95vh] h-[900px] flex flex-col p-0">
                 <DialogHeader className="px-6 py-4 border-b shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Map className="w-5 h-5" />
@@ -251,7 +251,7 @@ export function FullscreenMapDialog({
                 </div>
 
                 {/* 地图容器 */}
-                <div className="flex-1 relative min-h-0">
+                <div className="flex-1 relative min-h-0 isolate">
                     <MapContainer
                         center={[33.78, 119.8]}
                         zoom={8}

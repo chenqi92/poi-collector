@@ -46,9 +46,10 @@ const menuItems = [
 interface SettingsDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onRegionsChange?: (regions: SelectedRegion[]) => void;
 }
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange, onRegionsChange }: SettingsDialogProps) {
     const [activeMenu, setActiveMenu] = useState('apikeys');
 
     // API Key State
@@ -199,6 +200,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         setSavingRegions(true);
         try {
             localStorage.setItem('poi_selected_regions', JSON.stringify(selectedRegions));
+            onRegionsChange?.(selectedRegions);
             await new Promise(r => setTimeout(r, 300));
         } finally {
             setSavingRegions(false);

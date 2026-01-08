@@ -420,7 +420,11 @@ export default function Collector() {
                     </Card>
 
                     {/* Settings Dialog */}
-                    <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
+                    <SettingsDialog
+                        open={showSettings}
+                        onOpenChange={setShowSettings}
+                        onRegionsChange={setSelectedRegions}
+                    />
 
                     {/* Category Config Dialog */}
                     <CategoryConfigDialog
