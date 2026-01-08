@@ -194,6 +194,28 @@ export function DragDrawRectangle({
             if (!drawEnabled || !editable) return;
             if (isResizing) return;
 
+            // 只响应鼠标左键 (button = 0)
+            // 中键 (button = 1) 和右键 (button = 2) 不触发绘制
+            const originalEvent = e.originalEvent as MouseEvent;
+            if (originalEvent.button !== 0) return;
+
+            // 检查是否点击在调整手柄附近
+            // 如果是，让 marker 的 drag 事件处理，不触发新绘制
+            if (handlesRef.current.length > 0) {
+                const clickPoint = map.latLngToContainerPoint(e.latlng);
+                for (const handle of handlesRef.current) {
+                    const handlePoint = map.latLngToContainerPoint(handle.getLatLng());
+                    const distance = clickPoint.distanceTo(handlePoint);
+                    // 如果点击距离手柄很近（20像素内），则认为是点击手柄
+                    if (distance < 20) {
+                        return; // 让 marker 的 drag 事件处理
+                    }
+                }
+            }
+
+            // 防止选中地图上的控件元素
+            originalEvent.preventDefault();
+
             // 检查是否点击在矩形内部（用于拖动）
             if (isValidBounds && rectangleRef.current) {
                 const rectBounds = rectangleRef.current.getBounds();
