@@ -58,7 +58,6 @@ impl Collector for OsmCollector {
         category_id: &str,
     ) -> Result<(Vec<POIData>, bool), String> {
         let region = self.region.as_ref().ok_or("未设置区域")?;
-        let bounds = &region.bounds;
 
         // OSM 不支持分页，只返回第一页
         if page > 1 {
@@ -66,68 +65,85 @@ impl Collector for OsmCollector {
         }
 
         // 构建 Overpass QL 查询
-        // 根据关键词搜索名称包含该关键词的 POI
+        // 使用基于区域名称的 area 查询，避免使用过大的 bounds
+        // area 查询比 bbox 查询更精确，对于中国城市效果更好
+        let escaped_keyword = keyword.replace("\"", "").replace("\\", "");
+        let escaped_region = region.name.replace("\"", "").replace("\\", "");
+
+        // 使用 area 查询来限制到特定行政区
         let query = format!(
-            r#"[out:json][timeout:30];
+            r#"[out:json][timeout:60];
+area["name"~"{region}"]["boundary"="administrative"]->.searchArea;
 (
-  node["name"~"{keyword}",i]({min_lat},{min_lon},{max_lat},{max_lon});
-  way["name"~"{keyword}",i]({min_lat},{min_lon},{max_lat},{max_lon});
-  relation["name"~"{keyword}",i]({min_lat},{min_lon},{max_lat},{max_lon});
+  node["name"~"{keyword}",i](area.searchArea);
+  way["name"~"{keyword}",i](area.searchArea);
+  relation["name"~"{keyword}",i](area.searchArea);
 );
 out center body;
 "#,
-            keyword = keyword.replace("\"", ""),
-            min_lat = bounds.min_lat,
-            min_lon = bounds.min_lon,
-            max_lat = bounds.max_lat,
-            max_lon = bounds.max_lon
+            keyword = escaped_keyword,
+            region = escaped_region
         );
 
-        log::info!("[OSM] 搜索: {} 区域: {}", keyword, region.name);
+        log::info!("[OSM] 搜索关键词: {} 区域: {}", keyword, region.name);
+        log::info!("[OSM] 正在连接 Overpass API 服务器...");
 
         // 调用 Overpass API - 使用多个镜像服务器
         let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(90))
+            .connect_timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-        // Overpass API 镜像列表（按优先级排序）
+        // Overpass API 镜像列表（按优先级排序，优先使用俄罗斯镜像，国内访问更稳定）
         let endpoints = [
-            "https://overpass.kumi.systems/api/interpreter",
-            "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-            "https://overpass-api.de/api/interpreter",
             "https://overpass.openstreetmap.ru/api/interpreter",
+            "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
         ];
 
         let mut last_error = String::new();
         let mut response_result = None;
 
         for (idx, endpoint) in endpoints.iter().enumerate() {
-            log::info!("[OSM] 尝试服务器 {}: {}", idx + 1, endpoint);
+            log::info!("[OSM] 尝试服务器 {}/{}...", idx + 1, endpoints.len());
             match client
                 .post(*endpoint)
                 .body(query.clone())
                 .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("User-Agent", "POI-Collector/1.0")
                 .send()
             {
                 Ok(resp) if resp.status().is_success() => {
-                    log::info!("[OSM] 服务器 {} 响应成功", idx + 1);
+                    log::info!("[OSM] 服务器 {} 响应成功!", idx + 1);
                     response_result = Some(resp);
                     break;
                 }
                 Ok(resp) => {
-                    last_error = format!("服务器 {} 返回错误: {}", endpoint, resp.status());
-                    log::warn!("[OSM] {}", last_error);
+                    last_error = format!("服务器返回 HTTP {}", resp.status());
+                    log::warn!("[OSM] 服务器 {} 失败: {}", idx + 1, last_error);
                 }
                 Err(e) => {
-                    last_error = format!("服务器 {} 请求失败: {}", endpoint, e);
-                    log::warn!("[OSM] {}", last_error);
+                    // 判断错误类型，给出更友好的提示
+                    if e.is_timeout() {
+                        last_error = "连接超时（可能需要网络代理）".to_string();
+                    } else if e.is_connect() {
+                        last_error = "无法连接服务器（请检查网络）".to_string();
+                    } else {
+                        last_error = e.to_string();
+                    }
+                    log::warn!("[OSM] 服务器 {} 失败: {}", idx + 1, last_error);
                 }
             }
         }
 
-        let response = response_result
-            .ok_or_else(|| format!("所有 Overpass API 服务器均不可用: {}", last_error))?;
+        let response = response_result.ok_or_else(|| {
+            format!(
+                "无法访问 Overpass API，请检查网络连接。最后错误: {}",
+                last_error
+            )
+        })?;
 
         let data: OverpassResponse = response
             .json()
@@ -136,6 +152,7 @@ out center body;
         log::info!("[OSM] 找到 {} 个结果", data.elements.len());
 
         let mut pois = Vec::new();
+        let mut filtered_count = 0;
         for element in data.elements {
             // 获取坐标（节点直接有，way/relation 使用 center）
             let (lat, lon) = if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
@@ -145,6 +162,17 @@ out center body;
             } else {
                 continue; // 没有坐标，跳过
             };
+
+            // 检查是否在区域 bounds 范围内（与其他采集器保持一致）
+            let bounds = &region.bounds;
+            if lon < bounds.min_lon
+                || lon > bounds.max_lon
+                || lat < bounds.min_lat
+                || lat > bounds.max_lat
+            {
+                filtered_count += 1;
+                continue; // 不在区域范围内，跳过
+            }
 
             let tags = element.tags.unwrap_or_default();
             let name = tags.get("name").cloned().unwrap_or_default();
@@ -183,6 +211,11 @@ out center body;
                 ),
             });
         }
+
+        if filtered_count > 0 {
+            log::info!("[OSM] 过滤区域外 POI: {} 个", filtered_count);
+        }
+        log::info!("[OSM] 有效 POI: {} 个", pois.len());
 
         // OSM 一次返回所有结果，没有更多页
         Ok((pois, false))
