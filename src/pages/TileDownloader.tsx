@@ -159,8 +159,6 @@ export default function TileDownloader() {
     const [selectedRegionCode, setSelectedRegionCode] = useState<string | null>(null);
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
     const [regionSearchResults, setRegionSearchResults] = useState<{ code: string; name: string; level: string }[]>([]);
-    // 多边形选区坐标（可选）
-    const [polygonCoords, setPolygonCoords] = useState<[number, number][] | null>(null);
 
     // 加载平台列表
     useEffect(() => {
@@ -294,7 +292,6 @@ export default function TileDownloader() {
         setPlatform('amap');
         setMapType('street');
         setBounds({ north: 31.5, south: 30.7, east: 122.0, west: 121.0 });
-        setPolygonCoords(null);
         setZoomLevels([10, 11, 12, 13, 14]);
         setThreadCount(8);
         setOutputFormat('folder');
@@ -574,7 +571,7 @@ export default function TileDownloader() {
                                                                 <span className="truncate">{region.name}</span>
                                                                 <span className="text-xs text-muted-foreground">
                                                                     {region.level === 'province' ? '省' :
-                                                                     region.level === 'city' ? '市' : '区/县'}
+                                                                        region.level === 'city' ? '市' : '区/县'}
                                                                 </span>
                                                             </button>
                                                         ))}
@@ -767,9 +764,8 @@ export default function TileDownloader() {
                             apiKey={apiKey || undefined}
                             bounds={bounds}
                             onBoundsChange={setBounds}
-                            polygonCoords={polygonCoords}
-                            onPolygonChange={setPolygonCoords}
                             selectedRegionCode={selectedRegionCode}
+                            onSelectedRegionCodeChange={setSelectedRegionCode}
                             selectionMode={selectionMode}
                             onSelectionModeChange={setSelectionMode}
                         />

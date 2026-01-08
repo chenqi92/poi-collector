@@ -4,6 +4,7 @@ import { Search as SearchIcon, MapPin, List, Columns, Loader2 } from 'lucide-rea
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import POIMap, { POI } from '@/components/POIMap';
+import SimpleBar from 'simplebar-react';
 
 type ViewMode = 'list' | 'map' | 'split';
 
@@ -62,9 +63,9 @@ export default function Search() {
     const showMap = viewMode === 'map' || viewMode === 'split';
 
     return (
-        <div className="h-full flex flex-col gap-4">
+        <div className="h-full flex flex-col gap-4 overflow-hidden">
             {/* 搜索栏 */}
-            <Card className="shrink-0 overflow-hidden">
+            <Card className="shrink-0 overflow-visible relative">
                 <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500" />
                 <CardContent className="py-4">
                     <div className="flex items-center gap-3">
@@ -159,10 +160,10 @@ export default function Search() {
                 }`}>
                 {/* 列表 */}
                 {showList && (
-                    <Card className="overflow-hidden h-full">
-                        <CardContent className="p-0 h-full">
+                    <Card className="overflow-hidden h-full flex flex-col">
+                        <CardContent className="p-0 flex-1 min-h-0">
                             {results.length > 0 ? (
-                                <div className="h-full overflow-y-auto">
+                                <SimpleBar className="h-full">
                                     {results.map((poi) => (
                                         <div
                                             key={poi.id}
@@ -196,7 +197,7 @@ export default function Search() {
                                             </div>
                                         </div>
                                     ))}
-                                </div>
+                                </SimpleBar>
                             ) : (
                                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
                                     <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">

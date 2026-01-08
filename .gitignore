@@ -28,3 +28,5 @@ dist-ssr
 *.db-wal
 *.db-shm
 *.db-journal
+.agent
+.shared

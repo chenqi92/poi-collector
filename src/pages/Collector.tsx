@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { CategoryConfigDialog } from '@/components/CategoryConfigDialog';
 import { useToast } from '@/components/ui/toast';
+import SimpleBar from 'simplebar-react';
 
 interface SelectedRegion {
     code: string;
@@ -182,9 +183,9 @@ export default function Collector() {
     }, [statuses]);
 
     return (
-        <div className="space-y-6">
+        <div className="h-full flex flex-col gap-4">
             {/* Header */}
-            <div className="flex items-center justify-between">
+            <div className="shrink-0 flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">数据采集</h1>
                     <p className="text-muted-foreground">从各平台采集 POI 数据</p>
@@ -207,233 +208,238 @@ export default function Collector() {
                 </div>
             </div>
 
-            {/* 地区配置提示 */}
-            <Card className={`overflow-hidden ${selectedRegions.length > 0 ? 'border-primary/30' : 'border-destructive/30'}`}>
-                <div className={`absolute top-0 left-0 right-0 h-1 ${selectedRegions.length > 0 ? 'bg-gradient-to-r from-primary to-indigo-500' : 'bg-gradient-to-r from-destructive to-red-400'}`} />
-                <CardContent className="py-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${selectedRegions.length > 0 ? 'bg-primary/20' : 'bg-destructive/20'
-                                }`}>
-                                <MapPin className={`w-5 h-5 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'
-                                    }`} />
-                            </div>
-                            <div>
-                                <div className={`font-medium ${selectedRegions.length > 0 ? 'text-foreground' : 'text-destructive'
-                                    }`}>
-                                    {selectedRegions.length > 0
-                                        ? `已选择 ${selectedRegions.length} 个地区`
-                                        : '未配置采集地区'
-                                    }
-                                </div>
-                                <div className="text-sm text-muted-foreground">
-                                    {selectedRegions.length > 0
-                                        ? selectedRegions.slice(0, 5).map(r => r.name).join('、') +
-                                        (selectedRegions.length > 5 ? ` 等` : '')
-                                        : '请先在设置中选择要采集的地区'
-                                    }
-                                </div>
-                            </div>
-                        </div>
-                        <Button variant="outline" size="sm" onClick={() => setShowSettings(true)} className="hover-lift">
-                            管理地区
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* 平台采集卡片 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                {platforms.map((platformConfig) => {
-                    const platform = platformConfig.id;
-                    const PlatformIcon = platformConfig.icon;
-                    const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
-                    const config = statusConfig[status.status] || statusConfig.idle;
-                    // 使用选中的类别数量计算进度，而非全部类别数量
-                    const selectedCount = selectedCategories[platform]?.length || 0;
-                    const progress = selectedCount > 0
-                        ? (status.completed_categories?.length || 0) / selectedCount * 100
-                        : 0;
-                    const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
-                    const isRunning = status.status === 'running';
-
-
-                    return (
-                        <Card
-                            key={platform}
-                            className={`overflow-hidden relative hover-lift transition-all duration-300 ${!hasApiKey ? 'opacity-75' : ''} ${isRunning ? 'animate-pulse-glow' : ''}`}
-                        >
-                            {/* Gradient top border */}
-                            <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${platformConfig.gradient}`} />
-
-                            {/* Background gradient */}
-                            <div className={`absolute inset-0 bg-gradient-to-br ${platformConfig.bgGradient} pointer-events-none`} />
-
-                            <CardHeader className="pb-2 relative">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <div className={`w-8 h-8 rounded-lg bg-gradient-to-r ${platformConfig.gradient} flex items-center justify-center`}>
-                                            <PlatformIcon className="w-4 h-4 text-white" />
+            {/* Scrollable content */}
+            <SimpleBar className="flex-1 min-h-0">
+                <div className="space-y-4 pr-2">
+                    {/* 地区配置提示 */}
+                    <Card className={`overflow-hidden ${selectedRegions.length > 0 ? 'border-primary/30' : 'border-destructive/30'}`}>
+                        <div className={`absolute top-0 left-0 right-0 h-1 ${selectedRegions.length > 0 ? 'bg-gradient-to-r from-primary to-indigo-500' : 'bg-gradient-to-r from-destructive to-red-400'}`} />
+                        <CardContent className="py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${selectedRegions.length > 0 ? 'bg-primary/20' : 'bg-destructive/20'
+                                        }`}>
+                                        <MapPin className={`w-5 h-5 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'
+                                            }`} />
+                                    </div>
+                                    <div>
+                                        <div className={`font-medium ${selectedRegions.length > 0 ? 'text-foreground' : 'text-destructive'
+                                            }`}>
+                                            {selectedRegions.length > 0
+                                                ? `已选择 ${selectedRegions.length} 个地区`
+                                                : '未配置采集地区'
+                                            }
                                         </div>
-                                        <CardTitle className="text-base">{platformConfig.name}</CardTitle>
-                                    </div>
-                                    <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${config.bg} ${config.color}`}>
-                                        {config.text}
-                                    </span>
-                                </div>
-                                {!platformConfig.needsApiKey && (
-                                    <span className="text-xs text-emerald-500 dark:text-emerald-400 mt-1">免费 · 无需 API Key</span>
-                                )}
-                            </CardHeader>
-                            <CardContent className="space-y-4 relative">
-                                {/* 进度条 */}
-                                <div>
-                                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full bg-gradient-to-r ${platformConfig.gradient} transition-all duration-300 ${isRunning ? 'progress-bar-striped' : ''}`}
-                                            style={{ width: `${progress}%` }}
-                                        />
-                                    </div>
-                                    <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-                                        <span>{status.completed_categories?.length || 0} / {categories.length} 类别</span>
-                                        <span>已采集: {status.total_collected?.toLocaleString() || 0}</span>
+                                        <div className="text-sm text-muted-foreground">
+                                            {selectedRegions.length > 0
+                                                ? selectedRegions.slice(0, 5).map(r => r.name).join('、') +
+                                                (selectedRegions.length > 5 ? ` 等` : '')
+                                                : '请先在设置中选择要采集的地区'
+                                            }
+                                        </div>
                                     </div>
                                 </div>
-
-                                {/* 类别配置 */}
-                                <button
-                                    onClick={() => setCategoryDialogPlatform(platform)}
-                                    className="w-full flex items-center justify-between p-3 border border-border/50 rounded-xl hover:bg-accent/50 transition-all cursor-pointer group"
-                                >
-                                    <span className="flex items-center gap-2 text-sm">
-                                        <Settings2 className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
-                                        类别配置
-                                        <span className="text-muted-foreground">
-                                            ({selectedCategories[platform]?.length || 0}/{categories.length})
-                                        </span>
-                                    </span>
-                                </button>
-
-                                {/* 操作按钮 */}
-                                <div className="flex gap-2">
-                                    {status.status === 'running' ? (
-                                        <>
-                                            {/* 采集中：显示暂停和停止 */}
-                                            <Button
-                                                className="flex-1"
-                                                variant="outline"
-                                                onClick={() => pauseCollector(platform)}
-                                            >
-                                                <Pause className="w-4 h-4 mr-2" />
-                                                暂停
-                                            </Button>
-                                            <Button
-                                                variant="destructive"
-                                                onClick={() => fullStopCollector(platform)}
-                                            >
-                                                <Square className="w-4 h-4 mr-2" />
-                                                停止
-                                            </Button>
-                                        </>
-                                    ) : status.status === 'paused' ? (
-                                        <>
-                                            {/* 已暂停：显示继续和停止 */}
-                                            <Button
-                                                className="flex-1 gradient-primary text-white border-0"
-                                                onClick={() => startCollector(platform)}
-                                            >
-                                                <Play className="w-4 h-4 mr-2" />
-                                                继续
-                                            </Button>
-                                            <Button
-                                                variant="destructive"
-                                                onClick={() => fullStopCollector(platform)}
-                                            >
-                                                <Square className="w-4 h-4 mr-2" />
-                                                停止
-                                            </Button>
-                                        </>
-                                    ) : (
-                                        <>
-                                            {/* 未开始/已完成/出错：显示开始和重置 */}
-                                            <Button
-                                                className="flex-1 gradient-primary text-white border-0 hover:opacity-90"
-                                                onClick={() => startCollector(platform)}
-                                            >
-                                                <Play className="w-4 h-4 mr-2" />
-                                                {status.status === 'completed' ? '重新开始' : '开始采集'}
-                                            </Button>
-                                            <Button
-                                                variant="outline"
-                                                onClick={() => resetCollector(platform)}
-                                                disabled={status.status === 'idle' || status.total_collected === 0}
-                                            >
-                                                <RotateCcw className="w-4 h-4 mr-2" />
-                                                重置
-                                            </Button>
-                                        </>
-                                    )}
-                                </div>
-
-                                {status.error_message && (
-                                    <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-xl text-destructive text-sm">
-                                        {status.error_message}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    );
-                })}
-            </div>
-
-            {/* 采集日志 - Terminal Style */}
-            <Card className="overflow-hidden">
-                <CardHeader className="border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
-                    <CardTitle className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                            <Terminal className="w-4 h-4 text-primary" />
-                        </div>
-                        采集日志
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                    <div className="terminal-bg rounded-b-lg p-4 h-48 overflow-y-auto font-mono text-sm">
-                        {logs.length > 0 ? (
-                            logs.map((log, i) => (
-                                <div key={i} className="text-gray-400 py-0.5 hover:bg-white/5 px-2 -mx-2 rounded">
-                                    <span className="text-gray-600 mr-2">{String(i + 1).padStart(3, '0')}</span>
-                                    {log}
-                                </div>
-                            ))
-                        ) : (
-                            <div className="text-gray-500 flex items-center gap-2">
-                                <span className="inline-block w-2 h-4 bg-primary/50 animate-pulse" />
-                                等待采集开始...
+                                <Button variant="outline" size="sm" onClick={() => setShowSettings(true)} className="hover-lift">
+                                    管理地区
+                                </Button>
                             </div>
-                        )}
+                        </CardContent>
+                    </Card>
+
+                    {/* 平台采集卡片 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                        {platforms.map((platformConfig) => {
+                            const platform = platformConfig.id;
+                            const PlatformIcon = platformConfig.icon;
+                            const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
+                            const config = statusConfig[status.status] || statusConfig.idle;
+                            // 使用选中的类别数量计算进度，而非全部类别数量
+                            const selectedCount = selectedCategories[platform]?.length || 0;
+                            const progress = selectedCount > 0
+                                ? (status.completed_categories?.length || 0) / selectedCount * 100
+                                : 0;
+                            const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
+                            const isRunning = status.status === 'running';
+
+
+                            return (
+                                <Card
+                                    key={platform}
+                                    className={`overflow-hidden relative hover-lift transition-all duration-300 ${!hasApiKey ? 'opacity-75' : ''} ${isRunning ? 'animate-pulse-glow' : ''}`}
+                                >
+                                    {/* Gradient top border */}
+                                    <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${platformConfig.gradient}`} />
+
+                                    {/* Background gradient */}
+                                    <div className={`absolute inset-0 bg-gradient-to-br ${platformConfig.bgGradient} pointer-events-none`} />
+
+                                    <CardHeader className="pb-2 relative">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-8 h-8 rounded-lg bg-gradient-to-r ${platformConfig.gradient} flex items-center justify-center`}>
+                                                    <PlatformIcon className="w-4 h-4 text-white" />
+                                                </div>
+                                                <CardTitle className="text-base">{platformConfig.name}</CardTitle>
+                                            </div>
+                                            <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${config.bg} ${config.color}`}>
+                                                {config.text}
+                                            </span>
+                                        </div>
+                                        {!platformConfig.needsApiKey && (
+                                            <span className="text-xs text-emerald-500 dark:text-emerald-400 mt-1">免费 · 无需 API Key</span>
+                                        )}
+                                    </CardHeader>
+                                    <CardContent className="space-y-4 relative">
+                                        {/* 进度条 */}
+                                        <div>
+                                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full bg-gradient-to-r ${platformConfig.gradient} transition-all duration-300 ${isRunning ? 'progress-bar-striped' : ''}`}
+                                                    style={{ width: `${progress}%` }}
+                                                />
+                                            </div>
+                                            <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+                                                <span>{status.completed_categories?.length || 0} / {categories.length} 类别</span>
+                                                <span>已采集: {status.total_collected?.toLocaleString() || 0}</span>
+                                            </div>
+                                        </div>
+
+                                        {/* 类别配置 */}
+                                        <button
+                                            onClick={() => setCategoryDialogPlatform(platform)}
+                                            className="w-full flex items-center justify-between p-3 border border-border/50 rounded-xl hover:bg-accent/50 transition-all cursor-pointer group"
+                                        >
+                                            <span className="flex items-center gap-2 text-sm">
+                                                <Settings2 className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
+                                                类别配置
+                                                <span className="text-muted-foreground">
+                                                    ({selectedCategories[platform]?.length || 0}/{categories.length})
+                                                </span>
+                                            </span>
+                                        </button>
+
+                                        {/* 操作按钮 */}
+                                        <div className="flex gap-2">
+                                            {status.status === 'running' ? (
+                                                <>
+                                                    {/* 采集中：显示暂停和停止 */}
+                                                    <Button
+                                                        className="flex-1"
+                                                        variant="outline"
+                                                        onClick={() => pauseCollector(platform)}
+                                                    >
+                                                        <Pause className="w-4 h-4 mr-2" />
+                                                        暂停
+                                                    </Button>
+                                                    <Button
+                                                        variant="destructive"
+                                                        onClick={() => fullStopCollector(platform)}
+                                                    >
+                                                        <Square className="w-4 h-4 mr-2" />
+                                                        停止
+                                                    </Button>
+                                                </>
+                                            ) : status.status === 'paused' ? (
+                                                <>
+                                                    {/* 已暂停：显示继续和停止 */}
+                                                    <Button
+                                                        className="flex-1 gradient-primary text-white border-0"
+                                                        onClick={() => startCollector(platform)}
+                                                    >
+                                                        <Play className="w-4 h-4 mr-2" />
+                                                        继续
+                                                    </Button>
+                                                    <Button
+                                                        variant="destructive"
+                                                        onClick={() => fullStopCollector(platform)}
+                                                    >
+                                                        <Square className="w-4 h-4 mr-2" />
+                                                        停止
+                                                    </Button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    {/* 未开始/已完成/出错：显示开始和重置 */}
+                                                    <Button
+                                                        className="flex-1 gradient-primary text-white border-0 hover:opacity-90"
+                                                        onClick={() => startCollector(platform)}
+                                                    >
+                                                        <Play className="w-4 h-4 mr-2" />
+                                                        {status.status === 'completed' ? '重新开始' : '开始采集'}
+                                                    </Button>
+                                                    <Button
+                                                        variant="outline"
+                                                        onClick={() => resetCollector(platform)}
+                                                        disabled={status.status === 'idle' || status.total_collected === 0}
+                                                    >
+                                                        <RotateCcw className="w-4 h-4 mr-2" />
+                                                        重置
+                                                    </Button>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {status.error_message && (
+                                            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-xl text-destructive text-sm">
+                                                {status.error_message}
+                                            </div>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            );
+                        })}
                     </div>
-                </CardContent>
-            </Card>
 
-            {/* Settings Dialog */}
-            <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
+                    {/* 采集日志 - Terminal Style */}
+                    <Card className="overflow-hidden">
+                        <CardHeader className="border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
+                            <CardTitle className="flex items-center gap-2">
+                                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+                                    <Terminal className="w-4 h-4 text-primary" />
+                                </div>
+                                采集日志
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                            <div className="terminal-bg rounded-b-lg p-4 h-48 overflow-y-auto font-mono text-sm">
+                                {logs.length > 0 ? (
+                                    logs.map((log, i) => (
+                                        <div key={i} className="text-gray-400 py-0.5 hover:bg-white/5 px-2 -mx-2 rounded">
+                                            <span className="text-gray-600 mr-2">{String(i + 1).padStart(3, '0')}</span>
+                                            {log}
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-gray-500 flex items-center gap-2">
+                                        <span className="inline-block w-2 h-4 bg-primary/50 animate-pulse" />
+                                        等待采集开始...
+                                    </div>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
 
-            {/* Category Config Dialog */}
-            <CategoryConfigDialog
-                open={categoryDialogPlatform !== null}
-                platformName={categoryDialogPlatform ? platformNames[categoryDialogPlatform] : ''}
-                categories={categories}
-                selectedCategories={selectedCategories[categoryDialogPlatform || ''] || []}
-                onClose={() => setCategoryDialogPlatform(null)}
-                onChange={(ids) => {
-                    if (categoryDialogPlatform) {
-                        setSelectedCategories(prev => ({
-                            ...prev,
-                            [categoryDialogPlatform]: ids
-                        }));
-                    }
-                }}
-            />
+                    {/* Settings Dialog */}
+                    <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
+
+                    {/* Category Config Dialog */}
+                    <CategoryConfigDialog
+                        open={categoryDialogPlatform !== null}
+                        platformName={categoryDialogPlatform ? platformNames[categoryDialogPlatform] : ''}
+                        categories={categories}
+                        selectedCategories={selectedCategories[categoryDialogPlatform || ''] || []}
+                        onClose={() => setCategoryDialogPlatform(null)}
+                        onChange={(ids) => {
+                            if (categoryDialogPlatform) {
+                                setSelectedCategories(prev => ({
+                                    ...prev,
+                                    [categoryDialogPlatform]: ids
+                                }));
+                            }
+                        }}
+                    />
+                </div>
+            </SimpleBar>
         </div>
     );
 }

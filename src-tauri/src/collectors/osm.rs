@@ -85,22 +85,49 @@ out center body;
 
         log::info!("[OSM] 搜索: {} 区域: {}", keyword, region.name);
 
-        // 调用 Overpass API
+        // 调用 Overpass API - 使用多个镜像服务器
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-        let response = client
-            .post("https://overpass-api.de/api/interpreter")
-            .body(query)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .send()
-            .map_err(|e| format!("请求 Overpass API 失败: {}", e))?;
+        // Overpass API 镜像列表（按优先级排序）
+        let endpoints = [
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.openstreetmap.ru/api/interpreter",
+        ];
 
-        if !response.status().is_success() {
-            return Err(format!("Overpass API 返回错误: {}", response.status()));
+        let mut last_error = String::new();
+        let mut response_result = None;
+
+        for (idx, endpoint) in endpoints.iter().enumerate() {
+            log::info!("[OSM] 尝试服务器 {}: {}", idx + 1, endpoint);
+            match client
+                .post(*endpoint)
+                .body(query.clone())
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .send()
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    log::info!("[OSM] 服务器 {} 响应成功", idx + 1);
+                    response_result = Some(resp);
+                    break;
+                }
+                Ok(resp) => {
+                    last_error = format!("服务器 {} 返回错误: {}", endpoint, resp.status());
+                    log::warn!("[OSM] {}", last_error);
+                }
+                Err(e) => {
+                    last_error = format!("服务器 {} 请求失败: {}", endpoint, e);
+                    log::warn!("[OSM] {}", last_error);
+                }
+            }
         }
+
+        let response = response_result
+            .ok_or_else(|| format!("所有 Overpass API 服务器均不可用: {}", last_error))?;
 
         let data: OverpassResponse = response
             .json()

@@ -4,6 +4,7 @@ import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw, HardDrive, Shie
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
+import SimpleBar from 'simplebar-react';
 
 interface Region {
     code: string;
@@ -170,67 +171,69 @@ export default function DataManagement() {
                         </div>
                         <CardDescription>按采集地区分组显示</CardDescription>
                     </CardHeader>
-                    <CardContent className="flex-1 overflow-y-auto p-4">
-                        {stats.length === 0 ? (
-                            <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                                <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-                                    <FolderTree className="w-8 h-8 opacity-30" />
+                    <CardContent className="flex-1 min-h-0 p-0">
+                        <SimpleBar className="h-full p-4">
+                            {stats.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                                    <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
+                                        <FolderTree className="w-8 h-8 opacity-30" />
+                                    </div>
+                                    <p className="font-medium">暂无采集数据</p>
+                                    <p className="text-sm mt-1">开始采集后将在此显示</p>
                                 </div>
-                                <p className="font-medium">暂无采集数据</p>
-                                <p className="text-sm mt-1">开始采集后将在此显示</p>
-                            </div>
-                        ) : (
-                            <div className="space-y-2">
-                                {stats.map(([code, count], index) => {
-                                    const isSelected = selected.has(code);
-                                    const percent = totalCount > 0 ? (count / totalCount) * 100 : 0;
-                                    return (
-                                        <div
-                                            key={code}
-                                            className={`p-3 rounded-xl border transition-all cursor-pointer hover-lift
+                            ) : (
+                                <div className="space-y-2">
+                                    {stats.map(([code, count], index) => {
+                                        const isSelected = selected.has(code);
+                                        const percent = totalCount > 0 ? (count / totalCount) * 100 : 0;
+                                        return (
+                                            <div
+                                                key={code}
+                                                className={`p-3 rounded-xl border transition-all cursor-pointer hover-lift
                                                       ${isSelected ? 'bg-primary/10 border-primary/30' : 'border-border/50 hover:bg-accent/50'}`}
-                                            onClick={() => toggleSelect(code)}
-                                        >
-                                            <div className="flex items-center justify-between mb-2">
-                                                <div className="flex items-center gap-3">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={isSelected}
-                                                        onChange={() => { }}
-                                                        className="w-4 h-4 cursor-pointer accent-primary"
-                                                    />
-                                                    <div>
-                                                        <div className="font-medium">
-                                                            {regionNames.get(code) || code}
-                                                        </div>
-                                                        <div className="text-xs text-muted-foreground">
-                                                            {code} · {count.toLocaleString()} 条 ({percent.toFixed(1)}%)
+                                                onClick={() => toggleSelect(code)}
+                                            >
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div className="flex items-center gap-3">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            onChange={() => { }}
+                                                            className="w-4 h-4 cursor-pointer accent-primary"
+                                                        />
+                                                        <div>
+                                                            <div className="font-medium">
+                                                                {regionNames.get(code) || code}
+                                                            </div>
+                                                            <div className="text-xs text-muted-foreground">
+                                                                {code} · {count.toLocaleString()} 条 ({percent.toFixed(1)}%)
+                                                            </div>
                                                         </div>
                                                     </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            deleteRegion(code);
+                                                        }}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </Button>
                                                 </div>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        deleteRegion(code);
-                                                    }}
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </Button>
+                                                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                                    <div
+                                                        className={`h-full rounded-full bg-gradient-to-r ${gradients[index % gradients.length]} transition-all duration-500`}
+                                                        style={{ width: `${percent}%` }}
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                                <div
-                                                    className={`h-full rounded-full bg-gradient-to-r ${gradients[index % gradients.length]} transition-all duration-500`}
-                                                    style={{ width: `${percent}%` }}
-                                                />
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </SimpleBar>
                     </CardContent>
                 </Card>
 

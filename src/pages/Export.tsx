@@ -368,7 +368,7 @@ export default function Export() {
 
   return (
     <div className="h-full flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+      <div className="shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">数据导出</h1>
           <p className="text-muted-foreground">
@@ -398,7 +398,7 @@ export default function Export() {
               )}
             </div>
           </CardHeader>
-          <CardContent className="flex-1 overflow-hidden p-0">
+          <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
             <SimpleBar className="h-full p-2">
               {/* 显示全部选项 */}
               <div
@@ -508,64 +508,66 @@ export default function Export() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 overflow-auto p-0">
+              <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
                 {loading ? (
                   <div className="flex items-center justify-center h-32">
                     <Loader2 className="w-6 h-6 animate-spin text-primary" />
                   </div>
                 ) : filteredData.length > 0 ? (
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-3 font-medium w-12">ID</th>
-                        <th className="text-left p-3 font-medium">名称</th>
-                        <th className="text-left p-3 font-medium">地址</th>
-                        <th className="text-left p-3 font-medium w-20">类别</th>
-                        <th className="text-left p-3 font-medium w-20">经度</th>
-                        <th className="text-left p-3 font-medium w-20">纬度</th>
-                        <th className="text-left p-3 font-medium w-16">平台</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedData.map((poi, idx) => (
-                        <tr
-                          key={poi.id}
-                          className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}
-                        >
-                          <td className="p-3 text-muted-foreground">
-                            {poi.id}
-                          </td>
-                          <td
-                            className="p-3 truncate max-w-[200px] font-medium"
-                            title={poi.name}
-                          >
-                            {poi.name}
-                          </td>
-                          <td
-                            className="p-3 truncate max-w-[200px] text-muted-foreground"
-                            title={poi.address}
-                          >
-                            {poi.address || "-"}
-                          </td>
-                          <td className="p-3 text-muted-foreground">
-                            {poi.category || "-"}
-                          </td>
-                          <td className="p-3 text-muted-foreground text-xs font-mono">
-                            {poi.lon.toFixed(4)}
-                          </td>
-                          <td className="p-3 text-muted-foreground text-xs font-mono">
-                            {poi.lat.toFixed(4)}
-                          </td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded-full text-xs ${platformColors[poi.platform] || 'bg-muted text-muted-foreground'}`}>
-                              {platformNames[poi.platform]?.substring(0, 2) ||
-                                poi.platform}
-                            </span>
-                          </td>
+                  <SimpleBar className="h-full">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="text-left p-3 font-medium w-12">ID</th>
+                          <th className="text-left p-3 font-medium">名称</th>
+                          <th className="text-left p-3 font-medium">地址</th>
+                          <th className="text-left p-3 font-medium w-20">类别</th>
+                          <th className="text-left p-3 font-medium w-20">经度</th>
+                          <th className="text-left p-3 font-medium w-20">纬度</th>
+                          <th className="text-left p-3 font-medium w-16">平台</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {pagedData.map((poi, idx) => (
+                          <tr
+                            key={poi.id}
+                            className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}
+                          >
+                            <td className="p-3 text-muted-foreground">
+                              {poi.id}
+                            </td>
+                            <td
+                              className="p-3 truncate max-w-[200px] font-medium"
+                              title={poi.name}
+                            >
+                              {poi.name}
+                            </td>
+                            <td
+                              className="p-3 truncate max-w-[200px] text-muted-foreground"
+                              title={poi.address}
+                            >
+                              {poi.address || "-"}
+                            </td>
+                            <td className="p-3 text-muted-foreground">
+                              {poi.category || "-"}
+                            </td>
+                            <td className="p-3 text-muted-foreground text-xs font-mono">
+                              {poi.lon.toFixed(4)}
+                            </td>
+                            <td className="p-3 text-muted-foreground text-xs font-mono">
+                              {poi.lat.toFixed(4)}
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded-full text-xs ${platformColors[poi.platform] || 'bg-muted text-muted-foreground'}`}>
+                                {platformNames[poi.platform]?.substring(0, 2) ||
+                                  poi.platform}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </SimpleBar>
                 ) : (
                   <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
                     <AlertCircle className="w-8 h-8 mb-2 opacity-50" />

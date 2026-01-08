@@ -9,7 +9,6 @@ import {
     Settings,
     Map,
 } from 'lucide-react';
-import SimpleBar from 'simplebar-react';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -33,7 +32,7 @@ export default function Layout() {
             <aside className="w-16 bg-gradient-to-b from-sidebar/90 to-sidebar/70 backdrop-blur-xl border-r border-white/5 dark:border-white/5 flex flex-col items-center py-4 relative">
                 {/* Subtle gradient overlay */}
                 <div className="absolute inset-0 bg-gradient-to-b from-primary/5 to-transparent pointer-events-none" />
-                
+
                 {/* Logo with glow effect */}
                 <div className="mb-6 relative z-10">
                     <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center text-white font-bold shadow-lg glow-sm">
@@ -51,8 +50,8 @@ export default function Layout() {
                                 cn(
                                     "w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-200 relative group",
                                     "text-muted-foreground hover:text-foreground",
-                                    isActive 
-                                        ? "gradient-primary text-white shadow-lg glow-sm" 
+                                    isActive
+                                        ? "gradient-primary text-white shadow-lg glow-sm"
                                         : "hover:bg-accent/50"
                                 )
                             }
@@ -76,9 +75,9 @@ export default function Layout() {
 
                 {/* Bottom section */}
                 <div className="relative z-10">
-                    <Button 
-                        variant="ghost" 
-                        size="icon" 
+                    <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => setSettingsOpen(true)}
                         className="w-11 h-11 rounded-xl text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all duration-200"
                     >
@@ -93,7 +92,7 @@ export default function Layout() {
                 <header className="h-14 border-b border-border/50 flex items-center justify-between px-6 shrink-0 bg-background/80 backdrop-blur-sm relative">
                     {/* Gradient accent line */}
                     <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
-                    
+
                     <h1 className="text-lg font-semibold text-foreground">POI Collector</h1>
 
                     <div className="flex items-center gap-2">
@@ -101,10 +100,10 @@ export default function Layout() {
                     </div>
                 </header>
 
-                {/* Content */}
-                <SimpleBar className="flex-1 p-6">
+                {/* Content - 使用 div 替代 SimpleBar，让各页面自己管理滚动 */}
+                <div className="flex-1 min-h-0 overflow-hidden p-6">
                     <Outlet />
-                </SimpleBar>
+                </div>
             </div>
 
             {/* Settings Dialog */}
