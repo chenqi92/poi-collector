@@ -458,7 +458,7 @@ export default function TileDownloader() {
             </div>
 
             {/* 主内容区 */}
-            <div className="flex-1 flex gap-4 min-h-0 isolate">
+            <div className="flex-1 flex gap-4 min-h-0">
                 {/* 左侧面板 - 始终显示创建表单 */}
                 <div className="w-80 flex flex-col gap-4 shrink-0 min-h-0">
                     <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -685,7 +685,7 @@ export default function TileDownloader() {
                 {/* 右侧主区域：地图 + 详情 */}
                 <div className="flex-1 flex flex-col gap-4 min-w-0">
                     {/* 地图区域 - 占据主要空间 */}
-                    <div className="flex-1 min-h-0 rounded-lg overflow-hidden border relative z-0">
+                    <div className="flex-1 min-h-0 rounded-lg overflow-hidden border relative z-0 isolate">
                         <TileBoundsMap
                             platform={platform}
                             mapType={mapType}

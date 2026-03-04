@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "POI Collector",
+  "productName": "GeoCollector",
   "version": "0.2.1",
   "identifier": "com.kkape.poi",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "POI Collector",
+        "title": "GeoCollector",
         "width": 1200,
         "height": 800
       }

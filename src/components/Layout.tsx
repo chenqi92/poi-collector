@@ -36,7 +36,7 @@ export default function Layout() {
                 {/* Logo with glow effect */}
                 <div className="mb-6 relative z-10">
                     <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center text-white font-bold shadow-lg glow-sm">
-                        P
+                        G
                     </div>
                 </div>
 
@@ -93,7 +93,7 @@ export default function Layout() {
                     {/* Gradient accent line */}
                     <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
 
-                    <h1 className="text-lg font-semibold text-foreground">POI Collector</h1>
+                    <h1 className="text-lg font-semibold text-foreground">GeoCollector</h1>
 
                     <div className="flex items-center gap-2">
                         <ThemeToggle />
