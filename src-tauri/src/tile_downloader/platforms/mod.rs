@@ -1,20 +1,22 @@
-mod google;
-mod baidu;
 mod amap;
+mod arcgis;
+mod baidu;
+mod bing;
+mod cjhy;
+mod google;
+mod osm;
 mod tencent;
 mod tianditu;
-mod osm;
-mod arcgis;
-mod bing;
 
-pub use google::GooglePlatform;
-pub use baidu::BaiduPlatform;
 pub use amap::AmapPlatform;
+pub use arcgis::ArcGisPlatform;
+pub use baidu::BaiduPlatform;
+pub use bing::BingPlatform;
+pub use cjhy::CjhyPlatform;
+pub use google::GooglePlatform;
+pub use osm::OsmPlatform;
 pub use tencent::TencentPlatform;
 pub use tianditu::TiandituPlatform;
-pub use osm::OsmPlatform;
-pub use arcgis::ArcGisPlatform;
-pub use bing::BingPlatform;
 
 use super::types::{MapType, PlatformInfo};
 use std::collections::HashMap;
@@ -70,6 +72,12 @@ pub trait TilePlatform: Send + Sync {
         vec![]
     }
 
+    /// 是否使用自定义 4326 切片方案（ArcGIS 航道图等）
+    /// 默认 false 表示使用标准 Web Mercator
+    fn uses_custom_4326_scheme(&self) -> bool {
+        false
+    }
+
     /// 获取平台信息
     fn info(&self) -> PlatformInfo {
         PlatformInfo {
@@ -78,7 +86,11 @@ pub trait TilePlatform: Send + Sync {
             enabled: true,
             min_zoom: self.min_zoom(),
             max_zoom: self.max_zoom(),
-            map_types: self.supported_map_types().iter().map(|t| t.to_string()).collect(),
+            map_types: self
+                .supported_map_types()
+                .iter()
+                .map(|t| t.to_string())
+                .collect(),
             requires_key: self.requires_api_key(),
         }
     }
@@ -95,6 +107,7 @@ pub fn create_platform(platform: &str, api_key: Option<&str>) -> Box<dyn TilePla
         "osm" => Box::new(OsmPlatform::new()),
         "arcgis" => Box::new(ArcGisPlatform::new()),
         "bing" => Box::new(BingPlatform::new()),
+        "cjhy" => Box::new(CjhyPlatform::new()),
         _ => Box::new(OsmPlatform::new()),
     };
 
@@ -116,5 +129,6 @@ pub fn get_all_platforms() -> Vec<PlatformInfo> {
         OsmPlatform::new().info(),
         ArcGisPlatform::new().info(),
         BingPlatform::new().info(),
+        CjhyPlatform::new().info(),
     ]
 }

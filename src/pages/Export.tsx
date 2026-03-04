@@ -14,6 +14,8 @@ import {
   MapPin,
   Search,
   FolderTree,
+  Anchor,
+  Ship,
 } from "lucide-react";
 import SimpleBar from "simplebar-react";
 import { Button } from "@/components/ui/button";
@@ -45,6 +47,22 @@ interface Region {
   name: string;
   level: string;
   parent_code: string | null;
+}
+
+interface BuoyInfo {
+  id: string;
+  name: string | null;
+  lon_84: number | null;
+  lat_84: number | null;
+  buoy_type: string | null;
+  icon_url: string | null;
+  organization_id: string | null;
+  color: string | null;
+  waterway: string | null;
+  shape: string | null;
+  light_info: string | null;
+  region: string | null;
+  raw_json: string;
 }
 
 const platformNames: Record<string, string> = {
@@ -103,12 +121,39 @@ export default function Export() {
   const [page, setPage] = useState(1);
   const pageSize = 100;
 
+  // Tab: poi | buoy
+  const [activeTab, setActiveTab] = useState<'poi' | 'buoy'>('poi');
+
+  // 航标数据
+  const [buoyCount, setBuoyCount] = useState(0);
+  const [buoyData, setBuoyData] = useState<BuoyInfo[]>([]);
+  const [buoyExporting, setBuoyExporting] = useState(false);
+  const [buoyPage, setBuoyPage] = useState(1);
+  const [buoySearch, setBuoySearch] = useState('');
+  const buoyPageSize = 100;
+
   // 是否显示表格（选择了地区或开启了显示全部）
   const hasRegionSelected = selectedRegions.size > 0 || showAll;
 
   useEffect(() => {
     loadProvinces();
+    loadBuoyInfo();
   }, []);
+
+  const loadBuoyInfo = async () => {
+    try {
+      const count = await invoke<number>('chart_get_buoy_count');
+      setBuoyCount(count);
+      if (count > 0) {
+        const data = await invoke<BuoyInfo[]>('chart_get_all_buoys');
+        setBuoyData(data);
+      } else {
+        setBuoyData([]);
+      }
+    } catch (e) {
+      console.error('加载航标信息失败:', e);
+    }
+  };
 
   // 当选择地区后加载数据
   useEffect(() => {
@@ -317,6 +362,19 @@ export default function Export() {
   const pagedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
   const totalPages = Math.ceil(filteredData.length / pageSize);
 
+  // 航标过滤和分页
+  const filteredBuoyData = buoySearch.trim()
+    ? buoyData.filter(b =>
+      (b.name || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
+      b.id.toLowerCase().includes(buoySearch.toLowerCase()) ||
+      (b.buoy_type || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
+      (b.waterway || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
+      (b.region || '').toLowerCase().includes(buoySearch.toLowerCase())
+    )
+    : buoyData;
+  const buoyTotalPages = Math.ceil(filteredBuoyData.length / buoyPageSize);
+  const pagedBuoyData = filteredBuoyData.slice((buoyPage - 1) * buoyPageSize, buoyPage * buoyPageSize);
+
   const renderRegion = (region: Region, indent: number = 0) => {
     const hasChildren = region.level !== "district";
     const isExpanded = expanded.has(region.code);
@@ -366,228 +424,400 @@ export default function Export() {
     );
   };
 
+  const handleBuoyExport = async (fmt: 'json' | 'csv') => {
+    const ext = fmt === 'json' ? 'json' : 'csv';
+    const filterName = fmt === 'json' ? 'JSON 文件' : 'CSV 文件';
+    setBuoyExporting(true);
+    try {
+      const filePath = await save({
+        defaultPath: `buoys_export.${ext}`,
+        filters: [{ name: filterName, extensions: [ext] }],
+      });
+      if (!filePath) { setBuoyExporting(false); return; }
+      const result = await invoke<string>('chart_export_buoys', { format: fmt, outputPath: filePath });
+      showSuccess('导出成功', result);
+    } catch (e) {
+      showError('导出失败', String(e));
+    } finally {
+      setBuoyExporting(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col gap-4">
       <div className="shrink-0 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">数据导出</h1>
           <p className="text-muted-foreground">
-            先选择地区，然后查看和导出对应数据
+            导出已采集的 POI 和航标数据
           </p>
+        </div>
+        {/* Tab 切换 */}
+        <div className="flex items-center bg-muted/50 rounded-xl p-1">
+          <button
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'poi'
+              ? 'bg-background shadow-sm text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+              }`}
+            onClick={() => setActiveTab('poi')}
+          >
+            <MapPin className="w-4 h-4" />
+            POI 数据
+          </button>
+          <button
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'buoy'
+              ? 'bg-background shadow-sm text-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+              }`}
+            onClick={() => setActiveTab('buoy')}
+          >
+            <Anchor className="w-4 h-4" />
+            航标数据
+            {buoyCount > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-500/20 text-blue-500 rounded-full">
+                {buoyCount.toLocaleString()}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 flex gap-4">
-        {/* 左侧: 地区筛选 */}
-        <Card className="w-56 shrink-0 overflow-hidden flex flex-col">
-          <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <FolderTree className="w-4 h-4 text-primary" />
-                选择地区
-              </CardTitle>
-              {selectedRegions.size > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={clearSelectedRegions}
-                >
-                  清空({selectedRegions.size})
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
-            <SimpleBar className="h-full p-2">
-              {/* 显示全部选项 */}
-              <div
-                className={`flex items-center gap-2 py-2.5 px-3 mb-2 rounded-xl text-xs border transition-all cursor-pointer
-                                          ${showAll
-                    ? "bg-primary/10 border-primary/30 text-primary"
-                    : "border-border hover:bg-accent"
-                  }`}
-                onClick={() => {
-                  setShowAll(!showAll);
-                  setPage(1);
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={showAll}
-                  onChange={() => { }}
-                  className="w-3.5 h-3.5 cursor-pointer accent-primary"
-                />
-                <span className="font-medium">显示全部数据</span>
+      {/* POI Tab */}
+      {activeTab === 'poi' && (
+        <div className="flex-1 min-h-0 flex gap-4">
+          {/* 左侧: 地区筛选 */}
+          <Card className="w-56 shrink-0 overflow-hidden flex flex-col">
+            <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <FolderTree className="w-4 h-4 text-primary" />
+                  选择地区
+                </CardTitle>
+                {selectedRegions.size > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={clearSelectedRegions}
+                  >
+                    清空({selectedRegions.size})
+                  </Button>
+                )}
               </div>
-
-              {!showAll && (
-                <div className="text-[10px] text-muted-foreground px-2 mb-2">
-                  按地区筛选（勾选上方可跳过）
+            </CardHeader>
+            <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
+              <SimpleBar className="h-full p-2">
+                {/* 显示全部选项 */}
+                <div
+                  className={`flex items-center gap-2 py-2.5 px-3 mb-2 rounded-xl text-xs border transition-all cursor-pointer
+                                          ${showAll
+                      ? "bg-primary/10 border-primary/30 text-primary"
+                      : "border-border hover:bg-accent"
+                    }`}
+                  onClick={() => {
+                    setShowAll(!showAll);
+                    setPage(1);
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showAll}
+                    onChange={() => { }}
+                    className="w-3.5 h-3.5 cursor-pointer accent-primary"
+                  />
+                  <span className="font-medium">显示全部数据</span>
                 </div>
-              )}
 
-              {provinces.map((p) => renderRegion(p))}
-            </SimpleBar>
-          </CardContent>
-        </Card>
-
-        {/* 右侧: 数据表格 */}
-        <Card className="flex-1 overflow-hidden flex flex-col">
-          {hasRegionSelected ? (
-            <>
-              <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <CardTitle className="text-base">数据预览</CardTitle>
-                    <select
-                      value={platform}
-                      onChange={(e) => setPlatform(e.target.value)}
-                      className="px-3 py-1.5 text-sm border border-input bg-background rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    >
-                      {Object.entries(platformNames).map(([key, name]) => (
-                        <option key={key} value={key}>
-                          {name}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => {
-                          setSearchQuery(e.target.value);
-                          setPage(1);
-                        }}
-                        placeholder="搜索名称或地址..."
-                        className="pl-8 pr-3 py-1.5 text-sm border border-input bg-background rounded-lg w-48
-                                                         focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      <span className="text-primary font-medium">{filteredData.length.toLocaleString()}</span> 条
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {totalPages > 1 && (
-                      <div className="flex items-center gap-1 text-sm mr-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2"
-                          onClick={() => setPage((p) => Math.max(1, p - 1))}
-                          disabled={page === 1}
-                        >
-                          上一页
-                        </Button>
-                        <span className="text-muted-foreground px-2">
-                          {page}/{totalPages}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2"
-                          onClick={() =>
-                            setPage((p) => Math.min(totalPages, p + 1))
-                          }
-                          disabled={page === totalPages}
-                        >
-                          下一页
-                        </Button>
-                      </div>
-                    )}
-                    <Button
-                      onClick={() => setShowExportDialog(true)}
-                      disabled={filteredData.length === 0}
-                      className="gradient-primary text-white border-0 hover:opacity-90"
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      导出数据
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
-                {loading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                  </div>
-                ) : filteredData.length > 0 ? (
-                  <SimpleBar className="h-full">
-                    <table className="w-full text-sm">
-                      <thead className="bg-muted/50 sticky top-0">
-                        <tr>
-                          <th className="text-left p-3 font-medium w-12">ID</th>
-                          <th className="text-left p-3 font-medium">名称</th>
-                          <th className="text-left p-3 font-medium">地址</th>
-                          <th className="text-left p-3 font-medium w-20">类别</th>
-                          <th className="text-left p-3 font-medium w-20">经度</th>
-                          <th className="text-left p-3 font-medium w-20">纬度</th>
-                          <th className="text-left p-3 font-medium w-16">平台</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pagedData.map((poi, idx) => (
-                          <tr
-                            key={poi.id}
-                            className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}
-                          >
-                            <td className="p-3 text-muted-foreground">
-                              {poi.id}
-                            </td>
-                            <td
-                              className="p-3 truncate max-w-[200px] font-medium"
-                              title={poi.name}
-                            >
-                              {poi.name}
-                            </td>
-                            <td
-                              className="p-3 truncate max-w-[200px] text-muted-foreground"
-                              title={poi.address}
-                            >
-                              {poi.address || "-"}
-                            </td>
-                            <td className="p-3 text-muted-foreground">
-                              {poi.category || "-"}
-                            </td>
-                            <td className="p-3 text-muted-foreground text-xs font-mono">
-                              {poi.lon.toFixed(4)}
-                            </td>
-                            <td className="p-3 text-muted-foreground text-xs font-mono">
-                              {poi.lat.toFixed(4)}
-                            </td>
-                            <td className="p-3">
-                              <span className={`px-2 py-0.5 rounded-full text-xs ${platformColors[poi.platform] || 'bg-muted text-muted-foreground'}`}>
-                                {platformNames[poi.platform]?.substring(0, 2) ||
-                                  poi.platform}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </SimpleBar>
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
-                    <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
-                    <p className="font-medium">所选地区暂无匹配数据</p>
-                    <p className="text-xs mt-1">请尝试选择其他地区或平台</p>
+                {!showAll && (
+                  <div className="text-[10px] text-muted-foreground px-2 mb-2">
+                    按地区筛选（勾选上方可跳过）
                   </div>
                 )}
-              </CardContent>
-            </>
-          ) : (
-            <CardContent className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
-              <div className="w-20 h-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-                <MapPin className="w-10 h-10 opacity-30" />
-              </div>
-              <p className="text-lg font-medium mb-2">请先选择地区</p>
-              <p className="text-sm">在左侧地区列表中勾选要导出的地区</p>
+
+                {provinces.map((p) => renderRegion(p))}
+              </SimpleBar>
             </CardContent>
-          )}
-        </Card>
-      </div>
+          </Card>
+
+          {/* 右侧: 数据表格 */}
+          <Card className="flex-1 overflow-hidden flex flex-col">
+            {hasRegionSelected ? (
+              <>
+                <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <CardTitle className="text-base">数据预览</CardTitle>
+                      <select
+                        value={platform}
+                        onChange={(e) => setPlatform(e.target.value)}
+                        className="px-3 py-1.5 text-sm border border-input bg-background rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50"
+                      >
+                        {Object.entries(platformNames).map(([key, name]) => (
+                          <option key={key} value={key}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => {
+                            setSearchQuery(e.target.value);
+                            setPage(1);
+                          }}
+                          placeholder="搜索名称或地址..."
+                          className="pl-8 pr-3 py-1.5 text-sm border border-input bg-background rounded-lg w-48
+                                                         focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        <span className="text-primary font-medium">{filteredData.length.toLocaleString()}</span> 条
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {totalPages > 1 && (
+                        <div className="flex items-center gap-1 text-sm mr-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            disabled={page === 1}
+                          >
+                            上一页
+                          </Button>
+                          <span className="text-muted-foreground px-2">
+                            {page}/{totalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() =>
+                              setPage((p) => Math.min(totalPages, p + 1))
+                            }
+                            disabled={page === totalPages}
+                          >
+                            下一页
+                          </Button>
+                        </div>
+                      )}
+                      <Button
+                        onClick={() => setShowExportDialog(true)}
+                        disabled={filteredData.length === 0}
+                        className="gradient-primary text-white border-0 hover:opacity-90"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        导出数据
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
+                  {loading ? (
+                    <div className="flex items-center justify-center h-32">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                    </div>
+                  ) : filteredData.length > 0 ? (
+                    <SimpleBar className="h-full">
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/50 sticky top-0">
+                          <tr>
+                            <th className="text-left p-3 font-medium w-12">ID</th>
+                            <th className="text-left p-3 font-medium">名称</th>
+                            <th className="text-left p-3 font-medium">地址</th>
+                            <th className="text-left p-3 font-medium w-20">类别</th>
+                            <th className="text-left p-3 font-medium w-20">经度</th>
+                            <th className="text-left p-3 font-medium w-20">纬度</th>
+                            <th className="text-left p-3 font-medium w-16">平台</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pagedData.map((poi, idx) => (
+                            <tr
+                              key={poi.id}
+                              className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}
+                            >
+                              <td className="p-3 text-muted-foreground">
+                                {poi.id}
+                              </td>
+                              <td
+                                className="p-3 truncate max-w-[200px] font-medium"
+                                title={poi.name}
+                              >
+                                {poi.name}
+                              </td>
+                              <td
+                                className="p-3 truncate max-w-[200px] text-muted-foreground"
+                                title={poi.address}
+                              >
+                                {poi.address || "-"}
+                              </td>
+                              <td className="p-3 text-muted-foreground">
+                                {poi.category || "-"}
+                              </td>
+                              <td className="p-3 text-muted-foreground text-xs font-mono">
+                                {poi.lon.toFixed(4)}
+                              </td>
+                              <td className="p-3 text-muted-foreground text-xs font-mono">
+                                {poi.lat.toFixed(4)}
+                              </td>
+                              <td className="p-3">
+                                <span className={`px-2 py-0.5 rounded-full text-xs ${platformColors[poi.platform] || 'bg-muted text-muted-foreground'}`}>
+                                  {platformNames[poi.platform]?.substring(0, 2) ||
+                                    poi.platform}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </SimpleBar>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+                      <AlertCircle className="w-8 h-8 mb-2 opacity-50" />
+                      <p className="font-medium">所选地区暂无匹配数据</p>
+                      <p className="text-xs mt-1">请尝试选择其他地区或平台</p>
+                    </div>
+                  )}
+                </CardContent>
+              </>
+            ) : (
+              <CardContent className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
+                <div className="w-20 h-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
+                  <MapPin className="w-10 h-10 opacity-30" />
+                </div>
+                <p className="text-lg font-medium mb-2">请先选择地区</p>
+                <p className="text-sm">在左侧地区列表中勾选要导出的地区</p>
+              </CardContent>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* Buoy Tab */}
+      {activeTab === 'buoy' && (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <Card className="flex-1 overflow-hidden flex flex-col">
+            <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-blue-500/10 to-transparent">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Ship className="w-4 h-4 text-blue-500" />
+                    航标数据
+                  </CardTitle>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      type="text"
+                      value={buoySearch}
+                      onChange={(e) => { setBuoySearch(e.target.value); setBuoyPage(1); }}
+                      placeholder="搜索名称/ID/类型..."
+                      className="pl-8 pr-3 py-1.5 text-sm border border-input bg-background rounded-lg w-48 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    />
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    <span className="text-blue-500 font-medium">{filteredBuoyData.length.toLocaleString()}</span> 条
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {buoyTotalPages > 1 && (
+                    <div className="flex items-center gap-1 text-sm mr-2">
+                      <Button variant="outline" size="sm" className="h-7 px-2"
+                        onClick={() => setBuoyPage(p => Math.max(1, p - 1))} disabled={buoyPage === 1}>
+                        上一页
+                      </Button>
+                      <span className="text-muted-foreground px-2">{buoyPage}/{buoyTotalPages}</span>
+                      <Button variant="outline" size="sm" className="h-7 px-2"
+                        onClick={() => setBuoyPage(p => Math.min(buoyTotalPages, p + 1))} disabled={buoyPage === buoyTotalPages}>
+                        下一页
+                      </Button>
+                    </div>
+                  )}
+                  <Button variant="outline" disabled={buoyExporting || buoyCount === 0}
+                    onClick={() => handleBuoyExport('json')}>
+                    {buoyExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileJson className="w-4 h-4 mr-2" />}
+                    JSON
+                  </Button>
+                  <Button className="gradient-primary text-white border-0 hover:opacity-90"
+                    disabled={buoyExporting || buoyCount === 0}
+                    onClick={() => handleBuoyExport('csv')}>
+                    {buoyExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                    导出 CSV
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
+              {buoyData.length > 0 ? (
+                <SimpleBar className="h-full">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-3 font-medium">名称</th>
+                        <th className="text-left p-3 font-medium w-28">所属航道</th>
+                        <th className="text-left p-3 font-medium w-20">地区</th>
+                        <th className="text-left p-3 font-medium w-24">经度</th>
+                        <th className="text-left p-3 font-medium w-24">纬度</th>
+                        <th className="text-left p-3 font-medium w-20">形状</th>
+                        <th className="text-left p-3 font-medium w-28">灯质</th>
+                        <th className="text-left p-3 font-medium w-16">颜色</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedBuoyData.map((buoy, idx) => (
+                        <tr key={buoy.id}
+                          className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}>
+                          <td className="p-3 font-medium truncate max-w-[200px]" title={buoy.name || ''}>
+                            {buoy.name || '-'}
+                          </td>
+                          <td className="p-3 text-xs truncate max-w-[140px]" title={buoy.waterway || ''}>
+                            {buoy.waterway ? (
+                              <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600">{buoy.waterway}</span>
+                            ) : '-'}
+                          </td>
+                          <td className="p-3 text-xs">
+                            {buoy.region ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">{buoy.region}</span>
+                            ) : '-'}
+                          </td>
+                          <td className="p-3 text-muted-foreground text-xs font-mono">
+                            {buoy.lon_84?.toFixed(6) || '-'}
+                          </td>
+                          <td className="p-3 text-muted-foreground text-xs font-mono">
+                            {buoy.lat_84?.toFixed(6) || '-'}
+                          </td>
+                          <td className="p-3 text-xs text-muted-foreground">
+                            {buoy.shape || '-'}
+                          </td>
+                          <td className="p-3 text-xs truncate max-w-[140px]" title={buoy.light_info || ''}>
+                            {buoy.light_info || '-'}
+                          </td>
+                          <td className="p-3">
+                            {buoy.color ? (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-muted">
+                                {buoy.color}
+                              </span>
+                            ) : '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </SimpleBar>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+                  <Anchor className="w-8 h-8 mb-2 opacity-50" />
+                  <p className="font-medium">暂无航标数据</p>
+                  <p className="text-xs mt-1">请先在航道图采集页面采集航标</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* 导出弹框 */}
       <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>

@@ -109,6 +109,7 @@ const platformNames: Record<string, string> = {
     osm: 'OpenStreetMap',
     arcgis: 'ArcGIS',
     bing: 'Bing地图',
+    cjhy: '长江航道图',
 };
 
 // 地图类型名称映射
@@ -119,6 +120,13 @@ const mapTypeNames: Record<string, string> = {
     terrain: '地形图',
     roadnet: '路网图',
     annotation: '注记图',
+};
+
+// 航道图图层名称映射
+const chartLayerNames: Record<string, string> = {
+    street: '底图 (一张图)',
+    satellite: '水域 (手动)',
+    terrain: '水深',
 };
 
 // 状态名称和颜色
@@ -182,8 +190,11 @@ export default function TileDownloader() {
         if (platforms.length === 0) return;
         const selectedPlatform = platforms.find((p) => p.id === platform);
         if (selectedPlatform && !selectedPlatform.map_types.includes(mapType)) {
-            // 当前地图类型不被新平台支持，切换到第一个支持的类型
             setMapType(selectedPlatform.map_types[0] || 'street');
+        }
+        // 航道图平台时调整默认缩放级别
+        if (platform === 'cjhy') {
+            setZoomLevels([4, 5, 6, 7, 8, 9, 10]);
         }
         // 自动加载已保存的 API Key
         if (selectedPlatform?.requires_key) {
@@ -237,11 +248,11 @@ export default function TileDownloader() {
     // 计算瓦片估算
     useEffect(() => {
         if (bounds.north > bounds.south && bounds.east > bounds.west && zoomLevels.length > 0) {
-            invoke<TileEstimate>('calculate_tiles_count', { bounds, zoomLevels }).then(
+            invoke<TileEstimate>('calculate_tiles_count', { bounds, zoomLevels, platform }).then(
                 setEstimate
             );
         }
-    }, [bounds, zoomLevels]);
+    }, [bounds, zoomLevels, platform]);
 
     // 创建任务
     const handleCreateTask = async () => {
@@ -412,6 +423,7 @@ export default function TileDownloader() {
     // 获取当前平台支持的地图类型
     const currentPlatform = platforms.find((p) => p.id === platform);
     const availableMapTypes = currentPlatform?.map_types || ['street'];
+    const isCjhy = platform === 'cjhy';
 
     // 过滤可用平台：不需要 Key 或已配置 Key 的平台
     const availablePlatforms = platforms.filter((p) => {
@@ -485,7 +497,7 @@ export default function TileDownloader() {
                                         </div>
 
                                         <div className="space-y-2">
-                                            <Label>地图类型</Label>
+                                            <Label>{isCjhy ? '图层类型' : '地图类型'}</Label>
                                             <Select value={mapType} onValueChange={setMapType}>
                                                 <SelectTrigger className="h-9">
                                                     <SelectValue />
@@ -493,7 +505,7 @@ export default function TileDownloader() {
                                                 <SelectContent>
                                                     {availableMapTypes.map((t) => (
                                                         <SelectItem key={t} value={t}>
-                                                            {mapTypeNames[t] || t}
+                                                            {isCjhy ? (chartLayerNames[t] || t) : (mapTypeNames[t] || t)}
                                                         </SelectItem>
                                                     ))}
                                                 </SelectContent>

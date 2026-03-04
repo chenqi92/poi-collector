@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw, HardDrive, Shield } from 'lucide-react';
+import { save } from '@tauri-apps/plugin-dialog';
+import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw, HardDrive, Shield, Ship, Anchor, FileJson, FileSpreadsheet, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
 import SimpleBar from 'simplebar-react';
 
@@ -13,17 +14,54 @@ interface Region {
     parent_code: string | null;
 }
 
+interface BuoyInfo {
+    id: string;
+    name: string | null;
+    lon_84: number | null;
+    lat_84: number | null;
+    buoy_type: string | null;
+    icon_url: string | null;
+    organization_id: string | null;
+    color: string | null;
+    waterway: string | null;
+    shape: string | null;
+    light_info: string | null;
+    region: string | null;
+    raw_json: string;
+}
+
 export default function DataManagement() {
     const { success, error: showError } = useToast();
     const [loading, setLoading] = useState(false);
     const [stats, setStats] = useState<[string, number][]>([]);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [regionNames, setRegionNames] = useState<Map<string, string>>(new Map());
+    const [buoyCount, setBuoyCount] = useState(0);
+    const [buoyData, setBuoyData] = useState<BuoyInfo[]>([]);
+    const [buoyPage, setBuoyPage] = useState(1);
+    const [buoySearch, setBuoySearch] = useState('');
+    const buoyPageSize = 50;
 
     useEffect(() => {
         loadStats();
         loadRegionNames();
+        loadBuoyData();
     }, []);
+
+    const loadBuoyData = async () => {
+        try {
+            const count = await invoke<number>('chart_get_buoy_count');
+            setBuoyCount(count);
+            if (count > 0) {
+                const data = await invoke<BuoyInfo[]>('chart_get_all_buoys');
+                setBuoyData(data);
+            } else {
+                setBuoyData([]);
+            }
+        } catch (e) {
+            console.error('加载航标数据失败:', e);
+        }
+    };
 
     const loadRegionNames = async () => {
         try {
@@ -31,7 +69,6 @@ export default function DataManagement() {
             const names = new Map<string, string>();
             provinces.forEach(p => names.set(p.code, p.name));
 
-            // 加载所有市县的名称
             for (const province of provinces) {
                 try {
                     const cities = await invoke<Region[]>('get_region_children', { parentCode: province.code });
@@ -53,7 +90,6 @@ export default function DataManagement() {
     const loadStats = async () => {
         setLoading(true);
         try {
-            // 先修复 region_code
             await invoke<[number, number]>('fix_region_codes');
             const data = await invoke<[string, number][]>('get_poi_stats_by_region');
             setStats(data);
@@ -76,14 +112,9 @@ export default function DataManagement() {
 
     const deleteSelected = async () => {
         if (selected.size === 0) return;
-
         const codes = Array.from(selected);
         const names = codes.map(c => regionNames.get(c) || c).join(', ');
-
-        if (!confirm(`确定要删除以下地区的所有数据吗？\n\n${names}\n\n此操作不可撤销！`)) {
-            return;
-        }
-
+        if (!confirm(`确定要删除以下地区的所有数据吗？\n\n${names}\n\n此操作不可撤销！`)) return;
         try {
             const count = await invoke<number>('delete_poi_by_regions', { codes });
             success('删除成功', `已删除 ${count.toLocaleString()} 条数据`);
@@ -96,10 +127,7 @@ export default function DataManagement() {
 
     const deleteRegion = async (code: string) => {
         const name = regionNames.get(code) || code;
-        if (!confirm(`确定要删除 ${name} 的所有数据吗？\n\n此操作不可撤销！`)) {
-            return;
-        }
-
+        if (!confirm(`确定要删除 ${name} 的所有数据吗？\n\n此操作不可撤销！`)) return;
         try {
             const count = await invoke<number>('delete_poi_by_regions', { codes: [code] });
             success('删除成功', `已删除 ${count.toLocaleString()} 条数据`);
@@ -110,13 +138,8 @@ export default function DataManagement() {
     };
 
     const clearAll = async () => {
-        if (!confirm('⚠️ 危险操作！\n\n确定要清空所有 POI 数据吗？\n\n此操作将删除所有已采集的数据，不可撤销！')) {
-            return;
-        }
-        if (!confirm('再次确认：您真的要删除全部数据吗？')) {
-            return;
-        }
-
+        if (!confirm('⚠️ 危险操作！\n\n确定要清空所有 POI 数据吗？\n\n此操作将删除所有已采集的数据，不可撤销！')) return;
+        if (!confirm('再次确认：您真的要删除全部数据吗？')) return;
         try {
             const count = await invoke<number>('clear_all_poi');
             success('清空成功', `已删除 ${count.toLocaleString()} 条数据`);
@@ -135,98 +158,98 @@ export default function DataManagement() {
         'from-orange-500 to-orange-400'
     ];
 
+    // 航标过滤和分页
+    const filteredBuoys = buoySearch.trim()
+        ? buoyData.filter(b =>
+            (b.name || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
+            b.id.toLowerCase().includes(buoySearch.toLowerCase()) ||
+            (b.buoy_type || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
+            (b.waterway || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
+            (b.region || '').toLowerCase().includes(buoySearch.toLowerCase())
+        )
+        : buoyData;
+    const buoyTotalPages = Math.ceil(filteredBuoys.length / buoyPageSize);
+    const pagedBuoys = filteredBuoys.slice((buoyPage - 1) * buoyPageSize, buoyPage * buoyPageSize);
+
     return (
         <div className="h-full flex flex-col gap-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">数据管理</h1>
-                    <p className="text-muted-foreground">管理已采集的 POI 数据</p>
+                    <p className="text-muted-foreground">管理已采集的 POI 和航标数据</p>
                 </div>
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 border border-primary/20">
                         <HardDrive className="w-4 h-4 text-primary" />
-                        <span className="text-sm font-medium text-primary">{totalCount.toLocaleString()} 条记录</span>
+                        <span className="text-sm font-medium text-primary">POI {totalCount.toLocaleString()}</span>
                     </div>
-                    <Button variant="outline" onClick={loadStats} disabled={loading} className="hover-lift">
+                    <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                        <Anchor className="w-4 h-4 text-blue-500" />
+                        <span className="text-sm font-medium text-blue-500">航标 {buoyCount.toLocaleString()}</span>
+                    </div>
+                    <Button variant="outline" onClick={() => { loadStats(); loadBuoyData(); }} disabled={loading} className="hover-lift">
                         <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                         刷新
                     </Button>
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* 上半部分: POI + 操作 */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 shrink-0" style={{ maxHeight: '45%' }}>
                 {/* POI 数据统计 */}
-                <Card className="overflow-hidden flex flex-col">
-                    <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
+                <Card className="overflow-hidden flex flex-col lg:col-span-2">
+                    <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent py-3">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                                    <Database className="w-4 h-4 text-primary" />
+                                <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center">
+                                    <Database className="w-3.5 h-3.5 text-primary" />
                                 </div>
-                                <CardTitle>POI 数据</CardTitle>
+                                <CardTitle className="text-sm">POI 数据</CardTitle>
                             </div>
-                            <span className="text-sm text-muted-foreground">
-                                共 <span className="font-medium text-primary">{stats.length}</span> 个地区
-                            </span>
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs text-muted-foreground">{stats.length} 个地区</span>
+                                {selected.size > 0 && (
+                                    <Button variant="destructive" size="sm" className="h-7 text-xs" onClick={deleteSelected}>
+                                        <Trash2 className="w-3 h-3 mr-1" />
+                                        删除 ({selected.size})
+                                    </Button>
+                                )}
+                            </div>
                         </div>
-                        <CardDescription>按采集地区分组显示</CardDescription>
                     </CardHeader>
                     <CardContent className="flex-1 min-h-0 p-0">
-                        <SimpleBar className="h-full p-4">
+                        <SimpleBar className="h-full p-3">
                             {stats.length === 0 ? (
                                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                                    <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
-                                        <FolderTree className="w-8 h-8 opacity-30" />
-                                    </div>
-                                    <p className="font-medium">暂无采集数据</p>
-                                    <p className="text-sm mt-1">开始采集后将在此显示</p>
+                                    <FolderTree className="w-8 h-8 opacity-30 mb-2" />
+                                    <p className="text-sm">暂无 POI 数据</p>
                                 </div>
                             ) : (
-                                <div className="space-y-2">
+                                <div className="space-y-1.5">
                                     {stats.map(([code, count], index) => {
                                         const isSelected = selected.has(code);
                                         const percent = totalCount > 0 ? (count / totalCount) * 100 : 0;
                                         return (
                                             <div
                                                 key={code}
-                                                className={`p-3 rounded-xl border transition-all cursor-pointer hover-lift
+                                                className={`p-2.5 rounded-lg border transition-all cursor-pointer
                                                       ${isSelected ? 'bg-primary/10 border-primary/30' : 'border-border/50 hover:bg-accent/50'}`}
                                                 onClick={() => toggleSelect(code)}
                                             >
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <div className="flex items-center gap-3">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isSelected}
-                                                            onChange={() => { }}
-                                                            className="w-4 h-4 cursor-pointer accent-primary"
-                                                        />
-                                                        <div>
-                                                            <div className="font-medium">
-                                                                {regionNames.get(code) || code}
-                                                            </div>
-                                                            <div className="text-xs text-muted-foreground">
-                                                                {code} · {count.toLocaleString()} 条 ({percent.toFixed(1)}%)
-                                                            </div>
-                                                        </div>
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <input type="checkbox" checked={isSelected} onChange={() => { }} className="w-3.5 h-3.5 accent-primary" />
+                                                        <span className="text-sm font-medium">{regionNames.get(code) || code}</span>
+                                                        <span className="text-xs text-muted-foreground">{count.toLocaleString()} 条</span>
                                                     </div>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            deleteRegion(code);
-                                                        }}
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
+                                                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                        onClick={(e) => { e.stopPropagation(); deleteRegion(code); }}>
+                                                        <Trash2 className="w-3 h-3" />
                                                     </Button>
                                                 </div>
-                                                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                                    <div
-                                                        className={`h-full rounded-full bg-gradient-to-r ${gradients[index % gradients.length]} transition-all duration-500`}
-                                                        style={{ width: `${percent}%` }}
-                                                    />
+                                                <div className="h-1 bg-muted rounded-full overflow-hidden">
+                                                    <div className={`h-full rounded-full bg-gradient-to-r ${gradients[index % gradients.length]}`}
+                                                        style={{ width: `${percent}%` }} />
                                                 </div>
                                             </div>
                                         );
@@ -239,68 +262,180 @@ export default function DataManagement() {
 
                 {/* 操作面板 */}
                 <Card className="overflow-hidden flex flex-col">
-                    <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-amber-500/10 to-transparent">
+                    <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-amber-500/10 to-transparent py-3">
                         <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
-                                <Shield className="w-4 h-4 text-amber-500" />
+                            <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                                <Shield className="w-3.5 h-3.5 text-amber-500" />
                             </div>
-                            <CardTitle>数据操作</CardTitle>
+                            <CardTitle className="text-sm">数据操作</CardTitle>
                         </div>
-                        <CardDescription>批量删除和清空操作</CardDescription>
                     </CardHeader>
-                    <CardContent className="flex-1 p-4 space-y-6">
-                        {/* 批量删除 */}
-                        <div className="p-4 border border-border/50 rounded-xl bg-muted/20">
-                            <h3 className="font-medium mb-2 flex items-center gap-2">
-                                <Trash2 className="w-4 h-4 text-muted-foreground" />
-                                批量删除
-                            </h3>
-                            <p className="text-sm text-muted-foreground mb-4">
-                                在左侧勾选要删除的地区，然后点击删除按钮
-                            </p>
-                            <Button
-                                variant="destructive"
-                                disabled={selected.size === 0}
-                                onClick={deleteSelected}
-                                className="w-full"
-                            >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                删除选中 ({selected.size})
-                            </Button>
-                        </div>
+                    <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
+                        <SimpleBar className="h-full p-4">
+                            <div className="space-y-4">
+                                {/* 清空 POI */}
+                                <div className="p-3 border border-destructive/30 bg-destructive/5 rounded-xl">
+                                    <h3 className="font-medium text-destructive mb-2 flex items-center gap-2 text-sm">
+                                        <AlertTriangle className="w-3.5 h-3.5" /> 清空 POI
+                                    </h3>
+                                    <Button variant="destructive" size="sm" onClick={clearAll} disabled={totalCount === 0} className="w-full">
+                                        <Trash2 className="w-3 h-3 mr-1" /> 清空全部 POI ({totalCount.toLocaleString()})
+                                    </Button>
+                                </div>
 
-                        {/* 清空全部 */}
-                        <div className="p-4 border border-destructive/30 bg-destructive/5 rounded-xl">
-                            <h3 className="font-medium text-destructive mb-2 flex items-center gap-2">
-                                <AlertTriangle className="w-4 h-4" />
-                                危险区域
-                            </h3>
-                            <p className="text-sm text-muted-foreground mb-4">
-                                清空所有 POI 数据。此操作不可撤销，请谨慎操作！
-                            </p>
-                            <Button
-                                variant="destructive"
-                                onClick={clearAll}
-                                disabled={totalCount === 0}
-                                className="w-full"
-                            >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                清空全部数据
-                            </Button>
-                        </div>
-
-                        {/* 预留: 瓦片管理 */}
-                        <div className="p-4 border border-dashed border-border rounded-xl bg-muted/10">
-                            <h3 className="font-medium text-muted-foreground mb-2 flex items-center gap-2">
-                                🗺️ 地图瓦片管理
-                            </h3>
-                            <p className="text-sm text-muted-foreground">
-                                功能开发中，敬请期待...
-                            </p>
-                        </div>
+                                {/* 航标操作 */}
+                                <div className="p-3 border border-blue-500/30 bg-blue-500/5 rounded-xl">
+                                    <h3 className="font-medium mb-2 flex items-center gap-2 text-sm">
+                                        <Ship className="w-3.5 h-3.5 text-blue-500" /> 航标操作
+                                    </h3>
+                                    <div className="space-y-2">
+                                        <div className="flex gap-2">
+                                            <Button variant="outline" size="sm" className="flex-1" disabled={buoyCount === 0}
+                                                onClick={async () => {
+                                                    try {
+                                                        const filePath = await save({ defaultPath: 'buoys.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+                                                        if (!filePath) return;
+                                                        const result = await invoke<string>('chart_export_buoys', { format: 'json', outputPath: filePath });
+                                                        success('导出成功', result);
+                                                    } catch (e) { showError('导出失败', String(e)); }
+                                                }}>
+                                                <FileJson className="w-3 h-3 mr-1" /> JSON
+                                            </Button>
+                                            <Button variant="outline" size="sm" className="flex-1" disabled={buoyCount === 0}
+                                                onClick={async () => {
+                                                    try {
+                                                        const filePath = await save({ defaultPath: 'buoys.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] });
+                                                        if (!filePath) return;
+                                                        const result = await invoke<string>('chart_export_buoys', { format: 'csv', outputPath: filePath });
+                                                        success('导出成功', result);
+                                                    } catch (e) { showError('导出失败', String(e)); }
+                                                }}>
+                                                <FileSpreadsheet className="w-3 h-3 mr-1" /> CSV
+                                            </Button>
+                                        </div>
+                                        <Button variant="destructive" size="sm" className="w-full" disabled={buoyCount === 0}
+                                            onClick={async () => {
+                                                if (!confirm('确定要清空所有航标数据吗？\n\n此操作不可撤销！')) return;
+                                                try {
+                                                    await invoke('chart_clear_buoys');
+                                                    success('清空成功', '航标数据已清空');
+                                                    loadBuoyData();
+                                                } catch (e) { showError('清空失败', String(e)); }
+                                            }}>
+                                            <Trash2 className="w-3 h-3 mr-1" /> 清空航标 ({buoyCount.toLocaleString()})
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        </SimpleBar>
                     </CardContent>
                 </Card>
             </div>
+
+            {/* 下半部分: 航标数据表格 */}
+            <Card className="flex-1 min-h-0 overflow-hidden flex flex-col">
+                <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-blue-500/10 to-transparent py-3 px-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                                <Anchor className="w-3.5 h-3.5 text-blue-500" />
+                            </div>
+                            <CardTitle className="text-sm">航标数据</CardTitle>
+                            <div className="relative">
+                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                                <input
+                                    type="text"
+                                    value={buoySearch}
+                                    onChange={(e) => { setBuoySearch(e.target.value); setBuoyPage(1); }}
+                                    placeholder="搜索名称/ID/类型..."
+                                    className="pl-8 pr-3 py-1 text-xs border border-input bg-background rounded-lg w-48 focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                />
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                                <span className="text-blue-500 font-medium">{filteredBuoys.length.toLocaleString()}</span> 条
+                            </span>
+                        </div>
+                        {buoyTotalPages > 1 && (
+                            <div className="flex items-center gap-1 text-xs">
+                                <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
+                                    onClick={() => setBuoyPage(p => Math.max(1, p - 1))} disabled={buoyPage === 1}>
+                                    上一页
+                                </Button>
+                                <span className="text-muted-foreground px-2">{buoyPage}/{buoyTotalPages}</span>
+                                <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
+                                    onClick={() => setBuoyPage(p => Math.min(buoyTotalPages, p + 1))} disabled={buoyPage === buoyTotalPages}>
+                                    下一页
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                </CardHeader>
+                <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
+                    {buoyData.length > 0 ? (
+                        <SimpleBar className="h-full">
+                            <table className="w-full text-sm">
+                                <thead className="bg-muted/50 sticky top-0">
+                                    <tr>
+                                        <th className="text-left p-2.5 font-medium text-xs">名称</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-24">所属航道</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-16">地区</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-20">经度</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-20">纬度</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-16">形状</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-24">灯质</th>
+                                        <th className="text-left p-2.5 font-medium text-xs w-16">颜色</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {pagedBuoys.map((buoy, idx) => (
+                                        <tr key={buoy.id}
+                                            className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}>
+                                            <td className="p-2.5 font-medium truncate max-w-[180px]" title={buoy.name || ''}>
+                                                {buoy.name || '-'}
+                                            </td>
+                                            <td className="p-2.5 text-xs truncate max-w-[120px]" title={buoy.waterway || ''}>
+                                                {buoy.waterway ? (
+                                                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600">{buoy.waterway}</span>
+                                                ) : '-'}
+                                            </td>
+                                            <td className="p-2.5 text-xs">
+                                                {buoy.region ? (
+                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">{buoy.region}</span>
+                                                ) : '-'}
+                                            </td>
+                                            <td className="p-2.5 text-muted-foreground text-xs font-mono">
+                                                {buoy.lon_84?.toFixed(6) || '-'}
+                                            </td>
+                                            <td className="p-2.5 text-muted-foreground text-xs font-mono">
+                                                {buoy.lat_84?.toFixed(6) || '-'}
+                                            </td>
+                                            <td className="p-2.5 text-xs text-muted-foreground">
+                                                {buoy.shape || '-'}
+                                            </td>
+                                            <td className="p-2.5 text-xs truncate max-w-[120px]" title={buoy.light_info || ''}>
+                                                {buoy.light_info || '-'}
+                                            </td>
+                                            <td className="p-2.5">
+                                                {buoy.color ? (
+                                                    <span className="px-2 py-0.5 rounded-full text-xs bg-muted">
+                                                        {buoy.color}
+                                                    </span>
+                                                ) : '-'}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </SimpleBar>
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
+                            <Anchor className="w-8 h-8 opacity-30 mb-2" />
+                            <p className="text-sm">暂无航标数据</p>
+                            <p className="text-xs mt-1">请先在航道图采集页面采集航标</p>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

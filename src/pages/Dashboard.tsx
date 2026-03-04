@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Database, MapPin, Globe, BarChart3, Loader2, Map, TrendingUp } from 'lucide-react';
+import { Database, MapPin, Globe, BarChart3, Loader2, Map, TrendingUp, Anchor, Ship } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import SimpleBar from 'simplebar-react';
 
@@ -29,10 +29,13 @@ export default function Dashboard() {
     const [regionStats, setRegionStats] = useState<[string, number][]>([]);
     const [regionNames, setRegionNames] = useState<Record<string, string>>({});
     const [loading, setLoading] = useState(true);
+    const [buoyCount, setBuoyCount] = useState(0);
+    const [buoyStats, setBuoyStats] = useState<[string, number][]>([]);
 
     useEffect(() => {
         loadStats();
         loadRegionStats();
+        loadBuoyStats();
     }, []);
 
     const loadStats = async () => {
@@ -43,6 +46,17 @@ export default function Dashboard() {
             console.error('加载统计失败:', e);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const loadBuoyStats = async () => {
+        try {
+            const count = await invoke<number>('chart_get_buoy_count');
+            setBuoyCount(count);
+            const typeStats = await invoke<[string, number][]>('chart_get_buoy_stats');
+            setBuoyStats(typeStats);
+        } catch (e) {
+            console.error('加载航标统计失败:', e);
         }
     };
 
@@ -309,6 +323,69 @@ export default function Dashboard() {
                                 </div>
                             </CardContent>
                         </Card>
+                    )}
+
+                    {/* 航道图数据 */}
+                    {buoyCount > 0 && (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {/* 航标统计卡片 */}
+                            <Card className="overflow-hidden">
+                                <CardHeader className="border-b border-border/50 bg-gradient-to-r from-blue-500/10 to-transparent">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <CardTitle className="flex items-center gap-2">
+                                                <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                                                    <Ship className="w-4 h-4 text-blue-500" />
+                                                </div>
+                                                航道图数据
+                                            </CardTitle>
+                                            <CardDescription className="mt-1">
+                                                航标采集统计
+                                            </CardDescription>
+                                        </div>
+                                        <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 rounded-lg">
+                                            <Anchor className="w-4 h-4 text-blue-500" />
+                                            <span className="text-sm font-bold text-blue-500">{buoyCount.toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </CardHeader>
+                                <CardContent className="p-0">
+                                    {buoyStats.length > 0 ? (
+                                        <SimpleBar className="max-h-60 p-4">
+                                            <div className="space-y-3">
+                                                {buoyStats.map(([type_name, count]) => {
+                                                    const maxCount = buoyStats[0]?.[1] || 1;
+                                                    const percent = (count / maxCount) * 100;
+                                                    return (
+                                                        <div key={type_name}>
+                                                            <div className="flex items-center justify-between mb-1.5">
+                                                                <span className="text-sm font-medium truncate flex-1 mr-2">
+                                                                    {type_name}
+                                                                </span>
+                                                                <span className="text-sm font-semibold">
+                                                                    {count.toLocaleString()}
+                                                                </span>
+                                                            </div>
+                                                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                                                <div
+                                                                    className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-700"
+                                                                    style={{ width: `${percent}%` }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </SimpleBar>
+                                    ) : (
+                                        <div className="text-muted-foreground text-center py-8">
+                                            <Anchor className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                            <p>暂无分类数据</p>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </div>
                     )}
                 </div>
             </SimpleBar>

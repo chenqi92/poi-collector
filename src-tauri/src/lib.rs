@@ -1,3 +1,4 @@
+mod chart_collector;
 mod collectors;
 mod commands;
 mod config;
@@ -6,6 +7,7 @@ mod database;
 mod regions;
 mod tile_downloader;
 
+use chart_collector::commands as chart_commands;
 use commands::*;
 use tile_downloader::boundaries;
 use tile_downloader::commands as tile_commands;
@@ -67,6 +69,21 @@ pub fn run() {
             tile_proxy::proxy_tile_request,
             boundaries::get_region_boundary,
             boundaries::clear_boundary_cache,
+            // 航道图采集
+            chart_commands::chart_estimate_tiles,
+            chart_commands::chart_start_buoy_collection,
+            chart_commands::chart_start_tile_download,
+            chart_commands::chart_stop_collection,
+            chart_commands::chart_get_status,
+            chart_commands::chart_get_buoys,
+            chart_commands::chart_get_buoy_count,
+            chart_commands::chart_clear_buoys,
+            chart_commands::chart_compose_image,
+            chart_commands::chart_get_default_bounds,
+            chart_commands::chart_reset_status,
+            chart_commands::chart_export_buoys,
+            chart_commands::chart_get_buoy_stats,
+            chart_commands::chart_get_all_buoys,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

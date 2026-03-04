@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// 计算经纬度边界内指定层级的所有瓦片坐标
+/// 计算经纬度边界内指定层级的所有瓦片坐标 (Web Mercator)
 pub fn calculate_tiles(bounds: &Bounds, zoom_levels: &[u32]) -> Vec<TileCoord> {
     let mut tiles = Vec::new();
 
@@ -40,7 +40,55 @@ pub fn calculate_tiles(bounds: &Bounds, zoom_levels: &[u32]) -> Vec<TileCoord> {
     tiles
 }
 
-/// 计算瓦片数量估算
+/// ArcGIS WGS84 (4326) 切片方案的 LOD 分辨率表
+const LOD_RESOLUTIONS: [f64; 14] = [
+    0.023794610058302804,  // level 0
+    0.00951784402332112,   // level 1
+    0.00475892201166056,   // level 2
+    0.00237946100583028,   // level 3
+    0.00118973050291514,   // level 4
+    5.9486525145757E-4,    // level 5
+    2.97432625728785E-4,   // level 6
+    1.487163128643925E-4,  // level 7
+    7.435815643219625E-5,  // level 8
+    3.7179078216098126E-5, // level 9
+    1.859072883855198E-5,  // level 10
+    9.294174688773075E-6,  // level 11
+    4.647087344386537E-6,  // level 12
+    2.37946100583028E-6,   // level 13
+];
+const TILE_ORIGIN_X: f64 = -400.0;
+const TILE_ORIGIN_Y: f64 = 400.0;
+const TILE_SIZE: f64 = 256.0;
+
+/// 计算经纬度边界内指定层级的所有瓦片坐标 (ArcGIS 4326 切片方案)
+pub fn calculate_tiles_4326(bounds: &Bounds, zoom_levels: &[u32]) -> Vec<TileCoord> {
+    let mut tiles = Vec::new();
+
+    for &z in zoom_levels {
+        let z_idx = z as usize;
+        if z_idx >= LOD_RESOLUTIONS.len() {
+            continue;
+        }
+        let res = LOD_RESOLUTIONS[z_idx];
+        let cell = res * TILE_SIZE;
+
+        let x_min = ((bounds.west - TILE_ORIGIN_X) / cell).floor() as u32;
+        let x_max = ((bounds.east - TILE_ORIGIN_X) / cell).floor() as u32;
+        let y_min = ((TILE_ORIGIN_Y - bounds.north) / cell).floor() as u32;
+        let y_max = ((TILE_ORIGIN_Y - bounds.south) / cell).floor() as u32;
+
+        for x in x_min..=x_max {
+            for y in y_min..=y_max {
+                tiles.push(TileCoord::new(z, x, y));
+            }
+        }
+    }
+
+    tiles
+}
+
+/// 计算瓦片数量估算 (Web Mercator)
 pub fn estimate_tiles(bounds: &Bounds, zoom_levels: &[u32]) -> TileEstimate {
     let mut total_tiles = 0u64;
     let mut tiles_per_level = Vec::new();
@@ -70,6 +118,37 @@ pub fn estimate_tiles(bounds: &Bounds, zoom_levels: &[u32]) -> TileEstimate {
     // 估算大小：假设每个瓦片平均 20KB
     let estimated_size_mb = (total_tiles as f64 * 20.0) / 1024.0;
 
+    TileEstimate {
+        total_tiles,
+        tiles_per_level,
+        estimated_size_mb,
+    }
+}
+
+/// 计算瓦片数量估算 (ArcGIS 4326)
+pub fn estimate_tiles_4326(bounds: &Bounds, zoom_levels: &[u32]) -> TileEstimate {
+    let mut total_tiles = 0u64;
+    let mut tiles_per_level = Vec::new();
+
+    for &z in zoom_levels {
+        let z_idx = z as usize;
+        if z_idx >= LOD_RESOLUTIONS.len() {
+            continue;
+        }
+        let res = LOD_RESOLUTIONS[z_idx];
+        let cell = res * TILE_SIZE;
+
+        let x_min = ((bounds.west - TILE_ORIGIN_X) / cell).floor() as u32;
+        let x_max = ((bounds.east - TILE_ORIGIN_X) / cell).floor() as u32;
+        let y_min = ((TILE_ORIGIN_Y - bounds.north) / cell).floor() as u32;
+        let y_max = ((TILE_ORIGIN_Y - bounds.south) / cell).floor() as u32;
+
+        let count = ((x_max - x_min + 1) as u64) * ((y_max - y_min + 1) as u64);
+        tiles_per_level.push((z, count));
+        total_tiles += count;
+    }
+
+    let estimated_size_mb = (total_tiles as f64 * 20.0) / 1024.0;
     TileEstimate {
         total_tiles,
         tiles_per_level,
@@ -132,7 +211,9 @@ impl TileDownloader {
     /// 创建任务状态
     pub fn create_state(&self, task_id: &str, thread_count: u32) -> Arc<DownloaderState> {
         let state = Arc::new(DownloaderState::new(thread_count));
-        self.states.write().insert(task_id.to_string(), state.clone());
+        self.states
+            .write()
+            .insert(task_id.to_string(), state.clone());
         state
     }
 
@@ -159,7 +240,11 @@ impl TileDownloader {
         let state = self.create_state(&task_id, thread_count);
 
         // 计算所有瓦片
-        let tiles = calculate_tiles(&bounds, &zoom_levels);
+        let tiles = if platform.uses_custom_4326_scheme() {
+            calculate_tiles_4326(&bounds, &zoom_levels)
+        } else {
+            calculate_tiles(&bounds, &zoom_levels)
+        };
         let total_tiles = tiles.len() as u64;
 
         log::info!(
@@ -286,7 +371,8 @@ impl TileDownloader {
                 .await;
 
             // 更新数据库进度
-            db.update_task_progress(&task_id_clone, completed, failed).ok();
+            db.update_task_progress(&task_id_clone, completed, failed)
+                .ok();
 
             // 短暂休息
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -308,7 +394,8 @@ impl TileDownloader {
             db.update_task_status(&task_id_clone, "completed").ok();
         }
 
-        db.update_task_progress(&task_id_clone, completed, failed).ok();
+        db.update_task_progress(&task_id_clone, completed, failed)
+            .ok();
 
         // 发送完成事件
         let _ = progress_tx
@@ -374,7 +461,9 @@ impl TileDownloader {
     /// 设置线程数
     pub fn set_thread_count(&self, task_id: &str, count: u32) -> bool {
         if let Some(state) = self.get_state(task_id) {
-            state.thread_count.store(count.max(1).min(32), Ordering::SeqCst);
+            state
+                .thread_count
+                .store(count.max(1).min(32), Ordering::SeqCst);
             true
         } else {
             false

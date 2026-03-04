@@ -1,5 +1,7 @@
 use super::database::TileDatabase;
-use super::downloader::{calculate_tiles, estimate_tiles, TileDownloader};
+use super::downloader::{
+    calculate_tiles, calculate_tiles_4326, estimate_tiles, estimate_tiles_4326, TileDownloader,
+};
 use super::platforms::{create_platform, get_all_platforms};
 use super::storage::create_storage;
 use super::types::*;
@@ -41,8 +43,16 @@ pub fn get_tile_platforms() -> Vec<PlatformInfo> {
 
 /// 计算瓦片数量
 #[tauri::command]
-pub fn calculate_tiles_count(bounds: Bounds, zoom_levels: Vec<u32>) -> TileEstimate {
-    estimate_tiles(&bounds, &zoom_levels)
+pub fn calculate_tiles_count(
+    bounds: Bounds,
+    zoom_levels: Vec<u32>,
+    platform: Option<String>,
+) -> TileEstimate {
+    if platform.as_deref() == Some("cjhy") {
+        estimate_tiles_4326(&bounds, &zoom_levels)
+    } else {
+        estimate_tiles(&bounds, &zoom_levels)
+    }
 }
 
 /// 创建下载任务
@@ -64,7 +74,12 @@ pub async fn create_tile_task(app: AppHandle, config: TaskConfig) -> Result<Stri
     }
 
     // 计算瓦片总数
-    let tiles = calculate_tiles(&config.bounds, &config.zoom_levels);
+    let is_4326 = config.platform == "cjhy";
+    let tiles = if is_4326 {
+        calculate_tiles_4326(&config.bounds, &config.zoom_levels)
+    } else {
+        calculate_tiles(&config.bounds, &config.zoom_levels)
+    };
     let total_tiles = tiles.len() as u64;
 
     // 生成任务ID
@@ -87,7 +102,12 @@ pub async fn create_tile_task(app: AppHandle, config: TaskConfig) -> Result<Stri
     )
     .map_err(|e| format!("创建任务失败: {}", e))?;
 
-    log::info!("创建下载任务: {} ({}), 共 {} 个瓦片", config.name, task_id, total_tiles);
+    log::info!(
+        "创建下载任务: {} ({}), 共 {} 个瓦片",
+        config.name,
+        task_id,
+        total_tiles
+    );
 
     Ok(task_id)
 }
@@ -324,10 +344,9 @@ pub async fn convert_tile_file(
     match input_ext.as_str() {
         "zip" => {
             // ZIP 解压
-            let file = std::fs::File::open(input)
-                .map_err(|e| format!("打开文件失败: {}", e))?;
-            let mut archive = zip::ZipArchive::new(file)
-                .map_err(|e| format!("读取 ZIP 文件失败: {}", e))?;
+            let file = std::fs::File::open(input).map_err(|e| format!("打开文件失败: {}", e))?;
+            let mut archive =
+                zip::ZipArchive::new(file).map_err(|e| format!("读取 ZIP 文件失败: {}", e))?;
 
             if output_format == "folder" {
                 // 解压到文件夹

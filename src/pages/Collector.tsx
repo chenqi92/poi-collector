@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2, Globe, Map, Navigation, MapPinned, Terminal } from 'lucide-react';
+import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2, Globe, Map, Navigation, MapPinned, Terminal, Anchor, Ship } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
@@ -61,6 +61,12 @@ export default function Collector() {
     const [apiKeys, setApiKeys] = useState<Record<string, { id: number; api_key: string }[]>>({});
     const { warning, error: showError, success } = useToast();
 
+    // 航标采集状态
+    const [buoyCount, setBuoyCount] = useState(0);
+    const [buoyStatus, setBuoyStatus] = useState<string>('idle');
+    const [buoyProgress, setBuoyProgress] = useState({ current: 0, total: 0, message: '' });
+    const [buoyGridStep, setBuoyGridStep] = useState(0.1);
+
     useEffect(() => {
         try {
             const saved = localStorage.getItem('poi_selected_regions');
@@ -74,9 +80,27 @@ export default function Collector() {
         const unlisten = listen<string>('collector-log', (event) => {
             setLogs(prev => [...prev.slice(-99), event.payload]);
         });
+        // 航标采集进度事件
+        const unlistenBuoy = listen<{ task_type: string; status: string; current: number; total: number; message: string | null }>('chart-progress', (event) => {
+            const p = event.payload;
+            if (p.task_type === 'buoy') {
+                setBuoyProgress({ current: p.current, total: p.total, message: p.message || '' });
+                setBuoyStatus(p.status === 'completed' ? 'idle' : 'running');
+                if (p.status === 'completed') {
+                    loadBuoyCount();
+                }
+            }
+        });
+        // 航标日志事件
+        const unlistenBuoyLog = listen<string>('chart-log', (event) => {
+            setLogs(prev => [...prev.slice(-99), `[航标] ${event.payload}`]);
+        });
+        loadBuoyCount();
         return () => {
             clearInterval(interval);
             unlisten.then(fn => fn());
+            unlistenBuoy.then(fn => fn());
+            unlistenBuoyLog.then(fn => fn());
         };
     }, []);
 
@@ -167,6 +191,94 @@ export default function Collector() {
             await invoke('reset_collector', { platform });
             success('已重置', `${platformNames[platform]} 采集进度已重置`);
             loadStatuses();
+        } catch (e) { console.error(e); }
+    };
+
+    // === 航标采集 ===
+    const loadBuoyCount = async () => {
+        try {
+            const count = await invoke<number>('chart_get_buoy_count');
+            setBuoyCount(count);
+        } catch (e) { console.error(e); }
+    };
+
+    // 从选中地区推导经纬度范围
+    // 长江航道主要覆盖：武汉 → 宜昌 → 荆州 → 岳阳 → 九江
+    const REGION_BOUNDS: Record<string, { west: number; south: number; east: number; north: number }> = {
+        // 湖北省及其主要城市
+        '420000': { west: 108.3, south: 29.0, east: 116.1, north: 33.3 },
+        '420100': { west: 113.7, south: 29.97, east: 115.08, north: 31.36 }, // 武汉
+        '420500': { west: 110.15, south: 29.56, east: 112.18, north: 31.75 }, // 宜昌
+        '421000': { west: 111.15, south: 29.26, east: 114.01, north: 30.65 }, // 荆州
+        '420600': { west: 112.31, south: 30.23, east: 113.32, north: 30.71 }, // 襄阳
+        '420700': { west: 113.52, south: 30.07, east: 114.87, north: 30.71 }, // 鄂州
+        '420200': { west: 114.32, south: 29.71, east: 115.43, north: 30.24 }, // 黄石
+        '421200': { west: 114.87, south: 29.83, east: 116.07, north: 31.22 }, // 咸宁
+        '421100': { west: 114.25, south: 29.83, east: 116.07, north: 31.06 }, // 黄冈
+        // 湖南省及其主要城市
+        '430000': { west: 108.8, south: 24.6, east: 114.3, north: 30.1 },
+        '430600': { west: 113.08, south: 28.88, east: 113.85, north: 29.69 }, // 岳阳
+        '430100': { west: 111.88, south: 27.85, east: 114.26, north: 28.67 }, // 长沙
+        // 江西省
+        '360000': { west: 113.6, south: 24.5, east: 118.5, north: 30.1 },
+        '360400': { west: 115.22, south: 29.03, east: 116.82, north: 29.96 }, // 九江
+    };
+
+    const deriveBoundsFromRegions = (): { west: number; south: number; east: number; north: number } | null => {
+        if (selectedRegions.length === 0) return null;
+
+        let west = 180, south = 90, east = -180, north = -90;
+        let hasMatch = false;
+
+        for (const region of selectedRegions) {
+            const b = REGION_BOUNDS[region.code];
+            if (b) {
+                west = Math.min(west, b.west);
+                south = Math.min(south, b.south);
+                east = Math.max(east, b.east);
+                north = Math.max(north, b.north);
+                hasMatch = true;
+            }
+        }
+
+        // 如果没有精确匹配，使用默认范围（荆州-岳阳航段）
+        if (!hasMatch) {
+            return { west: 111.37, south: 29.23, east: 114.01, north: 30.37 };
+        }
+
+        return { west, south, east, north };
+    };
+
+    const startBuoyCollection = async () => {
+        const bounds = deriveBoundsFromRegions();
+        if (!bounds) {
+            warning('未选择地区', '请先在设置中选择要采集的地区');
+            setShowSettings(true);
+            return;
+        }
+
+        try {
+            setBuoyStatus('running');
+            await invoke('chart_start_buoy_collection', {
+                west: bounds.west,
+                south: bounds.south,
+                east: bounds.east,
+                north: bounds.north,
+                gridStep: buoyGridStep,
+            });
+            success('航标采集已启动', `范围: [${bounds.west.toFixed(2)},${bounds.south.toFixed(2)}]-[${bounds.east.toFixed(2)},${bounds.north.toFixed(2)}]`);
+        } catch (e: unknown) {
+            setBuoyStatus('idle');
+            showError('航标采集失败', String(e));
+        }
+    };
+
+    const stopBuoyCollection = async () => {
+        try {
+            await invoke('chart_stop_collection');
+            setBuoyStatus('idle');
+            success('已停止', '航标采集已停止');
+            loadBuoyCount();
         } catch (e) { console.error(e); }
     };
 
@@ -389,6 +501,96 @@ export default function Collector() {
                             );
                         })}
                     </div>
+
+                    {/* 航标采集卡片 */}
+                    <Card className="overflow-hidden relative hover-lift transition-all duration-300">
+                        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-400" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-cyan-400/5 pointer-events-none" />
+                        <CardHeader className="pb-2 relative">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-400 flex items-center justify-center">
+                                        <Anchor className="w-4 h-4 text-white" />
+                                    </div>
+                                    <CardTitle className="text-base">航标数据采集</CardTitle>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-500">
+                                        {buoyCount.toLocaleString()} 条
+                                    </span>
+                                    {buoyStatus === 'running' && (
+                                        <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary animate-pulse">
+                                            采集中
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            <span className="text-xs text-muted-foreground mt-1">长江航道航标 · 根据所选地区自动确定范围</span>
+                        </CardHeader>
+                        <CardContent className="space-y-3 relative">
+                            {/* 采集范围 */}
+                            {selectedRegions.length > 0 && (
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+                                    <Ship className="w-3.5 h-3.5" />
+                                    <span>范围: {selectedRegions.slice(0, 3).map(r => r.name).join('、')}{selectedRegions.length > 3 ? ' 等' : ''}</span>
+                                </div>
+                            )}
+
+                            {/* 进度条 */}
+                            {buoyStatus === 'running' && buoyProgress.total > 0 && (
+                                <div>
+                                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300 progress-bar-striped"
+                                            style={{ width: `${(buoyProgress.current / buoyProgress.total) * 100}%` }}
+                                        />
+                                    </div>
+                                    <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+                                        <span>{buoyProgress.current}/{buoyProgress.total} 网格</span>
+                                        <span>{buoyProgress.message}</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 网格步长 */}
+                            <div className="flex items-center gap-2 text-sm">
+                                <label className="text-muted-foreground text-xs">网格步长:</label>
+                                <select
+                                    value={buoyGridStep}
+                                    onChange={(e) => setBuoyGridStep(parseFloat(e.target.value))}
+                                    disabled={buoyStatus === 'running'}
+                                    className="border border-input bg-background rounded px-2 py-1 text-xs"
+                                >
+                                    <option value={0.05}>0.05° (精细)</option>
+                                    <option value={0.1}>0.1° (标准)</option>
+                                    <option value={0.2}>0.2° (快速)</option>
+                                    <option value={0.5}>0.5° (粗略)</option>
+                                </select>
+                            </div>
+
+                            {/* 操作按钮 */}
+                            <div className="flex gap-2">
+                                {buoyStatus === 'running' ? (
+                                    <Button
+                                        className="flex-1"
+                                        variant="destructive"
+                                        onClick={stopBuoyCollection}
+                                    >
+                                        <Square className="w-4 h-4 mr-2" />
+                                        停止采集
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        className="flex-1 gradient-primary text-white border-0 hover:opacity-90"
+                                        onClick={startBuoyCollection}
+                                    >
+                                        <Play className="w-4 h-4 mr-2" />
+                                        开始采集
+                                    </Button>
+                                )}
+                            </div>
+                        </CardContent>
+                    </Card>
 
                     {/* 采集日志 - Terminal Style */}
                     <Card className="overflow-hidden">
