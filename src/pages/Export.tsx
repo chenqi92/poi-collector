@@ -130,6 +130,7 @@ export default function Export() {
   const [buoyExporting, setBuoyExporting] = useState(false);
   const [buoyPage, setBuoyPage] = useState(1);
   const [buoySearch, setBuoySearch] = useState('');
+  const [buoySelectedRegion, setBuoySelectedRegion] = useState<string | null>(null);
   const buoyPageSize = 100;
 
   // 是否显示表格（选择了地区或开启了显示全部）
@@ -363,15 +364,34 @@ export default function Export() {
   const totalPages = Math.ceil(filteredData.length / pageSize);
 
   // 航标过滤和分页
-  const filteredBuoyData = buoySearch.trim()
-    ? buoyData.filter(b =>
-      (b.name || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
-      b.id.toLowerCase().includes(buoySearch.toLowerCase()) ||
-      (b.buoy_type || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
-      (b.waterway || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
-      (b.region || '').toLowerCase().includes(buoySearch.toLowerCase())
-    )
-    : buoyData;
+  // 提取去重的地区列表
+  const buoyRegions = useMemo(() => {
+    const regionSet = new Set<string>();
+    buoyData.forEach(b => {
+      if (b.region) regionSet.add(b.region);
+    });
+    return Array.from(regionSet).sort();
+  }, [buoyData]);
+
+  const filteredBuoyData = useMemo(() => {
+    let data = buoyData;
+    // 地区筛选
+    if (buoySelectedRegion) {
+      data = data.filter(b => b.region === buoySelectedRegion);
+    }
+    // 搜索筛选
+    if (buoySearch.trim()) {
+      const q = buoySearch.toLowerCase();
+      data = data.filter(b =>
+        (b.name || '').toLowerCase().includes(q) ||
+        b.id.toLowerCase().includes(q) ||
+        (b.buoy_type || '').toLowerCase().includes(q) ||
+        (b.waterway || '').toLowerCase().includes(q) ||
+        (b.region || '').toLowerCase().includes(q)
+      );
+    }
+    return data;
+  }, [buoyData, buoySelectedRegion, buoySearch]);
   const buoyTotalPages = Math.ceil(filteredBuoyData.length / buoyPageSize);
   const pagedBuoyData = filteredBuoyData.slice((buoyPage - 1) * buoyPageSize, buoyPage * buoyPageSize);
 
@@ -463,6 +483,11 @@ export default function Export() {
           >
             <MapPin className="w-4 h-4" />
             POI 数据
+            {allData.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded-full">
+                {allData.length.toLocaleString()}
+              </span>
+            )}
           </button>
           <button
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'buoy'
@@ -699,7 +724,52 @@ export default function Export() {
 
       {/* Buoy Tab */}
       {activeTab === 'buoy' && (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex gap-4">
+          {/* 左侧：地区筛选 */}
+          <Card className="w-48 shrink-0 overflow-hidden flex flex-col">
+            <CardHeader className="py-2 px-3 shrink-0 border-b border-border/50 bg-gradient-to-r from-blue-500/10 to-transparent">
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-blue-500" />
+                  地区筛选
+                </span>
+                {buoySelectedRegion && (
+                  <button onClick={() => { setBuoySelectedRegion(null); setBuoyPage(1); }}
+                    className="text-[10px] text-muted-foreground hover:text-foreground">
+                    清除
+                  </button>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 flex-1 min-h-0">
+              <SimpleBar className="h-full">
+                <div className="p-1">
+                  <button
+                    className={`w-full text-left px-2.5 py-1.5 text-xs rounded transition-colors ${!buoySelectedRegion ? 'bg-blue-500/10 text-blue-500 font-medium' : 'text-muted-foreground hover:bg-accent/50'}`}
+                    onClick={() => { setBuoySelectedRegion(null); setBuoyPage(1); }}
+                  >
+                    全部地区 ({buoyData.length})
+                  </button>
+                  {buoyRegions.map(region => {
+                    const count = buoyData.filter(b => b.region === region).length;
+                    return (
+                      <button
+                        key={region}
+                        className={`w-full text-left px-2.5 py-1.5 text-xs rounded transition-colors flex items-center justify-between ${buoySelectedRegion === region ? 'bg-blue-500/10 text-blue-500 font-medium' : 'text-muted-foreground hover:bg-accent/50'}`}
+                        onClick={() => { setBuoySelectedRegion(region); setBuoyPage(1); }}
+                      >
+                        <span>{region}</span>
+                        <span className="text-[10px]">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </SimpleBar>
+            </CardContent>
+          </Card>
+
+
+          {/* 右侧：航标数据表格 */}
           <Card className="flex-1 overflow-hidden flex flex-col">
             <CardHeader className="py-3 px-4 shrink-0 border-b border-border/50 bg-gradient-to-r from-blue-500/10 to-transparent">
               <div className="flex items-center justify-between">
@@ -753,51 +823,47 @@ export default function Export() {
             <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
               {buoyData.length > 0 ? (
                 <SimpleBar className="h-full">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm table-fixed">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr>
-                        <th className="text-left p-3 font-medium">名称</th>
-                        <th className="text-left p-3 font-medium w-28">所属航道</th>
-                        <th className="text-left p-3 font-medium w-20">地区</th>
-                        <th className="text-left p-3 font-medium w-24">经度</th>
-                        <th className="text-left p-3 font-medium w-24">纬度</th>
-                        <th className="text-left p-3 font-medium w-20">形状</th>
-                        <th className="text-left p-3 font-medium w-28">灯质</th>
-                        <th className="text-left p-3 font-medium w-16">颜色</th>
+                        <th className="text-left p-2 font-medium w-[160px]">名称</th>
+                        <th className="text-left p-2 font-medium w-[100px]">航道</th>
+                        <th className="text-left p-2 font-medium w-[70px]">地区</th>
+                        <th className="text-left p-2 font-medium w-[180px]">坐标</th>
+                        <th className="text-left p-2 font-medium w-[60px]">形状</th>
+                        <th className="text-left p-2 font-medium w-[100px]">灯质</th>
+                        <th className="text-left p-2 font-medium w-[60px]">颜色</th>
                       </tr>
                     </thead>
                     <tbody>
                       {pagedBuoyData.map((buoy, idx) => (
                         <tr key={buoy.id}
                           className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}>
-                          <td className="p-3 font-medium truncate max-w-[200px]" title={buoy.name || ''}>
+                          <td className="p-2 font-medium truncate" title={buoy.name || ''}>
                             {buoy.name || '-'}
                           </td>
-                          <td className="p-3 text-xs truncate max-w-[140px]" title={buoy.waterway || ''}>
+                          <td className="p-2 text-xs truncate" title={buoy.waterway || ''}>
                             {buoy.waterway ? (
                               <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600">{buoy.waterway}</span>
                             ) : '-'}
                           </td>
-                          <td className="p-3 text-xs">
+                          <td className="p-2 text-xs truncate">
                             {buoy.region ? (
                               <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">{buoy.region}</span>
                             ) : '-'}
                           </td>
-                          <td className="p-3 text-muted-foreground text-xs font-mono">
-                            {buoy.lon_84?.toFixed(6) || '-'}
+                          <td className="p-2 text-muted-foreground text-xs font-mono whitespace-nowrap">
+                            {buoy.lon_84?.toFixed(5) || '-'}, {buoy.lat_84?.toFixed(5) || '-'}
                           </td>
-                          <td className="p-3 text-muted-foreground text-xs font-mono">
-                            {buoy.lat_84?.toFixed(6) || '-'}
-                          </td>
-                          <td className="p-3 text-xs text-muted-foreground">
+                          <td className="p-2 text-xs text-muted-foreground truncate">
                             {buoy.shape || '-'}
                           </td>
-                          <td className="p-3 text-xs truncate max-w-[140px]" title={buoy.light_info || ''}>
+                          <td className="p-2 text-xs truncate" title={buoy.light_info || ''}>
                             {buoy.light_info || '-'}
                           </td>
-                          <td className="p-3">
+                          <td className="p-2">
                             {buoy.color ? (
-                              <span className="px-2 py-0.5 rounded-full text-xs bg-muted">
+                              <span className="px-1.5 py-0.5 rounded-full text-xs bg-muted">
                                 {buoy.color}
                               </span>
                             ) : '-'}
@@ -817,7 +883,8 @@ export default function Export() {
             </CardContent>
           </Card>
         </div>
-      )}
+      )
+      }
 
       {/* 导出弹框 */}
       <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
@@ -891,6 +958,6 @@ export default function Export() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </div >
   );
 }

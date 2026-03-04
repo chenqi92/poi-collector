@@ -1,9 +1,9 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Play, Pause, Square, RotateCcw, Loader2, MapPin, Settings2, Globe, Map, Navigation, MapPinned, Terminal, Anchor, Ship } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { CategoryConfigDialog } from '@/components/CategoryConfigDialog';
 import { useToast } from '@/components/ui/toast';
@@ -293,14 +293,43 @@ export default function Collector() {
         });
         return { totalCollected, runningCount };
     }, [statuses]);
+    // 日志面板宽度
+    const [logWidth, setLogWidth] = useState(380);
+    const isDragging = useRef(false);
+    const startX = useRef(0);
+    const startWidth = useRef(0);
+
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+        isDragging.current = true;
+        startX.current = e.clientX;
+        startWidth.current = logWidth;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isDragging.current) return;
+            const delta = startX.current - e.clientX;
+            const newWidth = Math.max(280, Math.min(700, startWidth.current + delta));
+            setLogWidth(newWidth);
+        };
+        const handleMouseUp = () => {
+            isDragging.current = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    }, [logWidth]);
 
     return (
-        <div className="h-full flex flex-col gap-4">
+        <div className="h-full flex flex-col gap-3">
             {/* Header */}
             <div className="shrink-0 flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-foreground">数据采集</h1>
-                    <p className="text-muted-foreground">从各平台采集 POI 数据</p>
+                    <p className="text-sm text-muted-foreground">多平台 POI / 航标数据采集与管理</p>
                 </div>
                 <div className="flex items-center gap-4">
                     <div className="text-right">
@@ -310,9 +339,9 @@ export default function Collector() {
                         <div className="text-xs text-muted-foreground">总采集量</div>
                     </div>
                     {overallStats.runningCount > 0 && (
-                        <div className="flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-xl border border-primary/20 animate-pulse-glow">
-                            <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                            <span className="text-primary text-sm font-medium">
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-lg border border-primary/20 animate-pulse-glow">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                            <span className="text-primary text-xs font-medium">
                                 {overallStats.runningCount} 个任务运行中
                             </span>
                         </div>
@@ -320,332 +349,276 @@ export default function Collector() {
                 </div>
             </div>
 
-            {/* Scrollable content */}
-            <SimpleBar className="flex-1 min-h-0">
-                <div className="space-y-4 pr-2">
-                    {/* 地区配置提示 */}
-                    <Card className={`overflow-hidden ${selectedRegions.length > 0 ? 'border-primary/30' : 'border-destructive/30'}`}>
-                        <div className={`absolute top-0 left-0 right-0 h-1 ${selectedRegions.length > 0 ? 'bg-gradient-to-r from-primary to-indigo-500' : 'bg-gradient-to-r from-destructive to-red-400'}`} />
-                        <CardContent className="py-4">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${selectedRegions.length > 0 ? 'bg-primary/20' : 'bg-destructive/20'
-                                        }`}>
-                                        <MapPin className={`w-5 h-5 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'
-                                            }`} />
-                                    </div>
-                                    <div>
-                                        <div className={`font-medium ${selectedRegions.length > 0 ? 'text-foreground' : 'text-destructive'
-                                            }`}>
-                                            {selectedRegions.length > 0
-                                                ? `已选择 ${selectedRegions.length} 个地区`
-                                                : '未配置采集地区'
-                                            }
-                                        </div>
-                                        <div className="text-sm text-muted-foreground">
-                                            {selectedRegions.length > 0
-                                                ? selectedRegions.slice(0, 5).map(r => r.name).join('、') +
-                                                (selectedRegions.length > 5 ? ` 等` : '')
-                                                : '请先在设置中选择要采集的地区'
-                                            }
-                                        </div>
-                                    </div>
+            {/* 左右分栏主体 */}
+            <div className="flex-1 flex gap-0 min-h-0">
+                {/* 左侧：采集配置 */}
+                <div className="flex-1 min-w-0 flex flex-col min-h-0">
+                    <SimpleBar className="flex-1 min-h-0">
+                        <div className="space-y-3 pr-3">
+                            {/* 地区配置提示 - 紧凑版 */}
+                            <div className={`flex items-center justify-between px-3 py-2.5 rounded-lg border ${selectedRegions.length > 0 ? 'border-primary/30 bg-primary/5' : 'border-destructive/30 bg-destructive/5'}`}>
+                                <div className="flex items-center gap-2">
+                                    <MapPin className={`w-4 h-4 ${selectedRegions.length > 0 ? 'text-primary' : 'text-destructive'}`} />
+                                    <span className={`text-sm font-medium ${selectedRegions.length > 0 ? 'text-foreground' : 'text-destructive'}`}>
+                                        {selectedRegions.length > 0
+                                            ? `${selectedRegions.slice(0, 3).map(r => r.name).join('、')}${selectedRegions.length > 3 ? ` 等${selectedRegions.length}个` : ''}`
+                                            : '未配置采集地区'}
+                                    </span>
                                 </div>
-                                <Button variant="outline" size="sm" onClick={() => setShowSettings(true)} className="hover-lift">
+                                <Button variant="outline" size="sm" onClick={() => setShowSettings(true)} className="h-7 text-xs">
                                     管理地区
                                 </Button>
                             </div>
-                        </CardContent>
-                    </Card>
 
-                    {/* 平台采集卡片 */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                        {platforms.map((platformConfig) => {
-                            const platform = platformConfig.id;
-                            const PlatformIcon = platformConfig.icon;
-                            const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
-                            const config = statusConfig[status.status] || statusConfig.idle;
-                            // 使用选中的类别数量计算进度，而非全部类别数量
-                            const selectedCount = selectedCategories[platform]?.length || 0;
-                            const progress = selectedCount > 0
-                                ? (status.completed_categories?.length || 0) / selectedCount * 100
-                                : 0;
-                            const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
-                            const isRunning = status.status === 'running';
+                            {/* 平台采集卡片 - 紧凑版 */}
+                            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
+                                {platforms.map((platformConfig) => {
+                                    const platform = platformConfig.id;
+                                    const PlatformIcon = platformConfig.icon;
+                                    const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
+                                    const config = statusConfig[status.status] || statusConfig.idle;
+                                    const selectedCount = selectedCategories[platform]?.length || 0;
+                                    const progress = selectedCount > 0
+                                        ? (status.completed_categories?.length || 0) / selectedCount * 100
+                                        : 0;
+                                    const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
+                                    const isRunning = status.status === 'running';
 
-
-                            return (
-                                <Card
-                                    key={platform}
-                                    className={`overflow-hidden relative hover-lift transition-all duration-300 ${!hasApiKey ? 'opacity-75' : ''} ${isRunning ? 'animate-pulse-glow' : ''}`}
-                                >
-                                    {/* Gradient top border */}
-                                    <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${platformConfig.gradient}`} />
-
-                                    {/* Background gradient */}
-                                    <div className={`absolute inset-0 bg-gradient-to-br ${platformConfig.bgGradient} pointer-events-none`} />
-
-                                    <CardHeader className="pb-2 relative">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-8 h-8 rounded-lg bg-gradient-to-r ${platformConfig.gradient} flex items-center justify-center`}>
-                                                    <PlatformIcon className="w-4 h-4 text-white" />
-                                                </div>
-                                                <CardTitle className="text-base">{platformConfig.name}</CardTitle>
-                                            </div>
-                                            <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${config.bg} ${config.color}`}>
-                                                {config.text}
-                                            </span>
-                                        </div>
-                                        {!platformConfig.needsApiKey && (
-                                            <span className="text-xs text-emerald-500 dark:text-emerald-400 mt-1">免费 · 无需 API Key</span>
-                                        )}
-                                    </CardHeader>
-                                    <CardContent className="space-y-4 relative">
-                                        {/* 进度条 */}
-                                        <div>
-                                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                                                <div
-                                                    className={`h-full bg-gradient-to-r ${platformConfig.gradient} transition-all duration-300 ${isRunning ? 'progress-bar-striped' : ''}`}
-                                                    style={{ width: `${progress}%` }}
-                                                />
-                                            </div>
-                                            <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-                                                <span>{status.completed_categories?.length || 0} / {categories.length} 类别</span>
-                                                <span>已采集: {status.total_collected?.toLocaleString() || 0}</span>
-                                            </div>
-                                        </div>
-
-                                        {/* 类别配置 */}
-                                        <button
-                                            onClick={() => setCategoryDialogPlatform(platform)}
-                                            className="w-full flex items-center justify-between p-3 border border-border/50 rounded-xl hover:bg-accent/50 transition-all cursor-pointer group"
+                                    return (
+                                        <Card
+                                            key={platform}
+                                            className={`overflow-hidden relative transition-all duration-300 ${!hasApiKey ? 'opacity-75' : ''} ${isRunning ? 'animate-pulse-glow' : ''}`}
                                         >
-                                            <span className="flex items-center gap-2 text-sm">
-                                                <Settings2 className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
-                                                类别配置
-                                                <span className="text-muted-foreground">
-                                                    ({selectedCategories[platform]?.length || 0}/{categories.length})
-                                                </span>
-                                            </span>
-                                        </button>
+                                            <div className={`absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r ${platformConfig.gradient}`} />
+                                            <div className={`absolute inset-0 bg-gradient-to-br ${platformConfig.bgGradient} pointer-events-none`} />
 
-                                        {/* 操作按钮 */}
-                                        <div className="flex gap-2">
-                                            {status.status === 'running' ? (
-                                                <>
-                                                    {/* 采集中：显示暂停和停止 */}
-                                                    <Button
-                                                        className="flex-1"
-                                                        variant="outline"
-                                                        onClick={() => pauseCollector(platform)}
+                                            <div className="p-3 relative space-y-2.5">
+                                                {/* 标题行 */}
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <div className={`w-6 h-6 rounded bg-gradient-to-r ${platformConfig.gradient} flex items-center justify-center`}>
+                                                            <PlatformIcon className="w-3.5 h-3.5 text-white" />
+                                                        </div>
+                                                        <span className="text-sm font-medium">{platformConfig.name}</span>
+                                                    </div>
+                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${config.bg} ${config.color}`}>
+                                                        {config.text}
+                                                    </span>
+                                                </div>
+
+                                                {/* 进度条 */}
+                                                <div>
+                                                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full bg-gradient-to-r ${platformConfig.gradient} transition-all duration-300 ${isRunning ? 'progress-bar-striped' : ''}`}
+                                                            style={{ width: `${progress}%` }}
+                                                        />
+                                                    </div>
+                                                    <div className="flex justify-between mt-1 text-[10px] text-muted-foreground">
+                                                        <span>{status.completed_categories?.length || 0}/{categories.length} 类</span>
+                                                        <span>已采: {status.total_collected?.toLocaleString() || 0}</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* 类别 + 按钮合并行 */}
+                                                <div className="flex items-center gap-1.5">
+                                                    <button
+                                                        onClick={() => setCategoryDialogPlatform(platform)}
+                                                        className="flex items-center gap-1 px-2 py-1 text-[10px] border border-border/50 rounded hover:bg-accent/50 transition-all cursor-pointer"
                                                     >
-                                                        <Pause className="w-4 h-4 mr-2" />
-                                                        暂停
-                                                    </Button>
-                                                    <Button
-                                                        variant="destructive"
-                                                        onClick={() => fullStopCollector(platform)}
-                                                    >
-                                                        <Square className="w-4 h-4 mr-2" />
-                                                        停止
-                                                    </Button>
-                                                </>
-                                            ) : status.status === 'paused' ? (
-                                                <>
-                                                    {/* 已暂停：显示继续和停止 */}
-                                                    <Button
-                                                        className="flex-1 gradient-primary text-white border-0"
-                                                        onClick={() => startCollector(platform)}
-                                                    >
-                                                        <Play className="w-4 h-4 mr-2" />
-                                                        继续
-                                                    </Button>
-                                                    <Button
-                                                        variant="destructive"
-                                                        onClick={() => fullStopCollector(platform)}
-                                                    >
-                                                        <Square className="w-4 h-4 mr-2" />
-                                                        停止
-                                                    </Button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    {/* 未开始/已完成/出错：显示开始和重置 */}
-                                                    <Button
-                                                        className="flex-1 gradient-primary text-white border-0 hover:opacity-90"
-                                                        onClick={() => startCollector(platform)}
-                                                    >
-                                                        <Play className="w-4 h-4 mr-2" />
-                                                        {status.status === 'completed' ? '重新开始' : '开始采集'}
-                                                    </Button>
-                                                    <Button
-                                                        variant="outline"
-                                                        onClick={() => resetCollector(platform)}
-                                                        disabled={status.status === 'idle' || status.total_collected === 0}
-                                                    >
-                                                        <RotateCcw className="w-4 h-4 mr-2" />
-                                                        重置
-                                                    </Button>
-                                                </>
+                                                        <Settings2 className="w-3 h-3" />
+                                                        <span className="text-muted-foreground">
+                                                            ({selectedCategories[platform]?.length || 0}/{categories.length})
+                                                        </span>
+                                                    </button>
+                                                    <div className="flex-1 flex gap-1 justify-end">
+                                                        {status.status === 'running' ? (
+                                                            <>
+                                                                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => pauseCollector(platform)}>
+                                                                    <Pause className="w-3 h-3 mr-0.5" />暂停
+                                                                </Button>
+                                                                <Button size="sm" variant="destructive" className="h-6 text-[10px] px-2" onClick={() => fullStopCollector(platform)}>
+                                                                    <Square className="w-3 h-3" />
+                                                                </Button>
+                                                            </>
+                                                        ) : status.status === 'paused' ? (
+                                                            <>
+                                                                <Button size="sm" className="h-6 text-[10px] px-2 gradient-primary text-white border-0" onClick={() => startCollector(platform)}>
+                                                                    <Play className="w-3 h-3 mr-0.5" />继续
+                                                                </Button>
+                                                                <Button size="sm" variant="destructive" className="h-6 text-[10px] px-2" onClick={() => fullStopCollector(platform)}>
+                                                                    <Square className="w-3 h-3" />
+                                                                </Button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Button size="sm" className="h-6 text-[10px] px-2 gradient-primary text-white border-0" onClick={() => startCollector(platform)}>
+                                                                    <Play className="w-3 h-3 mr-0.5" />{status.status === 'completed' ? '重采' : '采集'}
+                                                                </Button>
+                                                                <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => resetCollector(platform)}
+                                                                    disabled={status.status === 'idle' || status.total_collected === 0}>
+                                                                    <RotateCcw className="w-3 h-3" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {status.error_message && (
+                                                    <div className="p-1.5 bg-destructive/10 border border-destructive/30 rounded text-destructive text-[10px] truncate" title={status.error_message}>
+                                                        {status.error_message}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </Card>
+                                    );
+                                })}
+                            </div>
+
+                            {/* 航标采集卡片 - 紧凑版 */}
+                            <Card className="overflow-hidden relative">
+                                <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 to-cyan-400" />
+                                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-cyan-400/5 pointer-events-none" />
+                                <div className="p-3 relative space-y-2.5">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5">
+                                            <div className="w-6 h-6 rounded bg-gradient-to-r from-blue-500 to-cyan-400 flex items-center justify-center">
+                                                <Anchor className="w-3.5 h-3.5 text-white" />
+                                            </div>
+                                            <span className="text-sm font-medium">航标数据采集</span>
+                                            <span className="text-[10px] text-muted-foreground">· 长江航道</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-500">
+                                                {buoyCount.toLocaleString()} 条
+                                            </span>
+                                            {buoyStatus === 'running' && (
+                                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-primary/10 text-primary animate-pulse">
+                                                    采集中
+                                                </span>
                                             )}
                                         </div>
+                                    </div>
 
-                                        {status.error_message && (
-                                            <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-xl text-destructive text-sm">
-                                                {status.error_message}
+                                    {/* 范围 + 步长 + 按钮 */}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        {selectedRegions.length > 0 && (
+                                            <div className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1">
+                                                <Ship className="w-3 h-3" />
+                                                <span>{selectedRegions.slice(0, 2).map(r => r.name).join('、')}{selectedRegions.length > 2 ? ' 等' : ''}</span>
                                             </div>
                                         )}
-                                    </CardContent>
-                                </Card>
-                            );
-                        })}
-                    </div>
-
-                    {/* 航标采集卡片 */}
-                    <Card className="overflow-hidden relative hover-lift transition-all duration-300">
-                        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-400" />
-                        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-cyan-400/5 pointer-events-none" />
-                        <CardHeader className="pb-2 relative">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-400 flex items-center justify-center">
-                                        <Anchor className="w-4 h-4 text-white" />
+                                        <select
+                                            value={buoyGridStep}
+                                            onChange={(e) => setBuoyGridStep(parseFloat(e.target.value))}
+                                            disabled={buoyStatus === 'running'}
+                                            className="border border-input bg-background rounded px-1.5 py-0.5 text-[10px] h-6"
+                                        >
+                                            <option value={0.05}>0.05°</option>
+                                            <option value={0.1}>0.1°</option>
+                                            <option value={0.2}>0.2°</option>
+                                            <option value={0.5}>0.5°</option>
+                                        </select>
+                                        <div className="flex-1" />
+                                        {buoyStatus === 'running' ? (
+                                            <Button size="sm" variant="destructive" className="h-6 text-[10px] px-3" onClick={stopBuoyCollection}>
+                                                <Square className="w-3 h-3 mr-1" />停止
+                                            </Button>
+                                        ) : (
+                                            <Button size="sm" className="h-6 text-[10px] px-3 gradient-primary text-white border-0" onClick={startBuoyCollection}>
+                                                <Play className="w-3 h-3 mr-1" />采集
+                                            </Button>
+                                        )}
                                     </div>
-                                    <CardTitle className="text-base">航标数据采集</CardTitle>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-500/10 text-blue-500">
-                                        {buoyCount.toLocaleString()} 条
-                                    </span>
-                                    {buoyStatus === 'running' && (
-                                        <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-primary/10 text-primary animate-pulse">
-                                            采集中
-                                        </span>
+
+                                    {/* 进度条 */}
+                                    {buoyStatus === 'running' && buoyProgress.total > 0 && (
+                                        <div>
+                                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300 progress-bar-striped"
+                                                    style={{ width: `${(buoyProgress.current / buoyProgress.total) * 100}%` }}
+                                                />
+                                            </div>
+                                            <div className="flex justify-between mt-0.5 text-[10px] text-muted-foreground">
+                                                <span>{buoyProgress.current}/{buoyProgress.total}</span>
+                                                <span>{buoyProgress.message}</span>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
-                            </div>
-                            <span className="text-xs text-muted-foreground mt-1">长江航道航标 · 根据所选地区自动确定范围</span>
-                        </CardHeader>
-                        <CardContent className="space-y-3 relative">
-                            {/* 采集范围 */}
-                            {selectedRegions.length > 0 && (
-                                <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-                                    <Ship className="w-3.5 h-3.5" />
-                                    <span>范围: {selectedRegions.slice(0, 3).map(r => r.name).join('、')}{selectedRegions.length > 3 ? ' 等' : ''}</span>
-                                </div>
-                            )}
-
-                            {/* 进度条 */}
-                            {buoyStatus === 'running' && buoyProgress.total > 0 && (
-                                <div>
-                                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                                        <div
-                                            className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300 progress-bar-striped"
-                                            style={{ width: `${(buoyProgress.current / buoyProgress.total) * 100}%` }}
-                                        />
-                                    </div>
-                                    <div className="flex justify-between mt-1 text-xs text-muted-foreground">
-                                        <span>{buoyProgress.current}/{buoyProgress.total} 网格</span>
-                                        <span>{buoyProgress.message}</span>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* 网格步长 */}
-                            <div className="flex items-center gap-2 text-sm">
-                                <label className="text-muted-foreground text-xs">网格步长:</label>
-                                <select
-                                    value={buoyGridStep}
-                                    onChange={(e) => setBuoyGridStep(parseFloat(e.target.value))}
-                                    disabled={buoyStatus === 'running'}
-                                    className="border border-input bg-background rounded px-2 py-1 text-xs"
-                                >
-                                    <option value={0.05}>0.05° (精细)</option>
-                                    <option value={0.1}>0.1° (标准)</option>
-                                    <option value={0.2}>0.2° (快速)</option>
-                                    <option value={0.5}>0.5° (粗略)</option>
-                                </select>
-                            </div>
-
-                            {/* 操作按钮 */}
-                            <div className="flex gap-2">
-                                {buoyStatus === 'running' ? (
-                                    <Button
-                                        className="flex-1"
-                                        variant="destructive"
-                                        onClick={stopBuoyCollection}
-                                    >
-                                        <Square className="w-4 h-4 mr-2" />
-                                        停止采集
-                                    </Button>
-                                ) : (
-                                    <Button
-                                        className="flex-1 gradient-primary text-white border-0 hover:opacity-90"
-                                        onClick={startBuoyCollection}
-                                    >
-                                        <Play className="w-4 h-4 mr-2" />
-                                        开始采集
-                                    </Button>
-                                )}
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* 采集日志 - Terminal Style */}
-                    <Card className="overflow-hidden">
-                        <CardHeader className="border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent">
-                            <CardTitle className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                                    <Terminal className="w-4 h-4 text-primary" />
-                                </div>
-                                采集日志
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-0">
-                            <div className="terminal-bg rounded-b-lg p-4 h-48 overflow-y-auto font-mono text-sm">
-                                {logs.length > 0 ? (
-                                    logs.map((log, i) => (
-                                        <div key={i} className="text-gray-400 py-0.5 hover:bg-white/5 px-2 -mx-2 rounded">
-                                            <span className="text-gray-600 mr-2">{String(i + 1).padStart(3, '0')}</span>
-                                            {log}
-                                        </div>
-                                    ))
-                                ) : (
-                                    <div className="text-gray-500 flex items-center gap-2">
-                                        <span className="inline-block w-2 h-4 bg-primary/50 animate-pulse" />
-                                        等待采集开始...
-                                    </div>
-                                )}
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Settings Dialog */}
-                    <SettingsDialog
-                        open={showSettings}
-                        onOpenChange={setShowSettings}
-                        onRegionsChange={setSelectedRegions}
-                    />
-
-                    {/* Category Config Dialog */}
-                    <CategoryConfigDialog
-                        open={categoryDialogPlatform !== null}
-                        platformName={categoryDialogPlatform ? platformNames[categoryDialogPlatform] : ''}
-                        categories={categories}
-                        selectedCategories={selectedCategories[categoryDialogPlatform || ''] || []}
-                        onClose={() => setCategoryDialogPlatform(null)}
-                        onChange={(ids) => {
-                            if (categoryDialogPlatform) {
-                                setSelectedCategories(prev => ({
-                                    ...prev,
-                                    [categoryDialogPlatform]: ids
-                                }));
-                            }
-                        }}
-                    />
+                            </Card>
+                        </div>
+                    </SimpleBar>
                 </div>
-            </SimpleBar>
+
+                {/* 可拖动分隔条 */}
+                <div
+                    className="w-1.5 shrink-0 cursor-col-resize group flex items-center justify-center hover:bg-primary/10 transition-colors rounded"
+                    onMouseDown={handleMouseDown}
+                >
+                    <div className="w-0.5 h-8 bg-border group-hover:bg-primary/50 rounded-full transition-colors" />
+                </div>
+
+                {/* 右侧：采集日志 */}
+                <div className="shrink-0 flex flex-col min-h-0" style={{ width: logWidth }}>
+                    <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-muted/30 shrink-0">
+                            <Terminal className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-sm font-medium">采集日志</span>
+                            {logs.length > 0 && (
+                                <span className="text-[10px] text-muted-foreground ml-auto">
+                                    {logs.length} 条
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                            <SimpleBar className="h-full">
+                                <div className="terminal-bg p-2 font-mono text-[11px] min-h-full">
+                                    {logs.length > 0 ? (
+                                        logs.map((log, i) => (
+                                            <div key={i} className="text-gray-400 py-px hover:bg-white/5 px-1.5 -mx-1.5 rounded leading-relaxed">
+                                                <span className="text-gray-600 mr-1.5 select-none">{String(i + 1).padStart(3, '0')}</span>
+                                                {log}
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-gray-500 flex items-center gap-2 p-2">
+                                            <span className="inline-block w-1.5 h-3.5 bg-primary/50 animate-pulse" />
+                                            等待采集开始...
+                                        </div>
+                                    )}
+                                </div>
+                            </SimpleBar>
+                        </div>
+                    </Card>
+                </div>
+            </div>
+
+            {/* Settings Dialog */}
+            <SettingsDialog
+                open={showSettings}
+                onOpenChange={setShowSettings}
+                onRegionsChange={setSelectedRegions}
+            />
+
+            {/* Category Config Dialog */}
+            <CategoryConfigDialog
+                open={categoryDialogPlatform !== null}
+                platformName={categoryDialogPlatform ? platformNames[categoryDialogPlatform] : ''}
+                categories={categories}
+                selectedCategories={selectedCategories[categoryDialogPlatform || ''] || []}
+                onClose={() => setCategoryDialogPlatform(null)}
+                onChange={(ids) => {
+                    if (categoryDialogPlatform) {
+                        setSelectedCategories(prev => ({
+                            ...prev,
+                            [categoryDialogPlatform]: ids
+                        }));
+                    }
+                }}
+            />
         </div>
     );
 }
+
