@@ -120,6 +120,7 @@ export default function Export() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const pageSize = 100;
+  const [totalPoiCount, setTotalPoiCount] = useState(0);
 
   // Tab: poi | buoy
   const [activeTab, setActiveTab] = useState<'poi' | 'buoy'>('poi');
@@ -139,7 +140,17 @@ export default function Export() {
   useEffect(() => {
     loadProvinces();
     loadBuoyInfo();
+    loadTotalPoiCount();
   }, []);
+
+  const loadTotalPoiCount = async () => {
+    try {
+      const stats = await invoke<{ total: number }>('get_stats');
+      setTotalPoiCount(stats.total);
+    } catch (e) {
+      console.error('获取POI总数失败:', e);
+    }
+  };
 
   const loadBuoyInfo = async () => {
     try {
@@ -483,11 +494,9 @@ export default function Export() {
           >
             <MapPin className="w-4 h-4" />
             POI 数据
-            {allData.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded-full">
-                {allData.length.toLocaleString()}
-              </span>
-            )}
+            <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded-full">
+              {allData.length > 0 ? allData.length.toLocaleString() : totalPoiCount.toLocaleString()}
+            </span>
           </button>
           <button
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'buoy'

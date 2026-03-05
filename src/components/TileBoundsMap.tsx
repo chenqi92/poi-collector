@@ -117,10 +117,9 @@ export function TileBoundsMap({
     const [showFullscreen, setShowFullscreen] = useState(false);
     const [isDrawingMode, setIsDrawingMode] = useState(false);
 
-    // 是否使用 OSM 底图 (当平台为 osm 时使用 OSM 底图)
-    const useOsmTiles = platform === 'osm';
-    // 航道图平台使用天地图作为底图预览
-    const useTiandituTiles = platform === 'cjhy';
+    // 是否使用 OSM 底图（osm 平台或 cjhy 航道图都使用 OSM 底图）
+    // cjhy 航道图的瓦片是叠加图层，需要独立的底图支撑
+    const useOsmTiles = platform === 'osm' || platform === 'cjhy';
 
     // 行政区域搜索状态
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
@@ -348,12 +347,6 @@ export function TileBoundsMap({
                             <TileLayer
                                 attribution="&copy; OpenStreetMap"
                                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            />
-                        ) : useTiandituTiles ? (
-                            <TileLayer
-                                attribution="&copy; 天地图"
-                                url="https://t{s}.tianditu.gov.cn/vec_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=vec&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=c53e41812acab56e4f467ca0add9b863"
-                                subdomains="01234567"
                             />
                         ) : (
                             <TilePreviewLayer

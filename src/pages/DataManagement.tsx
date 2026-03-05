@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
-import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw, HardDrive, Shield, Ship, Anchor, FileJson, FileSpreadsheet, Search } from 'lucide-react';
+import { Database, Trash2, AlertTriangle, FolderTree, RefreshCw, HardDrive, Shield, Ship, Anchor, FileJson, FileSpreadsheet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
@@ -14,21 +14,6 @@ interface Region {
     parent_code: string | null;
 }
 
-interface BuoyInfo {
-    id: string;
-    name: string | null;
-    lon_84: number | null;
-    lat_84: number | null;
-    buoy_type: string | null;
-    icon_url: string | null;
-    organization_id: string | null;
-    color: string | null;
-    waterway: string | null;
-    shape: string | null;
-    light_info: string | null;
-    region: string | null;
-    raw_json: string;
-}
 
 export default function DataManagement() {
     const { success, error: showError } = useToast();
@@ -37,10 +22,6 @@ export default function DataManagement() {
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [regionNames, setRegionNames] = useState<Map<string, string>>(new Map());
     const [buoyCount, setBuoyCount] = useState(0);
-    const [buoyData, setBuoyData] = useState<BuoyInfo[]>([]);
-    const [buoyPage, setBuoyPage] = useState(1);
-    const [buoySearch, setBuoySearch] = useState('');
-    const buoyPageSize = 50;
 
     useEffect(() => {
         loadStats();
@@ -52,12 +33,6 @@ export default function DataManagement() {
         try {
             const count = await invoke<number>('chart_get_buoy_count');
             setBuoyCount(count);
-            if (count > 0) {
-                const data = await invoke<BuoyInfo[]>('chart_get_all_buoys');
-                setBuoyData(data);
-            } else {
-                setBuoyData([]);
-            }
         } catch (e) {
             console.error('加载航标数据失败:', e);
         }
@@ -158,18 +133,7 @@ export default function DataManagement() {
         'from-orange-500 to-orange-400'
     ];
 
-    // 航标过滤和分页
-    const filteredBuoys = buoySearch.trim()
-        ? buoyData.filter(b =>
-            (b.name || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
-            b.id.toLowerCase().includes(buoySearch.toLowerCase()) ||
-            (b.buoy_type || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
-            (b.waterway || '').toLowerCase().includes(buoySearch.toLowerCase()) ||
-            (b.region || '').toLowerCase().includes(buoySearch.toLowerCase())
-        )
-        : buoyData;
-    const buoyTotalPages = Math.ceil(filteredBuoys.length / buoyPageSize);
-    const pagedBuoys = filteredBuoys.slice((buoyPage - 1) * buoyPageSize, buoyPage * buoyPageSize);
+
 
     return (
         <div className="h-full flex flex-col gap-4">
@@ -331,111 +295,6 @@ export default function DataManagement() {
                     </CardContent>
                 </Card>
             </div>
-
-            {/* 下半部分: 航标数据表格 */}
-            <Card className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-blue-500/10 to-transparent py-3 px-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                                <Anchor className="w-3.5 h-3.5 text-blue-500" />
-                            </div>
-                            <CardTitle className="text-sm">航标数据</CardTitle>
-                            <div className="relative">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                                <input
-                                    type="text"
-                                    value={buoySearch}
-                                    onChange={(e) => { setBuoySearch(e.target.value); setBuoyPage(1); }}
-                                    placeholder="搜索名称/ID/类型..."
-                                    className="pl-8 pr-3 py-1 text-xs border border-input bg-background rounded-lg w-48 focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                />
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                                <span className="text-blue-500 font-medium">{filteredBuoys.length.toLocaleString()}</span> 条
-                            </span>
-                        </div>
-                        {buoyTotalPages > 1 && (
-                            <div className="flex items-center gap-1 text-xs">
-                                <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
-                                    onClick={() => setBuoyPage(p => Math.max(1, p - 1))} disabled={buoyPage === 1}>
-                                    上一页
-                                </Button>
-                                <span className="text-muted-foreground px-2">{buoyPage}/{buoyTotalPages}</span>
-                                <Button variant="outline" size="sm" className="h-6 px-2 text-xs"
-                                    onClick={() => setBuoyPage(p => Math.min(buoyTotalPages, p + 1))} disabled={buoyPage === buoyTotalPages}>
-                                    下一页
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-                </CardHeader>
-                <CardContent className="flex-1 min-h-0 overflow-hidden p-0">
-                    {buoyData.length > 0 ? (
-                        <SimpleBar className="h-full">
-                            <table className="w-full text-sm">
-                                <thead className="bg-muted/50 sticky top-0">
-                                    <tr>
-                                        <th className="text-left p-2.5 font-medium text-xs">名称</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-24">所属航道</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-16">地区</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-20">经度</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-20">纬度</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-16">形状</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-24">灯质</th>
-                                        <th className="text-left p-2.5 font-medium text-xs w-16">颜色</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pagedBuoys.map((buoy, idx) => (
-                                        <tr key={buoy.id}
-                                            className={`border-b border-border/30 hover:bg-accent/30 transition-colors ${idx % 2 === 1 ? 'bg-muted/20' : ''}`}>
-                                            <td className="p-2.5 font-medium truncate max-w-[180px]" title={buoy.name || ''}>
-                                                {buoy.name || '-'}
-                                            </td>
-                                            <td className="p-2.5 text-xs truncate max-w-[120px]" title={buoy.waterway || ''}>
-                                                {buoy.waterway ? (
-                                                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-600">{buoy.waterway}</span>
-                                                ) : '-'}
-                                            </td>
-                                            <td className="p-2.5 text-xs">
-                                                {buoy.region ? (
-                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600">{buoy.region}</span>
-                                                ) : '-'}
-                                            </td>
-                                            <td className="p-2.5 text-muted-foreground text-xs font-mono">
-                                                {buoy.lon_84?.toFixed(6) || '-'}
-                                            </td>
-                                            <td className="p-2.5 text-muted-foreground text-xs font-mono">
-                                                {buoy.lat_84?.toFixed(6) || '-'}
-                                            </td>
-                                            <td className="p-2.5 text-xs text-muted-foreground">
-                                                {buoy.shape || '-'}
-                                            </td>
-                                            <td className="p-2.5 text-xs truncate max-w-[120px]" title={buoy.light_info || ''}>
-                                                {buoy.light_info || '-'}
-                                            </td>
-                                            <td className="p-2.5">
-                                                {buoy.color ? (
-                                                    <span className="px-2 py-0.5 rounded-full text-xs bg-muted">
-                                                        {buoy.color}
-                                                    </span>
-                                                ) : '-'}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </SimpleBar>
-                    ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-                            <Anchor className="w-8 h-8 opacity-30 mb-2" />
-                            <p className="text-sm">暂无航标数据</p>
-                            <p className="text-xs mt-1">请先在航道图采集页面采集航标</p>
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
         </div>
     );
 }

@@ -32,6 +32,8 @@ pub struct CollectorStatus {
     pub total_collected: i64,
     pub completed_categories: Vec<String>,
     pub current_category_id: String,
+    pub current_category_index: usize,
+    pub total_categories: usize,
     pub error_message: Option<String>,
 }
 
@@ -267,6 +269,8 @@ pub fn start_collector(
                 total_collected: 0,
                 completed_categories: vec![],
                 current_category_id: String::new(),
+                current_category_index: 0,
+                total_categories: selected_cats.len(),
                 error_message: None,
             },
         );
@@ -336,6 +340,7 @@ fn run_collector(
 
         update_status(&platform, |s| {
             s.current_category_id = cat.id.clone();
+            s.current_category_index = completed_categories.len();
         });
 
         emit_log(&app, &format!("[{}] 采集类别: {}", platform, cat.name));
@@ -476,6 +481,8 @@ pub fn reset_collector(platform: String) -> Result<(), String> {
             total_collected: 0,
             completed_categories: vec![],
             current_category_id: String::new(),
+            current_category_index: 0,
+            total_categories: 0,
             error_message: None,
         },
     );

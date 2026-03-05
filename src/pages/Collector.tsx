@@ -378,11 +378,16 @@ export default function Collector() {
                                     const status = statuses[platform] || { status: 'idle', total_collected: 0, completed_categories: [] };
                                     const config = statusConfig[status.status] || statusConfig.idle;
                                     const selectedCount = selectedCategories[platform]?.length || 0;
-                                    const progress = selectedCount > 0
-                                        ? (status.completed_categories?.length || 0) / selectedCount * 100
-                                        : 0;
                                     const hasApiKey = !platformConfig.needsApiKey || (apiKeys[platform]?.length || 0) > 0;
                                     const isRunning = status.status === 'running';
+                                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                    const st = status as any;
+                                    const totalCats = st.total_categories || selectedCount;
+                                    const progress = totalCats > 0
+                                        ? isRunning
+                                            ? ((st.current_category_index || 0) + 0.5) / totalCats * 100
+                                            : (status.completed_categories?.length || 0) / totalCats * 100
+                                        : 0;
 
                                     return (
                                         <Card
@@ -508,17 +513,20 @@ export default function Collector() {
                                                 <span>{selectedRegions.slice(0, 2).map(r => r.name).join('、')}{selectedRegions.length > 2 ? ' 等' : ''}</span>
                                             </div>
                                         )}
-                                        <select
-                                            value={buoyGridStep}
-                                            onChange={(e) => setBuoyGridStep(parseFloat(e.target.value))}
-                                            disabled={buoyStatus === 'running'}
-                                            className="border border-input bg-background rounded px-1.5 py-0.5 text-[10px] h-6"
-                                        >
-                                            <option value={0.05}>0.05°</option>
-                                            <option value={0.1}>0.1°</option>
-                                            <option value={0.2}>0.2°</option>
-                                            <option value={0.5}>0.5°</option>
-                                        </select>
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-[10px] text-muted-foreground">步长</span>
+                                            <select
+                                                value={buoyGridStep}
+                                                onChange={(e) => setBuoyGridStep(parseFloat(e.target.value))}
+                                                disabled={buoyStatus === 'running'}
+                                                className="border border-input bg-background rounded px-1.5 py-0.5 text-[10px] h-6"
+                                            >
+                                                <option value={0.05}>0.05°</option>
+                                                <option value={0.1}>0.1°</option>
+                                                <option value={0.2}>0.2°</option>
+                                                <option value={0.5}>0.5°</option>
+                                            </select>
+                                        </div>
                                         <div className="flex-1" />
                                         {buoyStatus === 'running' ? (
                                             <Button size="sm" variant="destructive" className="h-6 text-[10px] px-3" onClick={stopBuoyCollection}>
@@ -531,12 +539,12 @@ export default function Collector() {
                                         )}
                                     </div>
 
-                                    {/* 进度条 */}
-                                    {buoyStatus === 'running' && buoyProgress.total > 0 && (
+                                    {/* 进度条 - 始终显示 */}
+                                    {buoyProgress.total > 0 && (
                                         <div>
                                             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                                                 <div
-                                                    className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300 progress-bar-striped"
+                                                    className={`h-full transition-all duration-300 ${buoyStatus === 'running' ? 'bg-gradient-to-r from-blue-500 to-cyan-400 progress-bar-striped' : 'bg-blue-500/50'}`}
                                                     style={{ width: `${(buoyProgress.current / buoyProgress.total) * 100}%` }}
                                                 />
                                             </div>
@@ -562,17 +570,17 @@ export default function Collector() {
 
                 {/* 右侧：采集日志 */}
                 <div className="shrink-0 flex flex-col min-h-0" style={{ width: logWidth }}>
-                    <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
-                        <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 bg-muted/30 shrink-0">
-                            <Terminal className="w-3.5 h-3.5 text-primary" />
-                            <span className="text-sm font-medium">采集日志</span>
+                    <Card className="flex-1 flex flex-col overflow-hidden min-h-0 bg-[hsl(222,47%,4%)] border-[hsl(222,47%,12%)]">
+                        <div className="flex items-center gap-2 px-3 py-2 border-b border-[hsl(222,47%,12%)] bg-[hsl(222,47%,6%)] shrink-0">
+                            <Terminal className="w-3.5 h-3.5 text-blue-400" />
+                            <span className="text-sm font-medium text-gray-200">采集日志</span>
                             {logs.length > 0 && (
-                                <span className="text-[10px] text-muted-foreground ml-auto">
+                                <span className="text-[10px] text-gray-500 ml-auto">
                                     {logs.length} 条
                                 </span>
                             )}
                         </div>
-                        <div className="flex-1 min-h-0 overflow-hidden">
+                        <div className="flex-1 min-h-0 overflow-hidden bg-[hsl(222,47%,4%)]">
                             <SimpleBar className="h-full">
                                 <div className="terminal-bg p-2 font-mono text-[11px] min-h-full">
                                     {logs.length > 0 ? (
