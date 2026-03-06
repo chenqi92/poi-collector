@@ -67,6 +67,7 @@ pub fn run() {
             tile_commands::delete_tile_task,
             tile_commands::set_tile_thread_count,
             tile_commands::retry_failed_tiles,
+            tile_commands::get_tile_task_logs,
             tile_commands::convert_tile_file,
             tile_proxy::proxy_tile_request,
             boundaries::get_region_boundary,

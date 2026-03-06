@@ -332,6 +332,59 @@ pub async fn retry_failed_tiles(app: AppHandle, task_id: String) -> Result<u64, 
     Ok(count)
 }
 
+/// 获取任务日志（失败瓦片详情 + 统计）
+#[tauri::command]
+pub async fn get_tile_task_logs(
+    app: AppHandle,
+    task_id: String,
+) -> Result<serde_json::Value, String> {
+    let db = get_tile_db(&app)?;
+
+    // 获取统计
+    let (pending, completed, failed) = db
+        .get_tile_stats(&task_id)
+        .map_err(|e| format!("获取统计失败: {}", e))?;
+
+    // 获取失败详情（限 200 条）
+    let failed_details = db
+        .get_failed_tile_details(&task_id, 200)
+        .map_err(|e| format!("获取失败详情失败: {}", e))?;
+
+    // 构造错误摘要 — 按错误消息分组计数
+    let mut error_summary: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
+    for (_, _, _, ref err, _) in &failed_details {
+        *error_summary.entry(err.clone()).or_insert(0) += 1;
+    }
+
+    let failed_entries: Vec<serde_json::Value> = failed_details
+        .iter()
+        .map(|(z, x, y, err, retries)| {
+            serde_json::json!({
+                "z": z, "x": x, "y": y,
+                "error": err,
+                "retries": retries,
+            })
+        })
+        .collect();
+
+    let error_groups: Vec<serde_json::Value> = error_summary
+        .iter()
+        .map(|(err, count)| serde_json::json!({"error": err, "count": count}))
+        .collect();
+
+    Ok(serde_json::json!({
+        "stats": {
+            "pending": pending,
+            "completed": completed,
+            "failed": failed,
+            "total": pending + completed + failed,
+        },
+        "error_summary": error_groups,
+        "failed_tiles": failed_entries,
+    }))
+}
+
 /// 解压/转换瓦片文件
 #[tauri::command]
 pub async fn convert_tile_file(

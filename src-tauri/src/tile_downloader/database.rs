@@ -444,4 +444,32 @@ impl TileDatabase {
 
         Ok((pending as u64, completed as u64, failed as u64))
     }
+
+    /// 获取失败瓦片详情
+    pub fn get_failed_tile_details(
+        &self,
+        task_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(u32, u32, u32, String, u32)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT z, x, y, COALESCE(error_message, '未知错误'), retry_count FROM tile_progress WHERE task_id = ?1 AND status = 'failed' ORDER BY z, x, y LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![task_id, limit as i64], |row| {
+            Ok((
+                row.get::<_, u32>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, u32>(4)?,
+            ))
+        })?;
+
+        let mut details = Vec::new();
+        for row in rows {
+            details.push(row?);
+        }
+        Ok(details)
+    }
 }
