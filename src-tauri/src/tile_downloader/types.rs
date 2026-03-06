@@ -164,14 +164,22 @@ pub struct Bounds {
 
 impl Bounds {
     pub fn new(north: f64, south: f64, east: f64, west: f64) -> Self {
-        Self { north, south, east, west }
+        Self {
+            north,
+            south,
+            east,
+            west,
+        }
     }
 
     /// 验证边界是否有效
     pub fn is_valid(&self) -> bool {
-        self.north > self.south && self.east > self.west
-            && self.north <= 85.0511 && self.south >= -85.0511
-            && self.east <= 180.0 && self.west >= -180.0
+        self.north > self.south
+            && self.east > self.west
+            && self.north <= 85.0511
+            && self.south >= -85.0511
+            && self.east <= 180.0
+            && self.west >= -180.0
     }
 }
 
@@ -279,4 +287,6 @@ pub struct PlatformInfo {
     pub max_zoom: u32,
     pub map_types: Vec<String>,
     pub requires_key: bool,
+    /// 坐标参考系信息, 如 "EPSG:3857 (Web Mercator)"
+    pub crs_info: String,
 }

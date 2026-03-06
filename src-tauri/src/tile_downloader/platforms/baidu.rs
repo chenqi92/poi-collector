@@ -86,4 +86,8 @@ impl TilePlatform for BaiduPlatform {
     fn subdomains(&self) -> Vec<&str> {
         vec!["0", "1", "2", "3"]
     }
+
+    fn crs_info(&self) -> &str {
+        "EPSG:3857 (BD-09 坐标偏移)"
+    }
 }

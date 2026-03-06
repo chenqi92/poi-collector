@@ -416,7 +416,7 @@ export function TileBoundsMap({
                     {/* 绘制模式提示 */}
                     {selectionMode === 'draw' && isDrawingMode && (
                         <div className="absolute bottom-2 left-2 z-[1000] px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded-lg shadow-lg">
-                            拖拽绘制选区 · 点击「完成」退出绘制模式
+                            单击添加顶点 · 双击/点起点闭合 · 右键或Ctrl+Z撤销
                         </div>
                     )}
                 </div>

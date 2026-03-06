@@ -81,4 +81,8 @@ impl TilePlatform for CjhyPlatform {
     fn uses_custom_4326_scheme(&self) -> bool {
         true
     }
+
+    fn crs_info(&self) -> &str {
+        "ArcGIS 自定义 (类Web Mercator编号, 服务z+7=标准z)"
+    }
 }

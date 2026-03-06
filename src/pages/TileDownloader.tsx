@@ -80,6 +80,7 @@ interface PlatformInfo {
     max_zoom: number;
     map_types: string[];
     requires_key: boolean;
+    crs_info: string;
 }
 
 interface TileEstimate {
@@ -538,6 +539,13 @@ export default function TileDownloader() {
                                             </Select>
                                         </div>
                                     </div>
+
+                                    {/* 坐标系信息 - 全宽显示 */}
+                                    {currentPlatform?.crs_info && (
+                                        <p className={`text-xs ${currentPlatform.crs_info.includes('3857') ? 'text-muted-foreground' : 'text-red-500 font-medium'}`}>
+                                            🌐 坐标系: {currentPlatform.crs_info}
+                                        </p>
+                                    )}
 
                                     {/* 输出格式 */}
                                     <div className="space-y-2">

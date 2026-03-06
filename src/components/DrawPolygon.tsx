@@ -230,13 +230,20 @@ export function DrawPolygon({
             } else if (vertices.length >= 3) {
                 // 已有多边形，检查是否点击内部 → 开始拖拽
                 if (polygonRef.current) {
-                    // 如果有多边形层，检查点击是否在内部
                     const polyBounds = polygonRef.current.getBounds();
                     if (polyBounds.contains(e.latlng)) {
-                        // 这里不做拖拽，因为 click 不适合拖拽
                         // 拖拽在 mousedown 中处理
                     }
                 }
+            }
+        },
+
+        // 右键撤销上一个顶点
+        contextmenu(e) {
+            if (!isDrawing) return;
+            e.originalEvent.preventDefault();
+            if (vertices.length > 0) {
+                setVertices(prev => prev.slice(0, -1));
             }
         },
 
@@ -344,6 +351,19 @@ export function DrawPolygon({
             map.doubleClickZoom.enable();
         }
     }, [drawEnabled]);
+
+    // --- Ctrl+Z 撤销快捷键 ---
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (!isDrawing) return;
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                e.preventDefault();
+                setVertices(prev => prev.length > 0 ? prev.slice(0, -1) : prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isDrawing]);
 
     // --- 光标样式 ---
     useEffect(() => {

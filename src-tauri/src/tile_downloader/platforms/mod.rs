@@ -78,6 +78,11 @@ pub trait TilePlatform: Send + Sync {
         false
     }
 
+    /// 坐标参考系信息
+    fn crs_info(&self) -> &str {
+        "EPSG:3857 (Web Mercator)"
+    }
+
     /// 获取平台信息
     fn info(&self) -> PlatformInfo {
         PlatformInfo {
@@ -92,6 +97,7 @@ pub trait TilePlatform: Send + Sync {
                 .map(|t| t.to_string())
                 .collect(),
             requires_key: self.requires_api_key(),
+            crs_info: self.crs_info().to_string(),
         }
     }
 }

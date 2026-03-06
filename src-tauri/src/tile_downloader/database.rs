@@ -304,28 +304,47 @@ impl TileDatabase {
         Ok(())
     }
 
-    /// 初始化任务的瓦片列表
+    /// 初始化任务的瓦片列表（支持断点续传）
+    /// - 首次下载：插入所有瓦片为 pending
+    /// - 恢复/重试：将 failed 状态重置为 pending，保留 completed 不动
     pub fn init_tile_progress(&self, task_id: &str, tiles: &[TileCoord]) -> Result<()> {
         let mut conn = self.conn.lock();
-        let tx = conn.transaction()?;
 
-        // 先删除旧的进度记录
-        tx.execute(
-            "DELETE FROM tile_progress WHERE task_id = ?1",
+        // 检查是否已有进度记录
+        let existing_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM tile_progress WHERE task_id = ?1",
             params![task_id],
+            |row| row.get(0),
         )?;
 
-        // 批量插入
-        let mut stmt = tx.prepare(
-            "INSERT INTO tile_progress (task_id, z, x, y, status) VALUES (?1, ?2, ?3, ?4, 'pending')",
-        )?;
+        if existing_count > 0 {
+            // 已有记录 → 恢复/重试模式
+            // 只将 failed 的瓦片重置为 pending，让它们被重新下载
+            conn.execute(
+                "UPDATE tile_progress SET status = 'pending', error_message = NULL WHERE task_id = ?1 AND status = 'failed'",
+                params![task_id],
+            )?;
+            log::info!(
+                "任务 {} 恢复下载：已有 {} 条记录，已将失败的瓦片重置为 pending",
+                task_id,
+                existing_count
+            );
+        } else {
+            // 首次下载 → 全部插入
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT INTO tile_progress (task_id, z, x, y, status) VALUES (?1, ?2, ?3, ?4, 'pending')",
+                )?;
 
-        for tile in tiles {
-            stmt.execute(params![task_id, tile.z, tile.x, tile.y])?;
+                for tile in tiles {
+                    stmt.execute(params![task_id, tile.z, tile.x, tile.y])?;
+                }
+            }
+            tx.commit()?;
+            log::info!("任务 {} 首次下载：插入 {} 条瓦片记录", task_id, tiles.len());
         }
 
-        drop(stmt);
-        tx.commit()?;
         Ok(())
     }
 

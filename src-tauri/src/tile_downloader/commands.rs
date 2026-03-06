@@ -314,8 +314,20 @@ pub async fn retry_failed_tiles(app: AppHandle, task_id: String) -> Result<u64, 
         .reset_failed_tiles(&task_id)
         .map_err(|e| format!("重置失败瓦片失败: {}", e))?;
 
-    // 更新任务状态
-    db.update_task_status(&task_id, "pending").ok();
+    // 同步更新任务表：将 failed_tiles 设为 0
+    db.update_task_progress(
+        &task_id,
+        db.get_task(&task_id)
+            .ok()
+            .flatten()
+            .map(|t| t.completed_tiles)
+            .unwrap_or(0),
+        0,
+    )
+    .ok();
+
+    // 更新任务状态为 paused（start_tile_download 会从这个状态恢复）
+    db.update_task_status(&task_id, "paused").ok();
 
     Ok(count)
 }
