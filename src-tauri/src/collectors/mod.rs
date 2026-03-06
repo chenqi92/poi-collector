@@ -70,6 +70,7 @@ pub struct POIData {
 }
 
 /// 采集器 trait
+#[allow(dead_code)]
 pub trait Collector: Send + Sync {
     /// 平台名称
     fn platform(&self) -> &'static str;

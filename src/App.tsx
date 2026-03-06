@@ -8,6 +8,7 @@ import Search from '@/pages/Search';
 import Export from '@/pages/Export';
 import DataManagement from '@/pages/DataManagement';
 import TileDownloader from '@/pages/TileDownloader';
+import TaskHistory from '@/pages/TaskHistory';
 import '@/index.css';
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
               <Route path="export" element={<Export />} />
               <Route path="data-management" element={<DataManagement />} />
               <Route path="tile-downloader" element={<TileDownloader />} />
+              <Route path="task-history" element={<TaskHistory />} />
             </Route>
           </Routes>
         </BrowserRouter>

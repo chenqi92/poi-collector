@@ -10,9 +10,15 @@ use super::types::{Bounds, TileCoord};
 use std::path::Path;
 
 /// 瓦片存储 trait
+#[allow(dead_code)]
 pub trait TileStorage: Send + Sync {
     /// 初始化存储
-    fn init(&mut self, output_path: &Path, bounds: &Bounds, zoom_levels: &[u32]) -> Result<(), String>;
+    fn init(
+        &mut self,
+        output_path: &Path,
+        bounds: &Bounds,
+        zoom_levels: &[u32],
+    ) -> Result<(), String>;
 
     /// 保存瓦片
     fn save_tile(&mut self, coord: &TileCoord, data: &[u8]) -> Result<(), String>;

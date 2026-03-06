@@ -158,7 +158,7 @@ pub fn add_api_key(platform: String, api_key: String, name: Option<String>) -> R
 }
 
 #[tauri::command]
-pub fn delete_api_key(platform: String, key_id: i64) -> Result<(), String> {
+pub fn delete_api_key(_platform: String, key_id: i64) -> Result<(), String> {
     let db = DB.lock().map_err(|e| e.to_string())?;
     db.delete_api_key(key_id).map_err(|e| e.to_string())
 }
@@ -307,6 +307,23 @@ fn run_collector(
 ) {
     emit_log(&app, &format!("[{}] 开始采集...", platform));
 
+    // 创建 POI 采集任务记录
+    let cat_names: Vec<String> = categories.iter().map(|c| c.name.clone()).collect();
+    let poi_task_id = {
+        if let Ok(db) = DB.lock() {
+            db.create_poi_task(
+                &platform,
+                Some(&region.name),
+                Some(&region.admin_code),
+                &serde_json::to_string(&cat_names).unwrap_or_default(),
+                categories.len() as i64,
+            )
+            .ok()
+        } else {
+            None
+        }
+    };
+
     // 创建采集器
     let mut collector: Box<dyn Collector> = match platform.as_str() {
         "tianditu" => Box::new(TianDiTuCollector::new(api_key)),
@@ -318,6 +335,12 @@ fn run_collector(
                 s.status = "error".to_string();
                 s.error_message = Some("不支持的平台".to_string());
             });
+            if let Some(tid) = poi_task_id {
+                if let Ok(db) = DB.lock() {
+                    db.complete_poi_task(tid, "error", 0, Some("不支持的平台"))
+                        .ok();
+                }
+            }
             return;
         }
     };
@@ -335,6 +358,12 @@ fn run_collector(
             update_status(&platform, |s| {
                 s.status = "paused".to_string();
             });
+            if let Some(tid) = poi_task_id {
+                if let Ok(db) = DB.lock() {
+                    db.complete_poi_task(tid, "cancelled", total_collected, None)
+                        .ok();
+                }
+            }
             return;
         }
 
@@ -347,6 +376,12 @@ fn run_collector(
 
         for keyword in &cat.keywords {
             if should_stop(&platform) {
+                if let Some(tid) = poi_task_id {
+                    if let Ok(db) = DB.lock() {
+                        db.complete_poi_task(tid, "cancelled", total_collected, None)
+                            .ok();
+                    }
+                }
                 return;
             }
 
@@ -427,8 +462,14 @@ fn run_collector(
                         if e.contains("配额") {
                             update_status(&platform, |s| {
                                 s.status = "error".to_string();
-                                s.error_message = Some(e);
+                                s.error_message = Some(e.clone());
                             });
+                            if let Some(tid) = poi_task_id {
+                                if let Ok(db) = DB.lock() {
+                                    db.complete_poi_task(tid, "error", total_collected, Some(&e))
+                                        .ok();
+                                }
+                            }
                             return;
                         }
                         break;
@@ -441,6 +482,18 @@ fn run_collector(
         update_status(&platform, |s| {
             s.completed_categories = completed_categories.clone();
         });
+
+        // 更新 POI 任务进度
+        if let Some(tid) = poi_task_id {
+            if let Ok(db) = DB.lock() {
+                db.update_poi_task_progress(
+                    tid,
+                    completed_categories.len() as i64,
+                    total_collected,
+                )
+                .ok();
+            }
+        }
     }
 
     emit_log(
@@ -451,6 +504,14 @@ fn run_collector(
         s.status = "completed".to_string();
         s.current_category_id = String::new();
     });
+
+    // 记录完成
+    if let Some(tid) = poi_task_id {
+        if let Ok(db) = DB.lock() {
+            db.complete_poi_task(tid, "completed", total_collected, None)
+                .ok();
+        }
+    }
 }
 
 #[tauri::command]
@@ -666,4 +727,144 @@ pub fn delete_poi_by_regions(codes: Vec<String>) -> Result<usize, String> {
 pub fn clear_all_poi() -> Result<usize, String> {
     let db = DB.lock().map_err(|e| e.to_string())?;
     db.clear_all_poi().map_err(|e| e.to_string())
+}
+
+// === 统一任务历史 ===
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnifiedTask {
+    pub id: String,
+    pub task_type: String,
+    pub name: String,
+    pub status: String,
+    pub total: u64,
+    pub completed: u64,
+    pub failed: u64,
+    pub platform: Option<String>,
+    pub output_path: Option<String>,
+    pub created_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub extra: Option<String>,
+}
+
+/// 获取所有类型的任务历史
+#[tauri::command]
+pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> {
+    let mut tasks = Vec::new();
+
+    // 1. POI 采集任务
+    {
+        let db = DB.lock().map_err(|e| e.to_string())?;
+        if let Ok(poi_tasks) = db.get_poi_tasks() {
+            for t in poi_tasks {
+                let name = format!(
+                    "{} - {}",
+                    match t.platform.as_str() {
+                        "amap" => "高德地图",
+                        "baidu" => "百度地图",
+                        "tianditu" => "天地图",
+                        "osm" => "OpenStreetMap",
+                        _ => &t.platform,
+                    },
+                    t.region_name.as_deref().unwrap_or("未知区域")
+                );
+                tasks.push(UnifiedTask {
+                    id: format!("poi_{}", t.id),
+                    task_type: "poi".to_string(),
+                    name,
+                    status: t.status,
+                    total: t.total_categories as u64,
+                    completed: t.completed_categories as u64,
+                    failed: 0,
+                    platform: Some(t.platform),
+                    output_path: None,
+                    created_at: t.created_at,
+                    completed_at: t.completed_at,
+                    extra: Some(
+                        serde_json::json!({
+                            "total_collected": t.total_collected,
+                            "categories": t.categories,
+                            "region_code": t.region_code,
+                        })
+                        .to_string(),
+                    ),
+                });
+            }
+        }
+    }
+
+    // 2. 航标采集任务
+    {
+        use crate::chart_collector::commands::get_db_path;
+        use crate::chart_collector::database::ChartDatabase;
+        if let Ok(chart_db) = ChartDatabase::new(&get_db_path()) {
+            if let Ok(chart_tasks) = chart_db.get_chart_tasks() {
+                for t in chart_tasks {
+                    let name = format!("航标采集 - {}", t.task_type);
+                    tasks.push(UnifiedTask {
+                        id: format!("buoy_{}", t.id),
+                        task_type: "buoy".to_string(),
+                        name,
+                        status: t.status,
+                        total: t.total_items as u64,
+                        completed: t.completed_items as u64,
+                        failed: t.failed_items as u64,
+                        platform: None,
+                        output_path: t.output_path,
+                        created_at: t.created_at,
+                        completed_at: t.completed_at,
+                        extra: Some(
+                            serde_json::json!({
+                                "layers": t.layers,
+                                "zoom_levels": t.zoom_levels,
+                            })
+                            .to_string(),
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // 3. 瓦片下载任务
+    {
+        use crate::tile_downloader::commands::get_tile_db;
+        if let Ok(tile_db) = get_tile_db(&app) {
+            if let Ok(tile_tasks) = tile_db.get_all_tasks() {
+                for t in tile_tasks {
+                    tasks.push(UnifiedTask {
+                        id: format!("tile_{}", t.id),
+                        task_type: "tile".to_string(),
+                        name: t.name,
+                        status: t.status,
+                        total: t.total_tiles,
+                        completed: t.completed_tiles,
+                        failed: t.failed_tiles,
+                        platform: Some(t.platform),
+                        output_path: Some(t.output_path),
+                        created_at: Some(t.created_at),
+                        completed_at: t.completed_at,
+                        extra: Some(
+                            serde_json::json!({
+                                "map_type": t.map_type,
+                                "zoom_levels": t.zoom_levels,
+                                "output_format": t.output_format,
+                                "download_speed": t.download_speed,
+                            })
+                            .to_string(),
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // 按创建时间排序（新的在前）
+    tasks.sort_by(|a, b| {
+        let a_time = a.created_at.as_deref().unwrap_or("");
+        let b_time = b.created_at.as_deref().unwrap_or("");
+        b_time.cmp(a_time)
+    });
+
+    Ok(tasks)
 }

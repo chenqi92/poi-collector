@@ -53,6 +53,8 @@ pub fn run() {
             get_poi_stats_by_region,
             delete_poi_by_regions,
             clear_all_poi,
+            // 统一任务历史
+            get_all_task_history,
             // 瓦片下载
             tile_commands::get_tile_platforms,
             tile_commands::calculate_tiles_count,

@@ -109,6 +109,21 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_poi_platform ON poi_data(platform);
             CREATE INDEX IF NOT EXISTS idx_poi_category ON poi_data(category);
             CREATE INDEX IF NOT EXISTS idx_poi_region ON poi_data(region_code);
+
+            CREATE TABLE IF NOT EXISTS poi_collection_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                region_name TEXT,
+                region_code TEXT,
+                categories TEXT,
+                status TEXT NOT NULL DEFAULT 'running',
+                total_categories INTEGER DEFAULT 0,
+                completed_categories INTEGER DEFAULT 0,
+                total_collected INTEGER DEFAULT 0,
+                error_message TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT
+            );
         "#,
         )?;
         Ok(())
@@ -272,6 +287,7 @@ impl Database {
         Ok(rows > 0) // 返回是否实际插入了行
     }
 
+    #[allow(dead_code)]
     pub fn mark_key_exhausted(&self, key_id: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE api_keys SET quota_exhausted = 1 WHERE id = ?1",
@@ -416,6 +432,81 @@ impl Database {
         let count = self.conn.execute("DELETE FROM poi_data", [])?;
         Ok(count)
     }
+
+    // === POI 采集任务记录 ===
+
+    /// 创建 POI 采集任务
+    pub fn create_poi_task(
+        &self,
+        platform: &str,
+        region_name: Option<&str>,
+        region_code: Option<&str>,
+        categories: &str,
+        total_categories: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO poi_collection_tasks (platform, region_name, region_code, categories, total_categories) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![platform, region_name, region_code, categories, total_categories],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// 更新 POI 采集任务进度
+    pub fn update_poi_task_progress(
+        &self,
+        task_id: i64,
+        completed_categories: i64,
+        total_collected: i64,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE poi_collection_tasks SET completed_categories = ?1, total_collected = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3",
+            params![completed_categories, total_collected, task_id],
+        )?;
+        Ok(())
+    }
+
+    /// 完成 POI 采集任务
+    pub fn complete_poi_task(
+        &self,
+        task_id: i64,
+        status: &str,
+        total_collected: i64,
+        error_message: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE poi_collection_tasks SET status = ?1, total_collected = ?2, error_message = ?3, completed_at = CURRENT_TIMESTAMP WHERE id = ?4",
+            params![status, total_collected, error_message, task_id],
+        )?;
+        Ok(())
+    }
+
+    /// 获取 POI 采集任务列表
+    pub fn get_poi_tasks(&self) -> Result<Vec<PoiTask>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, platform, region_name, region_code, categories, status, total_categories, completed_categories, total_collected, error_message, created_at, completed_at FROM poi_collection_tasks ORDER BY id DESC"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PoiTask {
+                id: row.get(0)?,
+                platform: row.get(1)?,
+                region_name: row.get(2)?,
+                region_code: row.get(3)?,
+                categories: row.get(4)?,
+                status: row.get(5)?,
+                total_categories: row.get(6)?,
+                completed_categories: row.get(7)?,
+                total_collected: row.get(8)?,
+                error_message: row.get(9)?,
+                created_at: row.get(10)?,
+                completed_at: row.get(11)?,
+            })
+        })?;
+        let mut tasks = Vec::new();
+        for row in rows {
+            tasks.push(row?);
+        }
+        Ok(tasks)
+    }
 }
 
 /// 导出用的 POI 结构体（包含更多字段）
@@ -430,4 +521,21 @@ pub struct ExportPOI {
     pub category: String,
     pub platform: String,
     pub region_code: String,
+}
+
+/// POI 采集任务记录
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PoiTask {
+    pub id: i64,
+    pub platform: String,
+    pub region_name: Option<String>,
+    pub region_code: Option<String>,
+    pub categories: Option<String>,
+    pub status: String,
+    pub total_categories: i64,
+    pub completed_categories: i64,
+    pub total_collected: i64,
+    pub error_message: Option<String>,
+    pub created_at: Option<String>,
+    pub completed_at: Option<String>,
 }

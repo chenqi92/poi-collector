@@ -35,6 +35,7 @@ pub fn generate_buoy_sign(
 }
 
 /// 构建完整的航标 API URL
+#[allow(dead_code)]
 pub fn build_buoy_api_url(
     lon1: f64,
     lat1: f64,

@@ -1,5 +1,5 @@
 //! 行政区划数据模块
-//! 
+//!
 //! 从内置 JSON 文件加载省市区数据，支持按层级查询
 
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,7 @@ pub fn get_provinces() -> Vec<Region> {
 }
 
 /// 获取所有城市
+#[allow(dead_code)]
 pub fn get_cities() -> Vec<Region> {
     get_all_regions()
         .iter()
@@ -82,6 +83,7 @@ pub fn get_cities() -> Vec<Region> {
 }
 
 /// 获取所有区县
+#[allow(dead_code)]
 pub fn get_districts() -> Vec<Region> {
     get_all_regions()
         .iter()
@@ -97,16 +99,14 @@ pub fn get_all_district_codes(code: &str) -> Vec<String> {
         Some(r) => r,
         None => return vec![],
     };
-    
+
     match region.level.as_str() {
         "district" => vec![code.to_string()],
-        "city" => {
-            get_children(code)
-                .iter()
-                .filter(|r| r.level == "district")
-                .map(|r| r.code.clone())
-                .collect()
-        }
+        "city" => get_children(code)
+            .iter()
+            .filter(|r| r.level == "district")
+            .map(|r| r.code.clone())
+            .collect(),
         "province" => {
             let mut result = vec![];
             for city in get_children(code) {
@@ -137,14 +137,14 @@ pub fn search_regions(query: &str) -> Vec<Region> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_load_regions() {
         let regions = get_all_regions();
         assert!(!regions.is_empty());
         println!("Loaded {} regions", regions.len());
     }
-    
+
     #[test]
     fn test_get_provinces() {
         let provinces = get_provinces();

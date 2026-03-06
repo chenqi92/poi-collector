@@ -158,8 +158,8 @@ export default function DataManagement() {
                 </div>
             </div>
 
-            {/* 上半部分: POI + 操作 */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 shrink-0" style={{ maxHeight: '45%' }}>
+            {/* POI + 操作 */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
                 {/* POI 数据统计 */}
                 <Card className="overflow-hidden flex flex-col lg:col-span-2">
                     <CardHeader className="shrink-0 border-b border-border/50 bg-gradient-to-r from-muted/50 to-transparent py-3">

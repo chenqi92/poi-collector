@@ -12,9 +12,13 @@ impl TileDatabase {
     pub fn new(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
 
-        let db = Self { conn: Mutex::new(conn) };
+        let db = Self {
+            conn: Mutex::new(conn),
+        };
         db.init_tables()?;
+        db.recover_interrupted_tasks()?;
         Ok(db)
     }
 
@@ -66,6 +70,19 @@ impl TileDatabase {
             CREATE INDEX IF NOT EXISTS idx_tile_progress_status ON tile_progress(task_id, status);
             "#,
         )?;
+        Ok(())
+    }
+
+    /// 恢复崩溃中断的任务 - 将 downloading 状态重置为 paused
+    fn recover_interrupted_tasks(&self) -> Result<()> {
+        let conn = self.conn.lock();
+        let count = conn.execute(
+            "UPDATE tile_download_tasks SET status = 'paused', error_message = '应用重启后自动恢复' WHERE status = 'downloading'",
+            [],
+        )?;
+        if count > 0 {
+            log::info!("崩溃恢复：已将 {} 个下载中的任务重置为暂停状态", count);
+        }
         Ok(())
     }
 
@@ -234,12 +251,7 @@ impl TileDatabase {
     }
 
     /// 更新任务进度
-    pub fn update_task_progress(
-        &self,
-        task_id: &str,
-        completed: u64,
-        failed: u64,
-    ) -> Result<()> {
+    pub fn update_task_progress(&self, task_id: &str, completed: u64, failed: u64) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.lock().execute(
             "UPDATE tile_download_tasks SET completed_tiles = ?1, failed_tiles = ?2, updated_at = ?3 WHERE id = ?4",
@@ -259,6 +271,7 @@ impl TileDatabase {
     }
 
     /// 设置任务失败
+    #[allow(dead_code)]
     pub fn set_task_failed(&self, task_id: &str, error: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.lock().execute(
@@ -297,7 +310,10 @@ impl TileDatabase {
         let tx = conn.transaction()?;
 
         // 先删除旧的进度记录
-        tx.execute("DELETE FROM tile_progress WHERE task_id = ?1", params![task_id])?;
+        tx.execute(
+            "DELETE FROM tile_progress WHERE task_id = ?1",
+            params![task_id],
+        )?;
 
         // 批量插入
         let mut stmt = tx.prepare(
@@ -336,6 +352,7 @@ impl TileDatabase {
     }
 
     /// 获取失败的瓦片
+    #[allow(dead_code)]
     pub fn get_failed_tiles(&self, task_id: &str) -> Result<Vec<TileCoord>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(

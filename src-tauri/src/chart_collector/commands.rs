@@ -22,7 +22,7 @@ static TASK_STATUS: Lazy<RwLock<ChartTaskStatus>> =
     Lazy::new(|| RwLock::new(ChartTaskStatus::Idle));
 
 /// 获取数据库路径
-fn get_db_path() -> String {
+pub fn get_db_path() -> String {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
@@ -130,6 +130,12 @@ pub async fn chart_start_buoy_collection(
     let app_final = app.clone();
     let db_path = get_db_path();
     tokio::spawn(async move {
+        // 创建任务记录
+        let task_id = match ChartDatabase::new(&db_path) {
+            Ok(db) => db.create_chart_task("buoy", 0).unwrap_or(0),
+            Err(_) => 0,
+        };
+
         let collector = BuoyCollector::new(step);
         let result = collector
             .collect(&bounds, stop_flag, progress_tx, log_tx.clone())
@@ -145,6 +151,11 @@ pub async fn chart_start_buoy_collection(
                     Ok(db) => match db.upsert_buoys(&buoys) {
                         Ok(count) => {
                             *TASK_STATUS.write() = ChartTaskStatus::Completed;
+                            // 更新任务记录
+                            if task_id > 0 {
+                                let _ =
+                                    db.complete_chart_task(task_id, "completed", count as i64, 0);
+                            }
                             let _ = log_tx
                                 .send(format!("✅ 航标采集完成，入库 {} 条", count))
                                 .await;
@@ -161,6 +172,9 @@ pub async fn chart_start_buoy_collection(
                         }
                         Err(e) => {
                             *TASK_STATUS.write() = ChartTaskStatus::Failed;
+                            if task_id > 0 {
+                                let _ = db.complete_chart_task(task_id, "failed", 0, 0);
+                            }
                             let _ = log_tx.send(format!("❌ 保存数据库失败: {}", e)).await;
                         }
                     },
@@ -172,6 +186,12 @@ pub async fn chart_start_buoy_collection(
             }
             Err(e) => {
                 *TASK_STATUS.write() = ChartTaskStatus::Failed;
+                // 更新任务记录
+                if task_id > 0 {
+                    if let Ok(db) = ChartDatabase::new(&db_path) {
+                        let _ = db.complete_chart_task(task_id, "failed", 0, 0);
+                    }
+                }
                 let _ = log_tx.send(format!("❌ 航标采集失败: {}", e)).await;
             }
         }

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 // HMR trigger: 2026-01-07T21:57:00
 import { listen } from '@tauri-apps/api/event';
 import { save, open as openDialog } from '@tauri-apps/plugin-dialog';
+import { useNavigate } from 'react-router-dom';
 import {
     Play,
     Pause,
@@ -15,7 +16,6 @@ import {
     FileArchive,
     Search,
     Download,
-    History,
 } from 'lucide-react';
 import { TileBoundsMap } from '@/components/TileBoundsMap';
 import { Button } from '@/components/ui/button';
@@ -99,18 +99,6 @@ interface ProgressEvent {
     message: string | null;
 }
 
-// 平台名称映射
-const platformNames: Record<string, string> = {
-    google: '谷歌地图',
-    baidu: '百度地图',
-    amap: '高德地图',
-    tencent: '腾讯地图',
-    tianditu: '天地图',
-    osm: 'OpenStreetMap',
-    arcgis: 'ArcGIS',
-    bing: 'Bing地图',
-    cjhy: '长江航道图',
-};
 
 // 地图类型名称映射
 const mapTypeNames: Record<string, string> = {
@@ -142,21 +130,21 @@ const statusInfo: Record<string, { name: string; color: string }> = {
 export default function TileDownloader() {
     const [tasks, setTasks] = useState<TaskInfo[]>([]);
     const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
-    const [selectedTask, setSelectedTask] = useState<TaskInfo | null>(null);
     const [showConvertDialog, setShowConvertDialog] = useState(false);
+    const [showCurrentTasksDialog, setShowCurrentTasksDialog] = useState(false);
     const [loading, setLoading] = useState(false);
     const [savedApiKeys, setSavedApiKeys] = useState<Record<string, { id: number; api_key: string }[]>>({});
-    const [showTasksDialog, setShowTasksDialog] = useState(false);
+    const navigate = useNavigate();
 
     // 新建任务表单
     const [taskName, setTaskName] = useState('');
     const [platform, setPlatform] = useState('osm');
     const [mapType, setMapType] = useState('street');
     const [bounds, setBounds] = useState<Bounds>({
-        north: 31.5,
-        south: 30.7,
-        east: 122.0,
-        west: 121.0,
+        north: 0,
+        south: 0,
+        east: 0,
+        west: 0,
     });
     const [zoomLevels, setZoomLevels] = useState<number[]>([10, 11, 12, 13, 14]);
     const [threadCount, setThreadCount] = useState(8);
@@ -165,6 +153,7 @@ export default function TileDownloader() {
     const [estimate, setEstimate] = useState<TileEstimate | null>(null);
     const [selectionMode, setSelectionMode] = useState<'draw' | 'region'>('draw');
     const [selectedRegionCode, setSelectedRegionCode] = useState<string | null>(null);
+    const [selectedRegionName, setSelectedRegionName] = useState<string | null>(null);
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
     const [regionSearchResults, setRegionSearchResults] = useState<{ code: string; name: string; level: string }[]>([]);
 
@@ -251,6 +240,8 @@ export default function TileDownloader() {
             invoke<TileEstimate>('calculate_tiles_count', { bounds, zoomLevels, platform }).then(
                 setEstimate
             );
+        } else {
+            setEstimate(null);
         }
     }, [bounds, zoomLevels, platform]);
 
@@ -258,6 +249,12 @@ export default function TileDownloader() {
     const handleCreateTask = async () => {
         if (!taskName.trim()) {
             alert('请输入任务名称');
+            return;
+        }
+
+        // 验证 bounds 有效性
+        if (!(bounds.north > bounds.south && bounds.east > bounds.west)) {
+            alert('请先选择下载区域（绘制选区或选择行政区域）');
             return;
         }
 
@@ -290,7 +287,7 @@ export default function TileDownloader() {
                 return;
             }
 
-            await invoke('create_tile_task', {
+            const taskId = await invoke<string>('create_tile_task', {
                 config: {
                     name: taskName,
                     platform,
@@ -306,7 +303,15 @@ export default function TileDownloader() {
             });
 
             resetForm();
-            loadTasks();
+            await loadTasks();
+
+            // 自动启动下载
+            try {
+                await invoke('start_tile_download', { taskId });
+                loadTasks();
+            } catch (startErr) {
+                console.error('自动启动下载失败:', startErr);
+            }
         } catch (e) {
             console.error('创建任务失败:', e);
             alert(`创建任务失败: ${e}`);
@@ -315,13 +320,11 @@ export default function TileDownloader() {
         }
     };
 
-    // 重置表单
+    // 重置表单（保留地图平台和类型选择）
     const resetForm = () => {
         setTaskName('');
-        setPlatform('amap');
-        setMapType('street');
-        setBounds({ north: 31.5, south: 30.7, east: 122.0, west: 121.0 });
-        setZoomLevels([10, 11, 12, 13, 14]);
+        setBounds({ north: 0, south: 0, east: 0, west: 0 });
+        setZoomLevels(platform === 'cjhy' ? [4, 5, 6, 7, 8, 9, 10] : [10, 11, 12, 13, 14]);
         setThreadCount(8);
         setOutputFormat('folder');
         setApiKey('');
@@ -349,14 +352,19 @@ export default function TileDownloader() {
         }
     }, []);
 
+    // 正在操作中的任务ID
+    const [operatingTaskId, setOperatingTaskId] = useState<string | null>(null);
+
     // 开始下载
     const handleStart = async (taskId: string) => {
+        setOperatingTaskId(taskId);
         try {
             await invoke('start_tile_download', { taskId });
             loadTasks();
         } catch (e) {
-            console.error('启动下载失败:', e);
             alert(`启动下载失败: ${e}`);
+        } finally {
+            setOperatingTaskId(null);
         }
     };
 
@@ -366,7 +374,7 @@ export default function TileDownloader() {
             await invoke('pause_tile_download', { taskId });
             loadTasks();
         } catch (e) {
-            console.error('暂停下载失败:', e);
+            alert(`暂停下载失败: ${e}`);
         }
     };
 
@@ -376,34 +384,46 @@ export default function TileDownloader() {
             await invoke('cancel_tile_download', { taskId });
             loadTasks();
         } catch (e) {
-            console.error('取消下载失败:', e);
+            alert(`取消下载失败: ${e}`);
         }
     };
 
     // 删除任务
-    const handleDelete = async (taskId: string, deleteFiles: boolean) => {
-        if (!confirm(deleteFiles ? '确定删除任务和文件？' : '确定删除任务？')) {
-            return;
-        }
+    const handleDelete = async (taskId: string) => {
+        if (!confirm('确定删除该下载任务？')) return;
         try {
-            await invoke('delete_tile_task', { taskId, deleteFiles });
-            loadTasks();
-            if (selectedTask?.id === taskId) {
-                setSelectedTask(null);
-            }
+            await invoke('delete_tile_task', { taskId, deleteFiles: false });
+            await loadTasks();
         } catch (e) {
-            console.error('删除任务失败:', e);
+            alert(`删除任务失败: ${e}`);
         }
     };
 
     // 重试失败瓦片
     const handleRetry = async (taskId: string) => {
+        setOperatingTaskId(taskId);
         try {
             const count = await invoke<number>('retry_failed_tiles', { taskId });
-            alert(`已重置 ${count} 个失败瓦片`);
+            if (count === 0) {
+                alert('没有需要重试的失败瓦片');
+                return;
+            }
+            await invoke('start_tile_download', { taskId });
             loadTasks();
         } catch (e) {
-            console.error('重试失败:', e);
+            alert(`重试失败: ${e}`);
+        } finally {
+            setOperatingTaskId(null);
+        }
+    };
+
+    // 打开文件夹
+    const handleOpenFolder = async (outputPath: string) => {
+        try {
+            const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+            await revealItemInDir(outputPath);
+        } catch (e) {
+            alert(`打开文件夹失败: ${e}`);
         }
     };
 
@@ -441,17 +461,23 @@ export default function TileDownloader() {
                     <p className="text-muted-foreground">下载地图瓦片用于离线使用</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => setShowTasksDialog(true)}>
-                        <History className="h-4 w-4 mr-2" />
-                        历史任务
-                        {tasks.length > 0 && (
-                            <span className="ml-2 px-1.5 py-0.5 text-xs bg-primary/20 text-primary rounded-full">
-                                {tasks.length}
-                            </span>
-                        )}
-                    </Button>
-                    <Button variant="outline" onClick={() => setShowConvertDialog(true)}>
-                        <FileArchive className="h-4 w-4 mr-2" />
+                    {(() => {
+                        const activeTasks = tasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
+                        return (
+                            <Button variant="outline" size="sm" onClick={() => setShowCurrentTasksDialog(true)}
+                                className={activeTasks.length > 0 ? 'border-blue-500/30 text-blue-600' : ''}>
+                                <Download className={cn('h-4 w-4 mr-1.5', activeTasks.length > 0 && 'animate-pulse')} />
+                                当前任务
+                                {activeTasks.length > 0 && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-600 rounded-full font-semibold">
+                                        {activeTasks.length}
+                                    </span>
+                                )}
+                            </Button>
+                        );
+                    })()}
+                    <Button variant="outline" size="sm" onClick={() => setShowConvertDialog(true)}>
+                        <FileArchive className="h-4 w-4 mr-1.5" />
                         格式转换
                     </Button>
                 </div>
@@ -560,34 +586,57 @@ export default function TileDownloader() {
                                     {selectionMode === 'region' && (
                                         <div className="space-y-2">
                                             <Label>行政区域</Label>
-                                            <div className="relative">
-                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                                <Input
-                                                    value={regionSearchQuery}
-                                                    onChange={(e) => handleRegionSearch(e.target.value)}
-                                                    placeholder="搜索行政区域..."
-                                                    className="pl-8 h-9"
-                                                />
-                                            </div>
-                                            {regionSearchResults.length > 0 && (
-                                                <div className="border rounded-md max-h-32 overflow-y-auto">
-                                                    {regionSearchResults.map((region) => (
-                                                        <button
-                                                            key={region.code}
-                                                            className={cn(
-                                                                'w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center justify-between',
-                                                                selectedRegionCode === region.code && 'bg-accent'
-                                                            )}
-                                                            onClick={() => setSelectedRegionCode(region.code)}
-                                                        >
-                                                            <span className="truncate">{region.name}</span>
-                                                            <span className="text-xs text-muted-foreground">
-                                                                {region.level === 'province' ? '省' :
-                                                                    region.level === 'city' ? '市' : '区/县'}
-                                                            </span>
-                                                        </button>
-                                                    ))}
+                                            {selectedRegionCode ? (
+                                                <div className="flex items-center gap-2 h-9 px-3 bg-primary/5 border border-primary/20 rounded-md">
+                                                    <Search className="h-4 w-4 text-primary/50 shrink-0" />
+                                                    <span className="text-sm flex-1 truncate">
+                                                        {selectedRegionName || selectedRegionCode}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => {
+                                                            setSelectedRegionCode(null);
+                                                            setSelectedRegionName(null);
+                                                            setRegionSearchQuery('');
+                                                            setRegionSearchResults([]);
+                                                            setBounds({ north: 0, south: 0, east: 0, west: 0 });
+                                                        }}
+                                                        className="text-muted-foreground hover:text-destructive shrink-0"
+                                                    >
+                                                        <span className="text-xs">✕</span>
+                                                    </button>
                                                 </div>
+                                            ) : (
+                                                <>
+                                                    <div className="relative">
+                                                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                                        <Input
+                                                            value={regionSearchQuery}
+                                                            onChange={(e) => handleRegionSearch(e.target.value)}
+                                                            placeholder="搜索行政区域..."
+                                                            className="pl-8 h-9"
+                                                        />
+                                                    </div>
+                                                    {regionSearchResults.length > 0 && (
+                                                        <div className="border rounded-md max-h-32 overflow-y-auto">
+                                                            {regionSearchResults.map((region) => (
+                                                                <button
+                                                                    key={region.code}
+                                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-accent flex items-center justify-between"
+                                                                    onClick={() => {
+                                                                        setSelectedRegionCode(region.code);
+                                                                        setSelectedRegionName(region.name);
+                                                                    }}
+                                                                >
+                                                                    <span className="truncate">{region.name}</span>
+                                                                    <span className="text-xs text-muted-foreground">
+                                                                        {region.level === 'province' ? '省' :
+                                                                            region.level === 'city' ? '市' : '区/县'}
+                                                                    </span>
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
                                     )}
@@ -657,7 +706,7 @@ export default function TileDownloader() {
 
                                     {/* 估算信息 */}
                                     {estimate && (
-                                        <Card className="bg-muted/50">
+                                        <Card className={estimate.total_tiles > 10_000_000 ? 'border-red-500/50 bg-red-500/5' : estimate.total_tiles > 1_000_000 ? 'border-yellow-500/50 bg-yellow-500/5' : 'bg-muted/50'}>
                                             <CardContent className="p-3">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <Layers className="h-4 w-4" />
@@ -667,6 +716,17 @@ export default function TileDownloader() {
                                                     <div>瓦片: <strong>{estimate.total_tiles.toLocaleString()}</strong></div>
                                                     <div>大小: <strong>{formatSize(estimate.estimated_size_mb)}</strong></div>
                                                 </div>
+                                                {estimate.total_tiles > 10_000_000 && (
+                                                    <div className="mt-2 text-xs text-red-500 font-medium">
+                                                        ⚠️ 瓦片数量过大（{(estimate.total_tiles / 1_000_000).toFixed(0)}M），可能导致内存溢出或下载数小时。建议缩小区域或减少层级。
+                                                        {platform === 'cjhy' && ' 航道图 Level 11+ 分辨率极高，大区域建议只选 4-10 级。'}
+                                                    </div>
+                                                )}
+                                                {estimate.total_tiles > 1_000_000 && estimate.total_tiles <= 10_000_000 && (
+                                                    <div className="mt-2 text-xs text-yellow-600">
+                                                        ⚠ 瓦片数超过 100 万，下载可能耗时较长
+                                                    </div>
+                                                )}
                                             </CardContent>
                                         </Card>
                                     )}
@@ -704,20 +764,129 @@ export default function TileDownloader() {
             {/* 转换对话框 */}
             <ConvertDialog open={showConvertDialog} onOpenChange={setShowConvertDialog} />
 
-            {/* 历史任务对话框 */}
-            <TasksDialog
-                open={showTasksDialog}
-                onOpenChange={setShowTasksDialog}
-                tasks={tasks}
-                selectedTask={selectedTask}
-                onSelectTask={setSelectedTask}
-                onStart={handleStart}
-                onPause={handlePause}
-                onCancel={handleCancel}
-                onRetry={handleRetry}
-                onDelete={handleDelete}
-                formatSpeed={formatSpeed}
-            />
+            {/* 当前任务弹框 */}
+            <Dialog open={showCurrentTasksDialog} onOpenChange={setShowCurrentTasksDialog}>
+                <DialogContent className="max-w-lg max-h-[70vh] flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Download className="h-5 w-5 text-blue-500" />
+                            当前下载任务
+                        </DialogTitle>
+                        <DialogDescription>
+                            {(() => {
+                                const active = tasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
+                                return active.length > 0 ? `${active.length} 个任务正在执行/等待中` : '无活跃任务';
+                            })()}
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        {(() => {
+                            const activeTasks = tasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
+                            if (activeTasks.length === 0) {
+                                return (
+                                    <div className="flex flex-col items-center justify-center h-32 text-muted-foreground">
+                                        <Download className="h-10 w-10 mb-3 opacity-20" />
+                                        <p>当前没有正在执行的下载任务</p>
+                                    </div>
+                                );
+                            }
+                            return (
+                                <SimpleBar className="h-full max-h-[45vh]">
+                                    <div className="space-y-2 pr-2">
+                                        {activeTasks.map(task => {
+                                            const progress = task.total_tiles > 0 ? ((task.completed_tiles + task.failed_tiles) / task.total_tiles) * 100 : 0;
+                                            const isActive = ['running', 'downloading'].includes(task.status);
+                                            const isPaused = task.status === 'paused';
+                                            const isPending = task.status === 'pending';
+                                            const isOperating = operatingTaskId === task.id;
+                                            return (
+                                                <div key={task.id} className={cn(
+                                                    'p-3 rounded-lg border transition-all',
+                                                    isActive && 'border-blue-500/30 bg-blue-500/5',
+                                                    isPaused && 'border-yellow-500/20 bg-yellow-500/5',
+                                                    isOperating && 'opacity-70',
+                                                    !isActive && !isPaused && 'border-border/50'
+                                                )}>
+                                                    {/* 名称 + 状态 + 操作 */}
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-medium text-sm flex-1 truncate">{task.name}</span>
+                                                        <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded-full',
+                                                            isActive ? 'text-blue-500 bg-blue-500/10' : isPaused ? 'text-yellow-500 bg-yellow-500/10' : 'text-muted-foreground bg-muted'
+                                                        )}>
+                                                            {statusInfo[task.status]?.name || task.status}
+                                                        </span>
+                                                        <div className="flex items-center gap-0.5">
+                                                            {isOperating && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground mr-1" />}
+                                                            {(isPending || isPaused) && (
+                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-500 hover:bg-green-500/10"
+                                                                    onClick={() => handleStart(task.id)} disabled={isOperating}>
+                                                                    <Play className="h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                            {isActive && (
+                                                                <>
+                                                                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-yellow-500 hover:bg-yellow-500/10"
+                                                                        onClick={() => handlePause(task.id)}>
+                                                                        <Pause className="h-3 w-3" />
+                                                                    </Button>
+                                                                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-500 hover:bg-red-500/10"
+                                                                        onClick={() => handleCancel(task.id)}>
+                                                                        <Square className="h-3 w-3" />
+                                                                    </Button>
+                                                                </>
+                                                            )}
+                                                            {task.failed_tiles > 0 && !isActive && (
+                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-orange-500 hover:bg-orange-500/10"
+                                                                    onClick={() => handleRetry(task.id)} disabled={isOperating}>
+                                                                    <RefreshCw className="h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                            {task.output_path && (
+                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                                    onClick={() => handleOpenFolder(task.output_path)}>
+                                                                    <FolderOpen className="h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                            {!isActive && (
+                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-400 hover:bg-red-500/10"
+                                                                    onClick={() => handleDelete(task.id)}>
+                                                                    <Trash2 className="h-3 w-3" />
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    {/* 进度 */}
+                                                    <div className="flex items-center gap-2 mt-2">
+                                                        <Progress value={progress} className="flex-1 h-1" />
+                                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                                            {task.completed_tiles.toLocaleString()}
+                                                            {task.failed_tiles > 0 && <span className="text-red-500"> ✗{task.failed_tiles.toLocaleString()}</span>}
+                                                            <span className="text-muted-foreground/50"> / {task.total_tiles.toLocaleString()}</span>
+                                                            {isActive && task.download_speed > 0 && (
+                                                                <span className="text-blue-400 ml-1">{formatSpeed(task.download_speed)}</span>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </SimpleBar>
+                            );
+                        })()}
+                    </div>
+
+                    <DialogFooter className="flex items-center justify-between">
+                        <Button variant="link" size="sm" className="text-muted-foreground" onClick={() => { setShowCurrentTasksDialog(false); navigate('/task-history'); }}>
+                            查看全部任务历史 →
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowCurrentTasksDialog(false)}>
+                            关闭
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -841,188 +1010,6 @@ function ConvertDialog({
                     </Button>
                     <Button onClick={handleConvert} disabled={loading || !inputFormat}>
                         {loading ? '转换中...' : '开始转换'}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-// 历史任务弹框组件
-function TasksDialog({
-    open,
-    onOpenChange,
-    tasks,
-    selectedTask,
-    onSelectTask,
-    onStart,
-    onPause,
-    onCancel,
-    onRetry,
-    onDelete,
-    formatSpeed,
-}: {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-    tasks: TaskInfo[];
-    selectedTask: TaskInfo | null;
-    onSelectTask: (task: TaskInfo | null) => void;
-    onStart: (taskId: string) => void;
-    onPause: (taskId: string) => void;
-    onCancel: (taskId: string) => void;
-    onRetry: (taskId: string) => void;
-    onDelete: (taskId: string, deleteFiles: boolean) => void;
-    formatSpeed: (speed: number) => string;
-}) {
-    return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
-                <DialogHeader>
-                    <DialogTitle>历史下载任务</DialogTitle>
-                    <DialogDescription>
-                        共 {tasks.length} 个任务
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div className="flex-1 min-h-0 overflow-hidden">
-                    {tasks.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
-                            <History className="h-12 w-12 mb-4 opacity-30" />
-                            <p>暂无下载任务</p>
-                            <p className="text-sm mt-1">在左侧创建新的下载任务</p>
-                        </div>
-                    ) : (
-                        <SimpleBar className="h-full max-h-[50vh]">
-                            <div className="space-y-2 pr-2">
-                                {tasks.map((task) => (
-                                    <Card
-                                        key={task.id}
-                                        className={cn(
-                                            'cursor-pointer transition-all hover:shadow-md',
-                                            selectedTask?.id === task.id && 'ring-2 ring-primary'
-                                        )}
-                                        onClick={() => onSelectTask(task)}
-                                    >
-                                        <CardContent className="p-3">
-                                            <div className="flex items-start justify-between mb-2">
-                                                <div className="flex-1 min-w-0">
-                                                    <h3 className="font-medium truncate">{task.name}</h3>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        {platformNames[task.platform] || task.platform} ·{' '}
-                                                        {mapTypeNames[task.map_type] || task.map_type}
-                                                    </p>
-                                                </div>
-                                                <span
-                                                    className={cn(
-                                                        'text-xs font-medium shrink-0 ml-2',
-                                                        statusInfo[task.status]?.color
-                                                    )}
-                                                >
-                                                    {statusInfo[task.status]?.name || task.status}
-                                                </span>
-                                            </div>
-
-                                            <Progress
-                                                value={
-                                                    task.total_tiles > 0
-                                                        ? ((task.completed_tiles + task.failed_tiles) /
-                                                            task.total_tiles) *
-                                                        100
-                                                        : 0
-                                                }
-                                                className="h-1.5 mb-2"
-                                            />
-
-                                            <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                                <span>
-                                                    {task.completed_tiles}/{task.total_tiles}
-                                                    {task.failed_tiles > 0 && (
-                                                        <span className="text-red-500 ml-1">
-                                                            ({task.failed_tiles} 失败)
-                                                        </span>
-                                                    )}
-                                                </span>
-                                                {task.status === 'downloading' && (
-                                                    <span>{formatSpeed(task.download_speed)}</span>
-                                                )}
-                                            </div>
-
-                                            <div className="flex gap-1 mt-2">
-                                                {(task.status === 'pending' || task.status === 'paused') && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        className="h-7 px-2"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onStart(task.id);
-                                                        }}
-                                                    >
-                                                        <Play className="h-3 w-3" />
-                                                    </Button>
-                                                )}
-                                                {task.status === 'downloading' && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        className="h-7 px-2"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onPause(task.id);
-                                                        }}
-                                                    >
-                                                        <Pause className="h-3 w-3" />
-                                                    </Button>
-                                                )}
-                                                {(task.status === 'downloading' || task.status === 'paused') && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        className="h-7 px-2"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onCancel(task.id);
-                                                        }}
-                                                    >
-                                                        <Square className="h-3 w-3" />
-                                                    </Button>
-                                                )}
-                                                {task.failed_tiles > 0 && task.status !== 'downloading' && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        className="h-7 px-2"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            onRetry(task.id);
-                                                        }}
-                                                    >
-                                                        <RefreshCw className="h-3 w-3" />
-                                                    </Button>
-                                                )}
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    className="h-7 px-2 text-destructive"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onDelete(task.id, false);
-                                                    }}
-                                                >
-                                                    <Trash2 className="h-3 w-3" />
-                                                </Button>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                ))}
-                            </div>
-                        </SimpleBar>
-                    )}
-                </div>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={() => onOpenChange(false)}>
-                        关闭
                     </Button>
                 </DialogFooter>
             </DialogContent>

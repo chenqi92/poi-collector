@@ -285,18 +285,31 @@ impl TileDownloader {
         // 下载循环
         loop {
             // 检查是否暂停
-            if state.is_paused.load(Ordering::Relaxed) {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+            if state.is_paused.load(Ordering::SeqCst) {
+                // 发送暂停状态事件
+                let _ = progress_tx
+                    .send(ProgressEvent {
+                        task_id: task_id_clone.clone(),
+                        completed: state.completed.load(Ordering::SeqCst),
+                        failed: state.failed.load(Ordering::SeqCst),
+                        total: total_tiles,
+                        speed: 0.0,
+                        current_zoom: state.current_zoom.load(Ordering::SeqCst),
+                        status: "paused".to_string(),
+                        message: None,
+                    })
+                    .await;
+                tokio::time::sleep(Duration::from_millis(200)).await;
                 continue;
             }
 
             // 检查是否停止
-            if !state.is_running.load(Ordering::Relaxed) {
+            if !state.is_running.load(Ordering::SeqCst) {
                 break;
             }
 
             // 获取待下载瓦片
-            let current_thread_count = state.thread_count.load(Ordering::Relaxed) as usize;
+            let current_thread_count = state.thread_count.load(Ordering::SeqCst) as usize;
             let pending = db
                 .get_pending_tiles(&task_id_clone, current_thread_count * 2)
                 .map_err(|e| format!("获取待下载瓦片失败: {}", e))?;
@@ -315,7 +328,7 @@ impl TileDownloader {
 
             // 更新当前层级
             if let Some(first) = pending.first() {
-                state.current_zoom.store(first.z, Ordering::Relaxed);
+                state.current_zoom.store(first.z, Ordering::SeqCst);
             }
 
             // 并发下载
@@ -347,14 +360,38 @@ impl TileDownloader {
                 handles.push(handle);
             }
 
-            // 等待所有下载完成
-            for handle in handles {
-                let _ = handle.await;
+            // 等待所有下载完成，同时检查停止/暂停信号
+            loop {
+                // 检查是否需要停止
+                if !state.is_running.load(Ordering::SeqCst) {
+                    // 停止时终止所有正在运行的任务
+                    for handle in &handles {
+                        handle.abort();
+                    }
+                    break;
+                }
+
+                // 检查是否所有任务都完成了
+                let all_done = handles.iter().all(|h| h.is_finished());
+                if all_done {
+                    // 收集结果
+                    for handle in handles {
+                        let _ = handle.await;
+                    }
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+
+            // 再次检查停止标志
+            if !state.is_running.load(Ordering::SeqCst) {
+                break;
             }
 
             // 发送进度事件
-            let completed = state.completed.load(Ordering::Relaxed);
-            let failed = state.failed.load(Ordering::Relaxed);
+            let completed = state.completed.load(Ordering::SeqCst);
+            let failed = state.failed.load(Ordering::SeqCst);
             let speed = state.calculate_speed();
 
             let _ = progress_tx
@@ -364,7 +401,7 @@ impl TileDownloader {
                     failed,
                     total: total_tiles,
                     speed,
-                    current_zoom: state.current_zoom.load(Ordering::Relaxed),
+                    current_zoom: state.current_zoom.load(Ordering::SeqCst),
                     status: "downloading".to_string(),
                     message: None,
                 })
@@ -487,7 +524,7 @@ async fn download_tile_with_url(
         Some(url) => url,
         None => {
             db.mark_tile_failed(task_id, tile, "不支持的地图类型").ok();
-            state.failed.fetch_add(1, Ordering::Relaxed);
+            state.failed.fetch_add(1, Ordering::SeqCst);
             return;
         }
     };
@@ -495,6 +532,11 @@ async fn download_tile_with_url(
     let mut retries = 0;
 
     loop {
+        // 在每次重试前检查是否已停止
+        if !state.is_running.load(Ordering::SeqCst) {
+            return;
+        }
+
         let mut request = client.get(&url);
         for (key, value) in &headers {
             request = request.header(key, value);
@@ -510,17 +552,17 @@ async fn download_tile_with_url(
                             if let Err(e) = s.save_tile(tile, &data) {
                                 log::warn!("保存瓦片失败 {}/{}/{}: {}", tile.z, tile.x, tile.y, e);
                                 db.mark_tile_failed(task_id, tile, &e).ok();
-                                state.failed.fetch_add(1, Ordering::Relaxed);
+                                state.failed.fetch_add(1, Ordering::SeqCst);
                             } else {
                                 db.mark_tile_completed(task_id, tile).ok();
-                                state.completed.fetch_add(1, Ordering::Relaxed);
+                                state.completed.fetch_add(1, Ordering::SeqCst);
                             }
                             return;
                         }
                         Err(e) => {
                             if retries >= max_retries {
                                 db.mark_tile_failed(task_id, tile, &e.to_string()).ok();
-                                state.failed.fetch_add(1, Ordering::Relaxed);
+                                state.failed.fetch_add(1, Ordering::SeqCst);
                                 return;
                             }
                         }
@@ -529,14 +571,14 @@ async fn download_tile_with_url(
                     // 4xx 错误不重试
                     let error = format!("HTTP {}", response.status());
                     db.mark_tile_failed(task_id, tile, &error).ok();
-                    state.failed.fetch_add(1, Ordering::Relaxed);
+                    state.failed.fetch_add(1, Ordering::SeqCst);
                     return;
                 } else {
                     // 5xx 错误重试
                     if retries >= max_retries {
                         let error = format!("HTTP {}", response.status());
                         db.mark_tile_failed(task_id, tile, &error).ok();
-                        state.failed.fetch_add(1, Ordering::Relaxed);
+                        state.failed.fetch_add(1, Ordering::SeqCst);
                         return;
                     }
                 }
@@ -544,15 +586,21 @@ async fn download_tile_with_url(
             Err(e) => {
                 if retries >= max_retries {
                     db.mark_tile_failed(task_id, tile, &e.to_string()).ok();
-                    state.failed.fetch_add(1, Ordering::Relaxed);
+                    state.failed.fetch_add(1, Ordering::SeqCst);
                     return;
                 }
             }
         }
 
         retries += 1;
-        // 指数退避
-        let delay = Duration::from_millis(1000 * 2u64.pow(retries.min(4)));
-        tokio::time::sleep(delay).await;
+        // 指数退避（缩短最大等待，停止时可快速退出）
+        let delay_ms = 500 * 2u64.pow(retries.min(3)); // 最大4秒
+        let steps = (delay_ms / 100).max(1);
+        for _ in 0..steps {
+            if !state.is_running.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
 }

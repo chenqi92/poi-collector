@@ -77,6 +77,7 @@ impl ChartLayer {
         headers
     }
 
+    #[allow(dead_code)]
     pub fn all() -> Vec<ChartLayer> {
         vec![
             ChartLayer::Yizhangtu,
@@ -163,6 +164,7 @@ pub struct GridCell {
     pub lat1: f64,
     pub lon2: f64,
     pub lat2: f64,
+    #[allow(dead_code)]
     pub index: usize,
 }
 
@@ -205,6 +207,7 @@ pub struct ChartProgressEvent {
 
 /// 航标 API 响应结构
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct BuoyApiResponse {
     pub result: Option<String>,
     pub time: Option<u64>,

@@ -8,6 +8,7 @@ import {
     Database,
     Settings,
     Map,
+    ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -18,6 +19,7 @@ const navItems = [
     { path: '/dashboard', icon: LayoutDashboard, label: '概览' },
     { path: '/collector', icon: Download, label: '采集' },
     { path: '/tile-downloader', icon: Map, label: '瓦片' },
+    { path: '/task-history', icon: ClipboardList, label: '任务' },
     { path: '/search', icon: Search, label: '查询' },
     { path: '/export', icon: FileOutput, label: '导出' },
     { path: '/data-management', icon: Database, label: '数据管理' },

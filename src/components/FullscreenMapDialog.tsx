@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-import { DragDrawRectangle, Bounds } from './DragDrawRectangle';
+import { DrawPolygon, Bounds } from './DrawPolygon';
 import { MapSearchBox } from './MapSearchBox';
 import { TilePreviewLayer } from './TilePreviewLayer';
 import { RegionBoundary } from './RegionBoundary';
@@ -262,7 +262,7 @@ export function FullscreenMapDialog({
 
                         {/* 根据模式显示不同的交互组件 */}
                         {selectionMode === 'draw' && (
-                            <DragDrawRectangle
+                            <DrawPolygon
                                 bounds={localBounds}
                                 onBoundsChange={setLocalBounds}
                                 editable={true}

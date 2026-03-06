@@ -331,4 +331,106 @@ impl ChartDatabase {
 
         Ok(stats)
     }
+
+    /// 创建航标采集任务
+    pub fn create_chart_task(&self, task_type: &str, total: i64) -> Result<i64, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.execute(
+            "INSERT INTO chart_tasks (task_type, status, total_items) VALUES (?1, 'running', ?2)",
+            params![task_type, total],
+        )
+        .map_err(|e| format!("创建任务失败: {}", e))?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 更新航标采集任务进度
+    pub fn update_chart_task_progress(
+        &self,
+        task_id: i64,
+        completed: i64,
+        failed: i64,
+    ) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.execute(
+            "UPDATE chart_tasks SET completed_items = ?1, failed_items = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3",
+            params![completed, failed, task_id],
+        ).map_err(|e| format!("更新任务进度失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 完成航标采集任务
+    pub fn complete_chart_task(
+        &self,
+        task_id: i64,
+        status: &str,
+        completed: i64,
+        failed: i64,
+    ) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.execute(
+            "UPDATE chart_tasks SET status = ?1, completed_items = ?2, failed_items = ?3, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
+            params![status, completed, failed, task_id],
+        ).map_err(|e| format!("完成任务失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 获取所有航标采集任务
+    pub fn get_chart_tasks(&self) -> Result<Vec<ChartTask>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, task_type, status, total_items, completed_items, failed_items, output_path, zoom_levels, layers, created_at, completed_at FROM chart_tasks ORDER BY id DESC"
+        ).map_err(|e| format!("准备查询失败: {}", e))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ChartTask {
+                    id: row.get(0)?,
+                    task_type: row.get(1)?,
+                    status: row.get(2)?,
+                    total_items: row.get(3)?,
+                    completed_items: row.get(4)?,
+                    failed_items: row.get(5)?,
+                    output_path: row.get(6)?,
+                    zoom_levels: row.get(7)?,
+                    layers: row.get(8)?,
+                    created_at: row.get(9)?,
+                    completed_at: row.get(10)?,
+                })
+            })
+            .map_err(|e| format!("查询失败: {}", e))?;
+
+        let mut tasks = Vec::new();
+        for row in rows {
+            tasks.push(row.map_err(|e| format!("解析行失败: {}", e))?);
+        }
+        Ok(tasks)
+    }
+}
+
+/// 航标采集任务记录
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChartTask {
+    pub id: i64,
+    pub task_type: String,
+    pub status: String,
+    pub total_items: i64,
+    pub completed_items: i64,
+    pub failed_items: i64,
+    pub output_path: Option<String>,
+    pub zoom_levels: Option<String>,
+    pub layers: Option<String>,
+    pub created_at: Option<String>,
+    pub completed_at: Option<String>,
 }

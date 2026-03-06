@@ -582,7 +582,7 @@ export default function Collector() {
                         </div>
                         <div className="flex-1 min-h-0 overflow-hidden bg-[hsl(222,47%,4%)]">
                             <SimpleBar className="h-full">
-                                <div className="terminal-bg p-2 font-mono text-[11px] min-h-full">
+                                <div className="terminal-bg p-2 font-mono text-[11px] min-h-full select-text cursor-text">
                                     {logs.length > 0 ? (
                                         logs.map((log, i) => (
                                             <div key={i} className="text-gray-400 py-px hover:bg-white/5 px-1.5 -mx-1.5 rounded leading-relaxed">

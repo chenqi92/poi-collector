@@ -6,6 +6,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 桌面应用：禁止全局文本选择和拖拽 */
+*,
+*::before,
+*::after {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 允许输入框和文本域中的文本选择 */
+input,
+textarea,
+[contenteditable="true"],
+pre,
+code,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+
 @layer base {
   :root {
     /* Light Mode - Clean Professional */

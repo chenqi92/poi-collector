@@ -20,7 +20,7 @@ static TILE_DOWNLOADER: Lazy<TileDownloader> = Lazy::new(TileDownloader::new);
 static TILE_DB: Lazy<RwLock<Option<Arc<TileDatabase>>>> = Lazy::new(|| RwLock::new(None));
 
 /// 初始化瓦片数据库
-fn get_tile_db(app: &AppHandle) -> Result<Arc<TileDatabase>, String> {
+pub fn get_tile_db(app: &AppHandle) -> Result<Arc<TileDatabase>, String> {
     let mut db_guard = TILE_DB.write();
     if db_guard.is_none() {
         let app_dir = app
