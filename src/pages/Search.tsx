@@ -360,8 +360,8 @@ export default function Search() {
                                                     }`}
                                             >
                                                 <div className="flex items-start gap-3">
-                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${selectedId === idx ? 'bg-blue-500/20' : 'bg-muted'}`}>
-                                                        <Anchor className={`w-4 h-4 ${selectedId === idx ? 'text-blue-500' : 'text-muted-foreground'}`} />
+                                                    <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${selectedId === idx ? 'bg-blue-500/20' : 'bg-muted'}`}>
+                                                        <Anchor className={`w-3 h-3 ${selectedId === idx ? 'text-blue-500' : 'text-muted-foreground'}`} />
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="font-medium text-foreground truncate">{buoy.name || buoy.id}</div>

@@ -371,6 +371,12 @@ export default function Collector() {
                             </div>
 
                             {/* 平台采集卡片 - 紧凑版 */}
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xs font-semibold text-primary flex items-center gap-1">
+                                    <MapPin className="w-3 h-3" /> POI 采集
+                                </span>
+                                <div className="flex-1 h-px bg-border" />
+                            </div>
                             <div className="grid grid-cols-2 xl:grid-cols-4 gap-2.5">
                                 {platforms.map((platformConfig) => {
                                     const platform = platformConfig.id;
@@ -478,6 +484,14 @@ export default function Collector() {
                                         </Card>
                                     );
                                 })}
+                            </div>
+
+                            {/* 航标采集分隔标题 */}
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className="text-xs font-semibold text-blue-500 flex items-center gap-1">
+                                    <Anchor className="w-3 h-3" /> 航标采集
+                                </span>
+                                <div className="flex-1 h-px bg-border" />
                             </div>
 
                             {/* 航标采集卡片 - 紧凑版 */}
