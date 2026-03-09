@@ -419,7 +419,7 @@ fn csv_escape(s: &str) -> String {
     }
 }
 
-/// 导出航标数据（JSON 或 CSV）
+/// 导出航标数据（JSON、CSV 或 SQL）
 #[tauri::command]
 pub fn chart_export_buoys(
     format: String,
@@ -449,16 +449,20 @@ pub fn chart_export_buoys(
             json.into_bytes()
         }
         "csv" => {
-            let mut csv = String::from("id,name,lon_84,lat_84,buoy_type,color,organization_id\n");
+            let mut csv = String::from("id,name,lon_84,lat_84,buoy_type,color,waterway,shape,light_info,region,organization_id\n");
             for b in &buoys {
                 csv.push_str(&format!(
-                    "{},{},{},{},{},{},{}\n",
+                    "{},{},{},{},{},{},{},{},{},{},{}\n",
                     csv_escape(&b.id),
                     csv_escape(b.name.as_deref().unwrap_or("")),
                     b.lon_84.map(|v| v.to_string()).unwrap_or_default(),
                     b.lat_84.map(|v| v.to_string()).unwrap_or_default(),
                     csv_escape(b.buoy_type.as_deref().unwrap_or("")),
                     csv_escape(b.color.as_deref().unwrap_or("")),
+                    csv_escape(b.waterway.as_deref().unwrap_or("")),
+                    csv_escape(b.shape.as_deref().unwrap_or("")),
+                    csv_escape(b.light_info.as_deref().unwrap_or("")),
+                    csv_escape(b.region.as_deref().unwrap_or("")),
                     csv_escape(b.organization_id.as_deref().unwrap_or("")),
                 ));
             }
@@ -466,6 +470,48 @@ pub fn chart_export_buoys(
             let mut bytes = vec![0xEF, 0xBB, 0xBF];
             bytes.extend_from_slice(csv.as_bytes());
             bytes
+        }
+        "mysql" => {
+            let mut sql_bytes: Vec<u8> = vec![0xEF, 0xBB, 0xBF]; // UTF-8 BOM
+            let mut sql = String::new();
+            sql.push_str("-- 航标数据导出\n");
+            sql.push_str("-- 生成时间: ");
+            sql.push_str(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+            sql.push_str("\n-- 编码: UTF-8\n\n");
+            sql.push_str("SET NAMES utf8mb4;\n\n");
+            sql.push_str("CREATE TABLE IF NOT EXISTS buoy_data (\n");
+            sql.push_str("  id VARCHAR(64) PRIMARY KEY,\n");
+            sql.push_str("  name VARCHAR(255),\n");
+            sql.push_str("  lon_84 DOUBLE,\n");
+            sql.push_str("  lat_84 DOUBLE,\n");
+            sql.push_str("  buoy_type VARCHAR(100),\n");
+            sql.push_str("  color VARCHAR(50),\n");
+            sql.push_str("  waterway VARCHAR(255),\n");
+            sql.push_str("  shape VARCHAR(100),\n");
+            sql.push_str("  light_info VARCHAR(255),\n");
+            sql.push_str("  region VARCHAR(100),\n");
+            sql.push_str("  organization_id VARCHAR(100)\n");
+            sql.push_str(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n");
+
+            for b in &buoys {
+                let sql_escape = |s: &str| s.replace("'", "''");
+                sql.push_str(&format!(
+                    "INSERT INTO buoy_data (id, name, lon_84, lat_84, buoy_type, color, waterway, shape, light_info, region, organization_id) VALUES ('{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n",
+                    sql_escape(&b.id),
+                    b.name.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.lon_84.map(|v| v.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                    b.lat_84.map(|v| v.to_string()).unwrap_or_else(|| "NULL".to_string()),
+                    b.buoy_type.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.color.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.waterway.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.shape.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.light_info.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.region.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                    b.organization_id.as_ref().map(|v| format!("'{}'", sql_escape(v))).unwrap_or_else(|| "NULL".to_string()),
+                ));
+            }
+            sql_bytes.extend_from_slice(sql.as_bytes());
+            sql_bytes
         }
         _ => return Err(format!("不支持的格式: {}", format)),
     };

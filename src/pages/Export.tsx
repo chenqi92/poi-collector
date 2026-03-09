@@ -95,10 +95,14 @@ export default function Export() {
   const [platform, setPlatform] = useState("all");
   const { success: showSuccess, error: showError } = useToast();
 
-  // 导出弹框
+  // POI 导出弹框
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [format, setFormat] = useState("excel");
   const [exporting, setExporting] = useState(false);
+
+  // 航标导出弹框
+  const [showBuoyExportDialog, setShowBuoyExportDialog] = useState(false);
+  const [buoyFormat, setBuoyFormat] = useState("excel");
 
   // 地区筛选
   const [provinces, setProvinces] = useState<Region[]>([]);
@@ -455,18 +459,29 @@ export default function Export() {
     );
   };
 
-  const handleBuoyExport = async (fmt: 'json' | 'csv') => {
-    const ext = fmt === 'json' ? 'json' : 'csv';
-    const filterName = fmt === 'json' ? 'JSON 文件' : 'CSV 文件';
+  const handleBuoyExport = async () => {
+    if (filteredBuoyData.length === 0) {
+      showError('无数据', '没有可导出的航标数据');
+      return;
+    }
+
+    const formatInfo = formats.find(f => f.id === buoyFormat);
+    if (!formatInfo) return;
+
+    const filePath = await save({
+      defaultPath: `buoys_export_${new Date().toISOString().split('T')[0]}.${formatInfo.ext}`,
+      filters: [{ name: formatInfo.label, extensions: [formatInfo.ext] }],
+    });
+
+    if (!filePath) return;
+
     setBuoyExporting(true);
     try {
-      const filePath = await save({
-        defaultPath: `buoys_export.${ext}`,
-        filters: [{ name: filterName, extensions: [ext] }],
-      });
-      if (!filePath) { setBuoyExporting(false); return; }
-      const result = await invoke<string>('chart_export_buoys', { format: fmt, outputPath: filePath });
+      // formats 中 id 为 excel 对应后端 csv，mysql 对应后端 mysql
+      const backendFormat = buoyFormat === 'excel' ? 'csv' : buoyFormat;
+      const result = await invoke<string>('chart_export_buoys', { format: backendFormat, outputPath: filePath });
       showSuccess('导出成功', result);
+      setShowBuoyExportDialog(false);
     } catch (e) {
       showError('导出失败', String(e));
     } finally {
@@ -815,16 +830,13 @@ export default function Export() {
                       </Button>
                     </div>
                   )}
-                  <Button variant="outline" disabled={buoyExporting || buoyCount === 0}
-                    onClick={() => handleBuoyExport('json')}>
-                    {buoyExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileJson className="w-4 h-4 mr-2" />}
-                    JSON
-                  </Button>
-                  <Button className="gradient-primary text-white border-0 hover:opacity-90"
-                    disabled={buoyExporting || buoyCount === 0}
-                    onClick={() => handleBuoyExport('csv')}>
-                    {buoyExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-                    导出 CSV
+                  <Button
+                    onClick={() => setShowBuoyExportDialog(true)}
+                    disabled={filteredBuoyData.length === 0}
+                    className="gradient-primary text-white border-0 hover:opacity-90"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    导出数据
                   </Button>
                 </div>
               </div>
@@ -953,6 +965,79 @@ export default function Export() {
             </Button>
             <Button onClick={handleExport} disabled={exporting} className="gradient-primary text-white border-0 hover:opacity-90">
               {exporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  导出中...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  选择位置导出
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 航标导出弹框 */}
+      <Dialog open={showBuoyExportDialog} onOpenChange={setShowBuoyExportDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center">
+                <Anchor className="w-4 h-4 text-white" />
+              </div>
+              导出航标数据
+            </DialogTitle>
+            <DialogDescription>
+              选择导出格式，将导出 <span className="text-blue-500 font-medium">{filteredBuoyData.length.toLocaleString()}</span> 条航标数据
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-4">
+            {formats.map((f) => {
+              const Icon = f.icon;
+              const isSelected = buoyFormat === f.id;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setBuoyFormat(f.id)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all cursor-pointer hover-lift
+                    ${isSelected
+                      ? "border-blue-500/50 bg-blue-500/5"
+                      : "border-border hover:border-blue-500/30"
+                    }`}
+                >
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isSelected ? `bg-gradient-to-r ${f.gradient}` : 'bg-muted'}`}>
+                    <Icon className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-muted-foreground'}`} />
+                  </div>
+                  <span
+                    className={
+                      isSelected
+                        ? "text-foreground font-medium"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {f.label}
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {f.desc}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowBuoyExportDialog(false)}
+            >
+              取消
+            </Button>
+            <Button onClick={handleBuoyExport} disabled={buoyExporting} className="bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 hover:opacity-90">
+              {buoyExporting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin mr-2" />
                   导出中...
