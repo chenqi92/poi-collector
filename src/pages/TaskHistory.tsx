@@ -494,8 +494,8 @@ export default function TaskHistory() {
 
             {/* 日志弹窗 */}
             <Dialog open={!!logTaskId} onOpenChange={(open) => !open && setLogTaskId(null)}>
-                <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
-                    <DialogHeader>
+                <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+                    <DialogHeader className="shrink-0">
                         <DialogTitle>任务日志</DialogTitle>
                     </DialogHeader>
                     {logLoading ? (
@@ -503,7 +503,7 @@ export default function TaskHistory() {
                             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                         </div>
                     ) : logData ? (
-                        <SimpleBar className="flex-1 overflow-auto">
+                        <SimpleBar className="flex-1 min-h-0">
                             <div className="space-y-4 pr-2">
                                 {/* 统计概览 */}
                                 <div className="grid grid-cols-4 gap-2 text-center text-sm">
@@ -553,7 +553,7 @@ export default function TaskHistory() {
                                         </h4>
                                         <div className="border rounded-md overflow-hidden">
                                             <table className="w-full text-xs">
-                                                <thead className="bg-muted/50">
+                                                <thead className="bg-muted/50 sticky top-0 z-10">
                                                     <tr>
                                                         <th className="text-left px-2 py-1.5 font-medium">Z</th>
                                                         <th className="text-left px-2 py-1.5 font-medium">X</th>
