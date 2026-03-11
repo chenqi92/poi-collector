@@ -85,6 +85,7 @@ pub fn run() {
             chart_commands::chart_get_default_bounds,
             chart_commands::chart_reset_status,
             chart_commands::chart_export_buoys,
+            chart_commands::chart_get_tile_count,
             chart_commands::chart_get_buoy_stats,
             chart_commands::chart_get_all_buoys,
         ])

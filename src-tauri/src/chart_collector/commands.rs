@@ -525,6 +525,64 @@ pub fn chart_export_buoys(
     ))
 }
 
+/// 瓦片文件统计结果
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChartTileStats {
+    pub total: u64,
+    pub by_layer: Vec<(String, u64)>,
+}
+
+/// 获取已下载的航道图瓦片数量（通过遍历文件系统）
+#[tauri::command]
+pub fn chart_get_tile_count() -> Result<ChartTileStats, String> {
+    let tiles_dir = get_default_output_dir();
+    let base = std::path::Path::new(&tiles_dir);
+
+    if !base.exists() {
+        return Ok(ChartTileStats {
+            total: 0,
+            by_layer: vec![],
+        });
+    }
+
+    let layer_names = [
+        ("yizhangtu", "底图"),
+        ("cjshoudong", "水域"),
+        ("soundg", "水深"),
+    ];
+
+    let mut total: u64 = 0;
+    let mut by_layer = Vec::new();
+
+    for (layer_id, layer_label) in &layer_names {
+        let layer_dir = base.join(layer_id);
+        if !layer_dir.exists() {
+            continue;
+        }
+        let mut count: u64 = 0;
+        // Walk the directory recursively
+        fn count_files(dir: &std::path::Path, count: &mut u64) {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        count_files(&path, count);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("png") {
+                        *count += 1;
+                    }
+                }
+            }
+        }
+        count_files(&layer_dir, &mut count);
+        if count > 0 {
+            by_layer.push((format!("{} ({})", layer_label, layer_id), count));
+            total += count;
+        }
+    }
+
+    Ok(ChartTileStats { total, by_layer })
+}
+
 /// 获取航标按类型分组统计
 #[tauri::command]
 pub fn chart_get_buoy_stats() -> Result<Vec<(String, i64)>, String> {

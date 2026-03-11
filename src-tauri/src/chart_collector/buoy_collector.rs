@@ -266,11 +266,18 @@ impl BuoyCollector {
                         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
                 });
 
+                // 优先使用 hbxz (航标形状) 作为类型，API 不返回 hblx
                 let buoy_type = obj
-                    .get("hblx")
+                    .get("hbxz")
+                    .or_else(|| obj.get("hblx"))
                     .or_else(|| obj.get("type"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .and_then(|v| {
+                        v.as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| v.as_i64().map(|n| n.to_string()))
+                            .or_else(|| v.as_f64().map(|n| n.to_string()))
+                    })
+                    .filter(|s| !s.is_empty());
 
                 let icon_url = obj
                     .get("hbtlpz")
@@ -295,11 +302,8 @@ impl BuoyCollector {
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
 
-                let shape = obj
-                    .get("hbxz")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string());
+                // shape 与 buoy_type 使用同一字段 hbxz
+                let shape = buoy_type.clone();
 
                 let light_info = obj
                     .get("dzxx")

@@ -16,6 +16,8 @@ import {
     FileArchive,
     Search,
     Download,
+    AlertTriangle,
+    Info,
 } from 'lucide-react';
 import { TileBoundsMap } from '@/components/TileBoundsMap';
 import { Button } from '@/components/ui/button';
@@ -465,12 +467,19 @@ export default function TileDownloader() {
                     {(() => {
                         const activeTasks = tasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
                         return (
-                            <Button variant="outline" size="sm" onClick={() => setShowCurrentTasksDialog(true)}
-                                className={activeTasks.length > 0 ? 'border-blue-500/30 text-blue-600' : ''}>
-                                <Download className={cn('h-4 w-4 mr-1.5', activeTasks.length > 0 && 'animate-pulse')} />
-                                当前任务
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowCurrentTasksDialog(true)}
+                                className={cn(
+                                    "transition-all duration-300 relative overflow-hidden",
+                                    activeTasks.length > 0 ? "border-blue-500/40 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 bg-blue-500/5 shadow-[0_0_10px_rgba(59,130,246,0.15)]" : ""
+                                )}
+                            >
+                                <Download className={cn('h-4 w-4 mr-1.5', activeTasks.length > 0 && 'animate-bounce')} />
+                                <span className="font-medium tracking-tight">当前任务</span>
                                 {activeTasks.length > 0 && (
-                                    <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-blue-500/20 text-blue-600 rounded-full font-semibold">
+                                    <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-blue-500 text-white rounded-full font-bold shadow-sm">
                                         {activeTasks.length}
                                     </span>
                                 )}
@@ -714,29 +723,84 @@ export default function TileDownloader() {
 
                                     {/* 估算信息 */}
                                     {estimate && (
-                                        <Card className={estimate.total_tiles > 10_000_000 ? 'border-red-500/50 bg-red-500/5' : estimate.total_tiles > 1_000_000 ? 'border-yellow-500/50 bg-yellow-500/5' : 'bg-muted/50'}>
-                                            <CardContent className="p-3">
-                                                <div className="flex items-center gap-2 mb-2">
+                                        <div className={cn(
+                                            "relative overflow-hidden rounded-xl border p-4 transition-all duration-300 animate-in fade-in slide-in-from-bottom-2",
+                                            estimate.total_tiles > 10_000_000
+                                                ? "border-red-500/30 bg-gradient-to-br from-red-500/10 via-red-500/5 to-transparent shadow-[0_0_15px_rgba(239,68,68,0.1)]"
+                                                : estimate.total_tiles > 1_000_000
+                                                    ? "border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 via-yellow-500/5 to-transparent shadow-[0_0_15px_rgba(234,179,8,0.1)]"
+                                                    : "border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent shadow-sm"
+                                        )}>
+                                            <div className="flex items-center gap-2 mb-4 relative z-10">
+                                                <div className={cn(
+                                                    "p-1.5 rounded-md",
+                                                    estimate.total_tiles > 10_000_000 ? "bg-red-500/20 text-red-600" :
+                                                        estimate.total_tiles > 1_000_000 ? "bg-yellow-500/20 text-yellow-600" :
+                                                            "bg-primary/20 text-primary"
+                                                )}>
                                                     <Layers className="h-4 w-4" />
-                                                    <span className="font-medium text-sm">预估信息</span>
                                                 </div>
-                                                <div className="grid grid-cols-2 gap-2 text-sm">
-                                                    <div>瓦片: <strong>{estimate.total_tiles.toLocaleString()}</strong></div>
-                                                    <div>大小: <strong>{formatSize(estimate.estimated_size_mb)}</strong></div>
+                                                <span className="font-semibold text-sm tracking-tight text-foreground">下载任务预估</span>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4 relative z-10">
+                                                <div className="space-y-1">
+                                                    <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">瓦片总数</p>
+                                                    <div className="flex items-baseline gap-1">
+                                                        <span className={cn(
+                                                            "text-2xl font-bold tracking-tight",
+                                                            estimate.total_tiles > 10_000_000 ? "text-red-500" :
+                                                                estimate.total_tiles > 1_000_000 ? "text-yellow-600 dark:text-yellow-500" :
+                                                                    "text-foreground"
+                                                        )}>
+                                                            {estimate.total_tiles > 1_000_000 ? (estimate.total_tiles / 1_000_000).toFixed(1) + 'M' : estimate.total_tiles.toLocaleString()}
+                                                        </span>
+                                                        <span className="text-xs text-muted-foreground font-medium">张</span>
+                                                    </div>
                                                 </div>
-                                                {estimate.total_tiles > 10_000_000 && (
-                                                    <div className="mt-2 text-xs text-red-500 font-medium">
-                                                        ⚠️ 瓦片数量过大（{(estimate.total_tiles / 1_000_000).toFixed(0)}M），可能导致内存溢出或下载数小时。建议缩小区域或减少层级。
-                                                        {platform === 'cjhy' && ' 航道图 Level 11+ 分辨率极高，大区域建议只选 4-10 级。'}
+                                                <div className="space-y-1">
+                                                    <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">预估大小</p>
+                                                    <div className="flex items-baseline gap-1">
+                                                        <span className="text-2xl font-bold tracking-tight text-foreground">
+                                                            {parseFloat(formatSize(estimate.estimated_size_mb))}
+                                                        </span>
+                                                        <span className="text-xs text-muted-foreground font-medium">
+                                                            {formatSize(estimate.estimated_size_mb).replace(/[0-9.]/g, '').trim()}
+                                                        </span>
                                                     </div>
-                                                )}
-                                                {estimate.total_tiles > 1_000_000 && estimate.total_tiles <= 10_000_000 && (
-                                                    <div className="mt-2 text-xs text-yellow-600">
-                                                        ⚠ 瓦片数超过 100 万，下载可能耗时较长
+                                                </div>
+                                            </div>
+
+                                            {estimate.total_tiles > 1_000_000 && (
+                                                <div className={cn(
+                                                    "relative mt-4 p-2.5 rounded-lg border text-xs leading-relaxed font-medium z-10 flex gap-2 items-start transition-colors",
+                                                    estimate.total_tiles > 10_000_000
+                                                        ? "bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400"
+                                                        : "bg-yellow-500/10 border-yellow-500/20 text-yellow-700 dark:text-yellow-500"
+                                                )}>
+                                                    {estimate.total_tiles > 10_000_000 ? (
+                                                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                                    ) : (
+                                                        <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                                    )}
+                                                    <div>
+                                                        {estimate.total_tiles > 10_000_000 ? (
+                                                            <>极大数量警告：数据量达到 <strong>{(estimate.total_tiles / 1_000_000).toFixed(1)}M</strong>，可能导致耗时过长或内存溢出，强烈建议缩小框选区域或减少层级。{platform === 'cjhy' && '航道图 Level 11+ 分辨率极高，建议大区域仅选择 4-10 级。'}</>
+                                                        ) : (
+                                                            <>大批量下载提醒：瓦片总数超过 100 万，任务执行可能需要较长时间，请耐心等待。</>
+                                                        )}
                                                     </div>
-                                                )}
-                                            </CardContent>
-                                        </Card>
+                                                </div>
+                                            )}
+
+                                            {/* 装饰性背景光晕 */}
+                                            <div className={cn(
+                                                "absolute -top-6 -right-6 w-32 h-32 rounded-full blur-3xl opacity-20 pointer-events-none z-0 transition-colors duration-500",
+                                                estimate.total_tiles > 10_000_000 ? "bg-red-500" :
+                                                    estimate.total_tiles > 1_000_000 ? "bg-yellow-500" :
+                                                        "bg-primary"
+                                            )} />
+                                        </div>
                                     )}
 
                                     {/* 创建按钮 */}
@@ -810,71 +874,92 @@ export default function TileDownloader() {
                                             const isOperating = operatingTaskId === task.id;
                                             return (
                                                 <div key={task.id} className={cn(
-                                                    'p-3 rounded-lg border transition-all',
-                                                    isActive && 'border-blue-500/30 bg-blue-500/5',
-                                                    isPaused && 'border-yellow-500/20 bg-yellow-500/5',
-                                                    isOperating && 'opacity-70',
-                                                    !isActive && !isPaused && 'border-border/50'
+                                                    'p-3.5 rounded-xl border transition-all group overflow-hidden relative',
+                                                    isActive ? 'border-blue-500/40 bg-gradient-to-r from-blue-500/10 to-transparent shadow-sm' :
+                                                        isPaused ? 'border-yellow-500/30 bg-gradient-to-r from-yellow-500/10 to-transparent' :
+                                                            'border-border/60 bg-muted/20 hover:bg-muted/40 hover:border-border',
+                                                    isOperating && 'opacity-70 scale-[0.99]'
                                                 )}>
-                                                    {/* 名称 + 状态 + 操作 */}
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-medium text-sm flex-1 truncate">{task.name}</span>
-                                                        <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded-full',
-                                                            isActive ? 'text-blue-500 bg-blue-500/10' : isPaused ? 'text-yellow-500 bg-yellow-500/10' : 'text-muted-foreground bg-muted'
+                                                    {/* 名称 + 状态 + 进度内容区 */}
+                                                    <div className="flex items-center gap-3 relative z-10 w-full">
+                                                        <div className={cn(
+                                                            "p-2 rounded-lg shrink-0",
+                                                            isActive ? "bg-blue-500/20 text-blue-600" :
+                                                                isPaused ? "bg-yellow-500/20 text-yellow-600" :
+                                                                    "bg-muted-foreground/10 text-muted-foreground"
                                                         )}>
-                                                            {statusInfo[task.status]?.name || task.status}
-                                                        </span>
-                                                        <div className="flex items-center gap-0.5">
-                                                            {isOperating && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground mr-1" />}
+                                                            <Layers className="h-4 w-4" />
+                                                        </div>
+                                                        <div className="flex flex-col flex-1 min-w-0 pr-8">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-semibold text-sm truncate">{task.name}</span>
+                                                                <span className={cn('text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-bold shrink-0',
+                                                                    isActive ? 'text-blue-600 bg-blue-500/20' :
+                                                                        isPaused ? 'text-yellow-600 bg-yellow-500/20' :
+                                                                            'text-muted-foreground bg-muted-foreground/10'
+                                                                )}>
+                                                                    {statusInfo[task.status]?.name || task.status}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 mt-1.5 w-full">
+                                                                <Progress value={progress} className="flex-1 h-1.5 bg-black/5 dark:bg-white/10" />
+                                                            </div>
+                                                            <div className="flex items-center justify-between mt-1 text-[11px] font-medium text-muted-foreground">
+                                                                <span className="truncate pr-2">
+                                                                    <span className="text-foreground">{task.completed_tiles.toLocaleString()}</span>
+                                                                    {task.failed_tiles > 0 && <span className="text-red-500 ml-1">✗{task.failed_tiles.toLocaleString()}</span>}
+                                                                    <span className="opacity-40 mx-1">/</span>
+                                                                    <span>{task.total_tiles.toLocaleString()}</span>
+                                                                </span>
+                                                                {isActive && task.download_speed > 0 && (
+                                                                    <span className="text-blue-500 tracking-tight tabular-nums flex items-center gap-1 shrink-0">
+                                                                        <Download className="h-3 w-3" />
+                                                                        {formatSpeed(task.download_speed)}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* 操作按钮 (悬浮显示或正在操作时显示加载) */}
+                                                        <div className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-gradient-to-l from-background/90 via-background/80 to-transparent pl-4 pr-1 py-1 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            {isOperating && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground mr-1 shrink-0" />}
                                                             {(isPending || isPaused) && (
-                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-500 hover:bg-green-500/10"
+                                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-green-500 hover:bg-green-500/10 hover:text-green-600 transition-colors shrink-0 backdrop-blur-sm"
                                                                     onClick={() => handleStart(task.id)} disabled={isOperating}>
-                                                                    <Play className="h-3 w-3" />
+                                                                    <Play className="h-4 w-4" />
                                                                 </Button>
                                                             )}
                                                             {isActive && (
                                                                 <>
-                                                                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-yellow-500 hover:bg-yellow-500/10"
+                                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-yellow-500 hover:bg-yellow-500/10 hover:text-yellow-600 transition-colors shrink-0 backdrop-blur-sm"
                                                                         onClick={() => handlePause(task.id)}>
-                                                                        <Pause className="h-3 w-3" />
+                                                                        <Pause className="h-4 w-4" />
                                                                     </Button>
-                                                                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-500 hover:bg-red-500/10"
+                                                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-orange-500 hover:bg-orange-500/10 hover:text-orange-600 transition-colors shrink-0 backdrop-blur-sm"
                                                                         onClick={() => handleCancel(task.id)}>
-                                                                        <Square className="h-3 w-3" />
+                                                                        <Square className="h-4 w-4" />
                                                                     </Button>
                                                                 </>
                                                             )}
                                                             {task.failed_tiles > 0 && !isActive && (
-                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-orange-500 hover:bg-orange-500/10"
+                                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-blue-500 hover:bg-blue-500/10 hover:text-blue-600 transition-colors shrink-0 backdrop-blur-sm"
                                                                     onClick={() => handleRetry(task.id)} disabled={isOperating}>
-                                                                    <RefreshCw className="h-3 w-3" />
+                                                                    <RefreshCw className="h-4 w-4" />
                                                                 </Button>
                                                             )}
                                                             {task.output_path && (
-                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 backdrop-blur-sm"
                                                                     onClick={() => handleOpenFolder(task.output_path)}>
-                                                                    <FolderOpen className="h-3 w-3" />
+                                                                    <FolderOpen className="h-4 w-4" />
                                                                 </Button>
                                                             )}
                                                             {!isActive && (
-                                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-400 hover:bg-red-500/10"
+                                                                <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500 hover:bg-red-500/10 hover:text-red-600 transition-colors shrink-0 backdrop-blur-sm"
                                                                     onClick={() => handleDelete(task.id)}>
-                                                                    <Trash2 className="h-3 w-3" />
+                                                                    <Trash2 className="h-4 w-4" />
                                                                 </Button>
                                                             )}
                                                         </div>
-                                                    </div>
-                                                    {/* 进度 */}
-                                                    <div className="flex items-center gap-2 mt-2">
-                                                        <Progress value={progress} className="flex-1 h-1" />
-                                                        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                                                            {task.completed_tiles.toLocaleString()}
-                                                            {task.failed_tiles > 0 && <span className="text-red-500"> ✗{task.failed_tiles.toLocaleString()}</span>}
-                                                            <span className="text-muted-foreground/50"> / {task.total_tiles.toLocaleString()}</span>
-                                                            {isActive && task.download_speed > 0 && (
-                                                                <span className="text-blue-400 ml-1">{formatSpeed(task.download_speed)}</span>
-                                                            )}
-                                                        </span>
                                                     </div>
                                                 </div>
                                             );

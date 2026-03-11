@@ -66,6 +66,14 @@ impl ChartDatabase {
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 completed_at DATETIME
             );
+
+            -- 迁移: 用 raw_json 中的 hbxz (航标形状) 回填 buoy_type
+            UPDATE chart_buoys
+            SET buoy_type = json_extract(raw_json, '$.hbxz'),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE buoy_type IS NULL
+              AND json_extract(raw_json, '$.hbxz') IS NOT NULL
+              AND json_extract(raw_json, '$.hbxz') != '';
             ",
         )
         .map_err(|e| format!("初始化数据表失败: {}", e))?;

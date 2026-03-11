@@ -234,12 +234,24 @@ export default function TaskHistory() {
         }
     };
 
-    // 格式化时间
+    // 格式化时间 - SQLite CURRENT_TIMESTAMP 存储UTC时间，需转为本地时间显示
     const formatTime = (timeStr: string | null) => {
         if (!timeStr) return '-';
         try {
-            const d = new Date(timeStr.replace(' ', 'T') + (timeStr.includes('+') ? '' : '+08:00'));
-            return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            // SQLite 格式: "2026-03-11 00:40:30", 视为 UTC
+            // 若已带时区偏移则直接解析，否则追加 Z 标记为 UTC
+            const isoStr = timeStr.replace(' ', 'T') + (timeStr.includes('+') || timeStr.includes('Z') ? '' : 'Z');
+            const d = new Date(isoStr);
+            if (isNaN(d.getTime())) return timeStr;
+            return d.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false,
+            });
         } catch {
             return timeStr;
         }
