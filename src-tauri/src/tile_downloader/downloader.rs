@@ -251,20 +251,21 @@ impl TileDownloader {
         db.init_tile_progress(&task_id, &tiles)
             .map_err(|e| format!("初始化进度失败: {}", e))?;
 
-        // 从数据库读取已有进度（恢复时 completed > 0）
-        let (_, existing_completed, _) = db
+        // 从数据库读取已有进度（恢复时 completed/failed > 0）
+        let (_, existing_completed, existing_failed) = db
             .get_tile_stats(&task_id)
             .map_err(|e| format!("获取统计失败: {}", e))?;
 
         // 初始化内存计数器为数据库已有值
         state.completed.store(existing_completed, Ordering::SeqCst);
-        state.failed.store(0, Ordering::SeqCst); // failed 已被重置为 pending
+        state.failed.store(existing_failed, Ordering::SeqCst);
 
         log::info!(
-            "任务 {} 开始下载，共 {} 个瓦片（已完成 {}），线程数 {}",
+            "任务 {} 开始下载，共 {} 个瓦片（已完成 {}，已失败 {}），线程数 {}",
             task_id,
             total_tiles,
             existing_completed,
+            existing_failed,
             thread_count
         );
 

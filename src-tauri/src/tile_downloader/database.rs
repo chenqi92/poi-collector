@@ -318,14 +318,11 @@ impl TileDatabase {
         )?;
 
         if existing_count > 0 {
-            // 已有记录 → 恢复/重试模式
-            // 只将 failed 的瓦片重置为 pending，让它们被重新下载
-            conn.execute(
-                "UPDATE tile_progress SET status = 'pending', error_message = NULL WHERE task_id = ?1 AND status = 'failed'",
-                params![task_id],
-            )?;
+            // 已有记录 → 恢复模式
+            // 不重置 failed 瓦片，只下载剩余 pending 的
+            // 用户如需重试已失败瓦片，需手动点击"重试"按钮（调用 reset_failed_tiles）
             log::info!(
-                "任务 {} 恢复下载：已有 {} 条记录，已将失败的瓦片重置为 pending",
+                "任务 {} 恢复下载：已有 {} 条记录，继续处理剩余 pending 瓦片",
                 task_id,
                 existing_count
             );
