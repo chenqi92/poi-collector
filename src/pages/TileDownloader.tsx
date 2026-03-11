@@ -209,8 +209,14 @@ export default function TileDownloader() {
 
     useEffect(() => {
         loadTasks();
-        const interval = setInterval(loadTasks, 2000);
-        return () => clearInterval(interval);
+        // 页面不可见时暂停轮询
+        let interval: ReturnType<typeof setInterval> | null = null;
+        const start = () => { if (!interval) interval = setInterval(loadTasks, 2000); };
+        const stop = () => { if (interval) { clearInterval(interval); interval = null; } };
+        const onVis = () => document.hidden ? stop() : start();
+        document.addEventListener('visibilitychange', onVis);
+        start();
+        return () => { stop(); document.removeEventListener('visibilitychange', onVis); };
     }, [loadTasks]);
 
     // 监听进度事件

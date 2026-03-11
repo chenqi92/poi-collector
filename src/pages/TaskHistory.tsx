@@ -96,30 +96,54 @@ export default function TaskHistory() {
         }
     }, []);
 
+    // 缓冲进度更新，避免每次事件都 remap 整个 tasks 数组
+    type ProgressUpdate = { completed: number; failed: number; status: string };
+    const pendingUpdatesRef = useRef<Record<string, ProgressUpdate>>({});
+    const flushTimerRef = useRef<number | null>(null);
+
+    const flushProgressUpdates = useCallback(() => {
+        flushTimerRef.current = null;
+        const updates = pendingUpdatesRef.current;
+        const keys = Object.keys(updates);
+        if (keys.length === 0) return;
+        pendingUpdatesRef.current = {};
+        setTasks(prev => prev.map(t => {
+            const u = updates[t.id];
+            return u ? { ...t, completed: u.completed, failed: u.failed, status: u.status } : t;
+        }));
+    }, []);
+
     useEffect(() => {
         loadTasks();
 
-        // loading 超时保护 - 5秒后自动结束 loading 状态
+        // loading 超时保护
         const loadingTimeout = setTimeout(() => setLoading(false), 5000);
 
-        // 监听瓦片下载进度事件 - 仅本地更新，不触发全量查询
+        // 监听进度事件 —— 通过 ref 缓冲 + rAF 批量刷新
         const unlisten = listen<{ task_id: string; completed: number; failed: number; speed: number; status: string }>('tile-download-progress', (event) => {
             const p = event.payload;
-            setTasks(prev => prev.map(t =>
-                t.id === `tile_${p.task_id}`
-                    ? { ...t, completed: p.completed, failed: p.failed, status: p.status }
-                    : t
-            ));
+            pendingUpdatesRef.current[`tile_${p.task_id}`] = { completed: p.completed, failed: p.failed, status: p.status };
+            if (flushTimerRef.current === null) {
+                flushTimerRef.current = requestAnimationFrame(flushProgressUpdates);
+            }
         });
 
-        // 定时全量刷新（低频）
-        const timer = setInterval(loadTasks, 10000);
+        // 定时全量刷新 —— 页面不可见时暂停
+        let timer: ReturnType<typeof setInterval> | null = null;
+        const start = () => { if (!timer) timer = setInterval(loadTasks, 10000); };
+        const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+        const onVis = () => document.hidden ? stop() : start();
+        document.addEventListener('visibilitychange', onVis);
+        start();
+
         return () => {
             unlisten.then(f => f());
-            clearInterval(timer);
+            stop();
+            document.removeEventListener('visibilitychange', onVis);
             clearTimeout(loadingTimeout);
+            if (flushTimerRef.current !== null) cancelAnimationFrame(flushTimerRef.current);
         };
-    }, [loadTasks]);
+    }, [loadTasks, flushProgressUpdates]);
 
     // 过滤任务
     const filteredTasks = activeTab === 'all'

@@ -74,13 +74,46 @@ export default function Collector() {
         } catch (e) { console.error(e); }
     }, []);
 
+    // 日志缓冲，避免每条日志都触发 setState
+    const logBufferRef = useRef<string[]>([]);
+    const logFlushTimerRef = useRef<number | null>(null);
+
+    const flushLogs = useCallback(() => {
+        logFlushTimerRef.current = null;
+        if (logBufferRef.current.length === 0) return;
+        const newEntries = logBufferRef.current;
+        logBufferRef.current = [];
+        setLogs(prev => {
+            const merged = [...prev, ...newEntries];
+            return merged.length > 100 ? merged.slice(-100) : merged;
+        });
+    }, []);
+
+    const appendLog = useCallback((msg: string) => {
+        logBufferRef.current.push(msg);
+        if (logFlushTimerRef.current === null) {
+            logFlushTimerRef.current = requestAnimationFrame(flushLogs);
+        }
+    }, [flushLogs]);
+
     useEffect(() => {
         loadData();
-        const interval = setInterval(loadStatuses, 2000);
+
+        // 轮询状态 —— 页面不可见时暂停
+        let interval: ReturnType<typeof setInterval> | null = null;
+        const startPolling = () => {
+            if (!interval) interval = setInterval(loadStatuses, 2000);
+        };
+        const stopPolling = () => {
+            if (interval) { clearInterval(interval); interval = null; }
+        };
+        const onVisChange = () => document.hidden ? stopPolling() : startPolling();
+        document.addEventListener('visibilitychange', onVisChange);
+        startPolling();
+
         const unlisten = listen<string>('collector-log', (event) => {
-            setLogs(prev => [...prev.slice(-99), event.payload]);
+            appendLog(event.payload);
         });
-        // 航标采集进度事件
         const unlistenBuoy = listen<{ task_type: string; status: string; current: number; total: number; message: string | null }>('chart-progress', (event) => {
             const p = event.payload;
             if (p.task_type === 'buoy') {
@@ -91,13 +124,14 @@ export default function Collector() {
                 }
             }
         });
-        // 航标日志事件
         const unlistenBuoyLog = listen<string>('chart-log', (event) => {
-            setLogs(prev => [...prev.slice(-99), `[航标] ${event.payload}`]);
+            appendLog(`[航标] ${event.payload}`);
         });
         loadBuoyCount();
         return () => {
-            clearInterval(interval);
+            stopPolling();
+            document.removeEventListener('visibilitychange', onVisChange);
+            if (logFlushTimerRef.current !== null) cancelAnimationFrame(logFlushTimerRef.current);
             unlisten.then(fn => fn());
             unlistenBuoy.then(fn => fn());
             unlistenBuoyLog.then(fn => fn());
