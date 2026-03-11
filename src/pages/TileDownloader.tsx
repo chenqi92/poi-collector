@@ -913,7 +913,13 @@ export default function TileDownloader() {
                                                             <div className="flex items-center justify-between mt-1 text-[11px] font-medium text-muted-foreground">
                                                                 <span className="truncate pr-2">
                                                                     <span className="text-foreground">{task.completed_tiles.toLocaleString()}</span>
-                                                                    {task.failed_tiles > 0 && <span className="text-red-500 ml-1">✗{task.failed_tiles.toLocaleString()}</span>}
+                                                                    {task.failed_tiles > 0 && (
+                                                                        task.platform === 'cjhy' ? (
+                                                                            <span className="text-amber-500 ml-1" title="航道图空白区域瓦片不存在，属正常现象">○{task.failed_tiles.toLocaleString()}空白</span>
+                                                                        ) : (
+                                                                            <span className="text-red-500 ml-1">✗{task.failed_tiles.toLocaleString()}</span>
+                                                                        )
+                                                                    )}
                                                                     <span className="opacity-40 mx-1">/</span>
                                                                     <span>{task.total_tiles.toLocaleString()}</span>
                                                                 </span>

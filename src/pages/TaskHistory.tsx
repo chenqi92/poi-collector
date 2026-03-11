@@ -406,7 +406,13 @@ export default function TaskHistory() {
                             <>
                                 <span className="text-green-500">{task.completed.toLocaleString()}</span>
                                 {task.failed > 0 && (
-                                    <span className="text-red-500">✗{task.failed.toLocaleString()}</span>
+                                    task.platform === 'cjhy' ? (
+                                        <span className="text-amber-500" title="航道图空白区域瓦片不存在，属正常现象">
+                                            ○{task.failed.toLocaleString()}空白
+                                        </span>
+                                    ) : (
+                                        <span className="text-red-500">✗{task.failed.toLocaleString()}</span>
+                                    )
                                 )}
                                 <span className="text-muted-foreground/50">/</span>
                                 <span>{task.total.toLocaleString()}</span>
