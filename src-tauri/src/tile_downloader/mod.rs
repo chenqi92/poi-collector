@@ -5,4 +5,5 @@ pub mod downloader;
 pub mod platforms;
 pub mod storage;
 pub mod tile_proxy;
+pub mod serve_tile;
 pub mod types;

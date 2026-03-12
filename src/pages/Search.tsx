@@ -1,13 +1,27 @@
 import { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Search as SearchIcon, MapPin, List, Columns, Loader2, Anchor } from 'lucide-react';
+import { Search as SearchIcon, MapPin, List, Columns, Loader2, Anchor, Map as MapIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import POIMap, { POI } from '@/components/POIMap';
 import SimpleBar from 'simplebar-react';
 
 type ViewMode = 'list' | 'map' | 'split';
-type SearchTab = 'poi' | 'buoy';
+type SearchTab = 'poi' | 'buoy' | 'chart';
+
+interface CjhyTask {
+    id: string;
+    name: string;
+    output_path: string;
+    total_tiles: number;
+    completed_tiles: number;
+    failed_tiles: number;
+    bounds_north: number;
+    bounds_south: number;
+    bounds_east: number;
+    bounds_west: number;
+    zoom_levels: number[];
+}
 
 const platformNames: Record<string, string> = {
     all: '全部平台',
@@ -63,12 +77,40 @@ export default function Search() {
     const [buoyLoading, setBuoyLoading] = useState(false);
     const [buoyLoaded, setBuoyLoaded] = useState(false);
 
+    // 航道图状态
+    const [cjhyTasks, setCjhyTasks] = useState<CjhyTask[]>([]);
+    const [selectedCjhyTask, setSelectedCjhyTask] = useState<string>('');
+    const [showChartOverlay, setShowChartOverlay] = useState(false);
+    const [cjhyLoaded, setCjhyLoaded] = useState(false);
+
     // 加载航标数据
     useEffect(() => {
         if (searchTab === 'buoy' && !buoyLoaded) {
             loadBuoys();
         }
     }, [searchTab, buoyLoaded]);
+
+    // 加载航道图任务列表
+    useEffect(() => {
+        if (searchTab === 'chart' && !cjhyLoaded) {
+            loadCjhyTasks();
+        }
+    }, [searchTab, cjhyLoaded]);
+
+    const loadCjhyTasks = async () => {
+        try {
+            const data = await invoke<CjhyTask[]>('get_cjhy_tile_tasks');
+            setCjhyTasks(data);
+            setCjhyLoaded(true);
+            // 自动选择第一个
+            if (data.length > 0 && !selectedCjhyTask) {
+                setSelectedCjhyTask(data[0].id);
+                setShowChartOverlay(true);
+            }
+        } catch (e) {
+            console.error('加载航道图任务失败:', e);
+        }
+    };
 
     const loadBuoys = async () => {
         setBuoyLoading(true);
@@ -134,10 +176,17 @@ export default function Search() {
         setSelectedId(poi.id);
     };
 
-    const showList = viewMode === 'list' || viewMode === 'split';
-    const showMap = viewMode === 'map' || viewMode === 'split';
+    const showList = searchTab !== 'chart' && (viewMode === 'list' || viewMode === 'split');
+    const showMap = searchTab === 'chart' || viewMode === 'map' || viewMode === 'split';
 
-    const currentResults = searchTab === 'poi' ? results : buoyMapData;
+    const currentResults = searchTab === 'poi' ? results : searchTab === 'buoy' ? buoyMapData : [];
+
+    // 当前选中的航道图任务
+    const selectedTask = cjhyTasks.find(t => t.id === selectedCjhyTask);
+    const chartTilePath = selectedTask?.output_path || '';
+    const chartBounds: [number, number, number, number] | undefined = selectedTask
+        ? [selectedTask.bounds_south, selectedTask.bounds_west, selectedTask.bounds_north, selectedTask.bounds_east]
+        : undefined;
 
     return (
         <div className="h-full flex flex-col gap-4 overflow-hidden">
@@ -154,7 +203,7 @@ export default function Search() {
                 <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-indigo-500 to-purple-500" />
                 <CardContent className="py-4">
                     {/* Tab 切换行 */}
-                    <div className="flex items-center gap-3 mb-3">
+                    <div className={`flex items-center gap-3 ${searchTab !== 'chart' ? 'mb-3' : ''}`}>
                         <div className="flex items-center bg-muted/50 rounded-lg p-0.5">
                             <button
                                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${searchTab === 'poi'
@@ -181,45 +230,90 @@ export default function Search() {
                                     </span>
                                 )}
                             </button>
+                            <button
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${searchTab === 'chart'
+                                    ? 'bg-background shadow-sm text-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                                onClick={() => setSearchTab('chart')}
+                            >
+                                <MapIcon className="w-3.5 h-3.5" />
+                                航道图
+                                {cjhyTasks.length > 0 && (
+                                    <span className="px-1.5 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-500 rounded-full">
+                                        {cjhyTasks.length}
+                                    </span>
+                                )}
+                            </button>
                         </div>
                         <div className="flex-1" />
 
-                        {/* 视图切换 */}
-                        <div className="flex border border-input rounded-xl overflow-hidden">
-                            <button
-                                onClick={() => setViewMode('list')}
-                                className={`p-2.5 transition-all cursor-pointer ${viewMode === 'list'
-                                    ? 'gradient-primary text-white'
-                                    : 'bg-background text-muted-foreground hover:bg-accent'
-                                    }`}
-                                title="列表视图"
-                            >
-                                <List className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setViewMode('split')}
-                                className={`p-2.5 border-x border-input transition-all cursor-pointer ${viewMode === 'split'
-                                    ? 'gradient-primary text-white'
-                                    : 'bg-background text-muted-foreground hover:bg-accent'
-                                    }`}
-                                title="分屏视图"
-                            >
-                                <Columns className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setViewMode('map')}
-                                className={`p-2.5 transition-all cursor-pointer ${viewMode === 'map'
-                                    ? 'gradient-primary text-white'
-                                    : 'bg-background text-muted-foreground hover:bg-accent'
-                                    }`}
-                                title="地图视图"
-                            >
-                                <MapPin className="w-4 h-4" />
-                            </button>
-                        </div>
+                        {/* 航道图 tab：右侧显示任务选择器；其他 tab：右侧显示视图切换 */}
+                        {searchTab === 'chart' ? (
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={selectedCjhyTask}
+                                    onChange={(e) => {
+                                        setSelectedCjhyTask(e.target.value);
+                                        setShowChartOverlay(!!e.target.value);
+                                    }}
+                                    className="px-3 py-1.5 border border-input bg-background rounded-lg text-sm text-foreground
+                                             focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer transition-all"
+                                >
+                                    <option value="">选择航道图...</option>
+                                    {cjhyTasks.map(t => (
+                                        <option key={t.id} value={t.id}>
+                                            {t.name} ({t.completed_tiles.toLocaleString()} 瓦片)
+                                        </option>
+                                    ))}
+                                </select>
+                                <label className="flex items-center gap-1.5 cursor-pointer select-none text-sm text-muted-foreground whitespace-nowrap">
+                                    <input
+                                        type="checkbox"
+                                        checked={showChartOverlay}
+                                        onChange={(e) => setShowChartOverlay(e.target.checked)}
+                                        className="w-3.5 h-3.5 rounded border-input text-primary focus:ring-primary/50"
+                                    />
+                                    叠加
+                                </label>
+                            </div>
+                        ) : (
+                            <div className="flex border border-input rounded-xl overflow-hidden">
+                                <button
+                                    onClick={() => setViewMode('list')}
+                                    className={`p-2.5 transition-all cursor-pointer ${viewMode === 'list'
+                                        ? 'gradient-primary text-white'
+                                        : 'bg-background text-muted-foreground hover:bg-accent'
+                                        }`}
+                                    title="列表视图"
+                                >
+                                    <List className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('split')}
+                                    className={`p-2.5 border-x border-input transition-all cursor-pointer ${viewMode === 'split'
+                                        ? 'gradient-primary text-white'
+                                        : 'bg-background text-muted-foreground hover:bg-accent'
+                                        }`}
+                                    title="分屏视图"
+                                >
+                                    <Columns className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('map')}
+                                    className={`p-2.5 transition-all cursor-pointer ${viewMode === 'map'
+                                        ? 'gradient-primary text-white'
+                                        : 'bg-background text-muted-foreground hover:bg-accent'
+                                        }`}
+                                    title="地图视图"
+                                >
+                                    <MapPin className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
                     </div>
 
-                    {/* 搜索输入区 */}
+                    {/* 搜索输入区（航道图 tab 时隐藏） */}
                     {searchTab === 'poi' ? (
                         <div className="flex items-center gap-3">
                             <div className="relative flex-1 group">
@@ -266,7 +360,7 @@ export default function Search() {
                                 )}
                             </Button>
                         </div>
-                    ) : (
+                    ) : searchTab === 'buoy' ? (
                         <div className="flex items-center gap-3">
                             <div className="relative flex-1 group">
                                 <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -282,9 +376,9 @@ export default function Search() {
                             </div>
                             {buoyLoading && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
                         </div>
-                    )}
+                    ) : null}
 
-                    {currentResults.length > 0 && (
+                    {currentResults.length > 0 && searchTab !== 'chart' && (
                         <div className="mt-3 text-sm text-muted-foreground">
                             找到 <span className="font-medium text-primary">{currentResults.length}</span> 条结果
                         </div>
@@ -405,10 +499,13 @@ export default function Search() {
                     <Card className="overflow-hidden h-full">
                         <CardContent className="p-0 h-full">
                             <div className="h-full w-full">
-                                <POIMap
+                            <POIMap
                                     pois={currentResults}
                                     selectedId={selectedId}
                                     onMarkerClick={handleMarkerClick}
+                                    showChartOverlay={searchTab === 'chart' && showChartOverlay}
+                                    chartTilePath={chartTilePath}
+                                    chartBounds={searchTab === 'chart' ? chartBounds : undefined}
                                 />
                             </div>
                         </CardContent>

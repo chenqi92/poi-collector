@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { invoke } from '@tauri-apps/api/core';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -32,6 +33,10 @@ export interface POIMapProps {
     zoom?: number;
     selectedId?: number | null;
     onMarkerClick?: (poi: POI) => void;
+    showChartOverlay?: boolean;
+    chartTilePath?: string;
+    /** [south, west, north, east] */
+    chartBounds?: [number, number, number, number];
 }
 
 // 自动调整地图视野以包含所有标记
@@ -123,6 +128,185 @@ function CenterOnSelected({ selectedId, pois }: { selectedId: number | null | un
     return null;
 }
 
+// 航道图覆盖层（ArcGIS EPSG:4326 自定义切片方案）
+const CJ_RESOLUTIONS = [
+    0.023794610058302794, 0.009517844023321119, 0.004758922011660559,
+    0.0023794610058302797, 0.0011897305029151398, 0.0005948652514575699,
+    0.00029743262572878496, 0.00014871631286439248, 0.00007435815643219624,
+    0.00003717907821609812, 0.000018590728838551974, 0.000009294174688773071,
+    0.000004647087344386536, 0.0000023794610058302796
+];
+const CJ_ORIGIN = [-400, 400];
+const TILE_SIZE = 256;
+
+
+function ChartOverlayLayer({ basePath, visible }: { basePath: string; visible: boolean }) {
+    const map = useMap();
+    const tilesRef = useRef<Record<string, L.ImageOverlay>>({});
+    const currentZRef = useRef(-1);
+    const visibleRef = useRef(visible);
+
+    // 切换显隐：只改 opacity，不卸载
+    useEffect(() => {
+        visibleRef.current = visible;
+        const tiles = tilesRef.current;
+        for (const key in tiles) {
+            if (tiles[key]) tiles[key].setOpacity(visible ? 0.9 : 0);
+        }
+    }, [visible]);
+
+    useEffect(() => {
+        const tiles = tilesRef.current;
+
+        function clearTiles() {
+            for (const key in tiles) {
+                if (tiles[key]) tiles[key].remove();
+                delete tiles[key];
+            }
+            currentZRef.current = -1;
+        }
+
+        function update() {
+            const bounds = map.getBounds();
+            const zoom = map.getZoom();
+            const mapZoom = Math.round(zoom) + 1;
+            const customZ = mapZoom - 7;
+
+            if (customZ < 4 || customZ > 10) {
+                clearTiles();
+                return;
+            }
+
+            const res = CJ_RESOLUTIONS[customZ];
+            if (!res) { clearTiles(); return; }
+
+            if (currentZRef.current !== customZ) {
+                clearTiles();
+                currentZRef.current = customZ;
+            }
+
+            const nw = bounds.getNorthWest();
+            const se = bounds.getSouthEast();
+            const startX = Math.floor((nw.lng - CJ_ORIGIN[0]) / (res * TILE_SIZE));
+            const startY = Math.floor((CJ_ORIGIN[1] - nw.lat) / (res * TILE_SIZE));
+            const endX = Math.floor((se.lng - CJ_ORIGIN[0]) / (res * TILE_SIZE));
+            const endY = Math.floor((CJ_ORIGIN[1] - se.lat) / (res * TILE_SIZE));
+
+            // 移除视口外的瓦片
+            for (const key in tiles) {
+                const [, tx, ty] = key.split(':').map(Number);
+                if (tx < startX - 1 || tx > endX + 1 || ty < startY - 1 || ty > endY + 1) {
+                    if (tiles[key]) tiles[key].remove();
+                    delete tiles[key];
+                }
+            }
+
+            // 加载视口内的新瓦片
+            for (let x = startX; x <= endX; x++) {
+                for (let y = startY; y <= endY; y++) {
+                    const tileKey = `${customZ}:${x}:${y}`;
+                    if (tiles[tileKey]) continue;
+
+                    // 占位标记，避免重复请求
+                    tiles[tileKey] = null as unknown as L.ImageOverlay;
+
+                    const nwLng = CJ_ORIGIN[0] + x * res * TILE_SIZE;
+                    const nwLat = CJ_ORIGIN[1] - y * res * TILE_SIZE;
+                    const seLng = nwLng + res * TILE_SIZE;
+                    const seLat = nwLat - res * TILE_SIZE;
+                    const tileBounds: L.LatLngBoundsExpression = [[seLat, nwLng], [nwLat, seLng]];
+
+                    invoke<string>('serve_local_tile', { basePath, z: customZ, x, y })
+                        .then((b64: string) => {
+                            if (b64 && tiles[tileKey] !== undefined) {
+                                const overlay = L.imageOverlay(
+                                    `data:image/png;base64,${b64}`,
+                                    tileBounds,
+                                    { opacity: visibleRef.current ? 0.9 : 0, interactive: false, zIndex: 9 }
+                                );
+                                overlay.addTo(map);
+                                tiles[tileKey] = overlay;
+                            } else {
+                                delete tiles[tileKey];
+                            }
+                        })
+                        .catch(() => {
+                            delete tiles[tileKey];
+                        });
+                }
+            }
+        }
+
+        map.on('moveend', update);
+        map.on('zoomend', update);
+        update();
+
+        return () => {
+            map.off('moveend', update);
+            map.off('zoomend', update);
+            clearTiles();
+        };
+    }, [map, basePath]);
+
+    return null;
+}
+
+// 航道图自动定位 + 层级指示器
+function FitChartBounds({ bounds }: { bounds?: [number, number, number, number] }) {
+    const map = useMap();
+    const prevBoundsRef = useRef<string>('');
+    useEffect(() => {
+        if (!bounds) return;
+        const boundsKey = bounds.join(',');
+        if (boundsKey === prevBoundsRef.current) return;
+        prevBoundsRef.current = boundsKey;
+        const [south, west, north, east] = bounds;
+        map.fitBounds([[south, west], [north, east]], { padding: [30, 30], maxZoom: 14 });
+    }, [bounds, map]);
+    return null;
+}
+
+function ZoomIndicator({ showChart }: { showChart: boolean }) {
+    const map = useMap();
+    const [zoom, setZoom] = useState(map.getZoom());
+    useEffect(() => {
+        const onZoom = () => setZoom(map.getZoom());
+        map.on('zoomend', onZoom);
+        return () => { map.off('zoomend', onZoom); };
+    }, [map]);
+
+    if (!showChart) return null;
+    const mapZoom = Math.round(zoom) + 1;
+    const chartZ = mapZoom - 7;
+    const inRange = chartZ >= 4 && chartZ <= 10;
+
+    return (
+        <div className="leaflet-bottom leaflet-right" style={{ pointerEvents: 'none' }}>
+            <div className="leaflet-control" style={{
+                pointerEvents: 'auto',
+                background: 'rgba(0,0,0,0.65)',
+                color: '#fff',
+                padding: '6px 10px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontFamily: 'monospace',
+                lineHeight: '1.6',
+                margin: '10px',
+                backdropFilter: 'blur(4px)',
+            }}>
+                <div>地图层级：<span style={{ fontWeight: 'bold' }}>{Math.round(zoom)}</span></div>
+                <div>
+                    航道图层级：
+                    <span style={{ fontWeight: 'bold', color: inRange ? '#4ade80' : '#f87171' }}>
+                        {inRange ? chartZ : '超出范围'}
+                    </span>
+                    <span style={{ opacity: 0.6, marginLeft: 4 }}>(4-10)</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // 选中状态的高亮颜色
 const SELECTED_COLOR = '#f97316'; // orange-500
 
@@ -131,7 +315,10 @@ export function POIMap({
     center = [33.78, 119.8], // 默认中心：阜宁
     zoom = 10,
     selectedId,
-    onMarkerClick
+    onMarkerClick,
+    showChartOverlay,
+    chartTilePath,
+    chartBounds
 }: POIMapProps) {
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -152,6 +339,13 @@ export function POIMap({
                 <FitBounds pois={pois} />
                 <ResizeHandler />
                 <CenterOnSelected selectedId={selectedId} pois={pois} />
+
+                {chartTilePath && (
+                    <ChartOverlayLayer basePath={chartTilePath} visible={!!showChartOverlay} />
+                )}
+
+                <FitChartBounds bounds={chartBounds} />
+                <ZoomIndicator showChart={!!showChartOverlay} />
 
                 {pois.map((poi) => {
                     const isSelected = poi.id === selectedId;

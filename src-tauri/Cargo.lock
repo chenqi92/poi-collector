@@ -3564,6 +3564,7 @@ name = "poi-collector-app"
 version = "0.2.3"
 dependencies = [
  "async-channel",
+ "base64 0.22.1",
  "chrono",
  "env_logger",
  "futures",

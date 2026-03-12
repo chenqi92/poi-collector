@@ -11,6 +11,7 @@ use chart_collector::commands as chart_commands;
 use commands::*;
 use tile_downloader::boundaries;
 use tile_downloader::commands as tile_commands;
+use tile_downloader::serve_tile;
 use tile_downloader::tile_proxy;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -70,6 +71,8 @@ pub fn run() {
             tile_commands::get_tile_task_logs,
             tile_commands::convert_tile_file,
             tile_proxy::proxy_tile_request,
+            serve_tile::serve_local_tile,
+            serve_tile::get_cjhy_tile_tasks,
             boundaries::get_region_boundary,
             boundaries::clear_boundary_cache,
             // 航道图采集
