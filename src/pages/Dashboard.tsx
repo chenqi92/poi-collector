@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { Database, MapPin, Globe, BarChart3, Loader2, Map, TrendingUp, Anchor, Ship, Layers } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import SimpleBar from 'simplebar-react';
 
 interface Stats {
     total: number;
@@ -159,36 +158,33 @@ export default function Dashboard() {
                 )}
             </div>
 
-            {/* Scrollable content */}
-            <SimpleBar className="flex-1 min-h-0 -mx-6 px-6">
-                <div className="space-y-6 pb-6">
-                    {/* Stat Cards (Top Row) */}
-                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-                        {statCards.map((card) => (
-                            <Card key={card.label} className="overflow-hidden hover-lift cursor-pointer group relative border-border/50 bg-gradient-to-br from-card to-card/50 shadow-sm transition-all duration-300">
-                                {/* Decorative Glow */}
-                                <div className={`absolute -right-8 -top-8 w-32 h-32 rounded-full blur-[40px] opacity-20 pointer-events-none transition-all duration-500 group-hover:opacity-40 bg-gradient-to-br ${card.gradient}`} />
-                                <div className={`absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b ${card.gradient} opacity-60`} />
+            {/* Stat Cards (Top Row) - 固定不滚动 */}
+            <div className="shrink-0 grid grid-cols-2 lg:grid-cols-5 gap-4">
+                {statCards.map((card) => (
+                    <Card key={card.label} className="overflow-hidden hover-lift cursor-pointer group relative border-border/50 bg-gradient-to-br from-card to-card/50 shadow-sm transition-all duration-300">
+                        {/* Decorative Glow */}
+                        <div className={`absolute -right-8 -top-8 w-32 h-32 rounded-full blur-[40px] opacity-20 pointer-events-none transition-all duration-500 group-hover:opacity-40 bg-gradient-to-br ${card.gradient}`} />
+                        <div className={`absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b ${card.gradient} opacity-60`} />
 
-                                <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 pl-5 z-10 relative">
-                                    <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                                        {card.label}
-                                    </CardTitle>
-                                    <div className={`w-9 h-9 rounded-xl ${card.iconBg} flex items-center justify-center shadow-sm transform transition-all duration-300 group-hover:scale-110 group-hover:rotate-3`}>
-                                        <card.icon className={`w-4 h-4 bg-gradient-to-br ${card.gradient} bg-clip-text`} style={{ color: 'inherit' }} />
-                                    </div>
-                                </CardHeader>
-                                <CardContent className="pb-5 pl-5 z-10 relative">
-                                    <div className="text-3xl font-bold tracking-tighter text-foreground transition-all">
-                                        {card.value.toLocaleString()}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ))}
-                    </div>
+                        <CardHeader className="flex flex-row items-center justify-between pb-2 pt-5 pl-5 z-10 relative">
+                            <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                {card.label}
+                            </CardTitle>
+                            <div className={`w-9 h-9 rounded-xl ${card.iconBg} flex items-center justify-center shadow-sm transform transition-all duration-300 group-hover:scale-110 group-hover:rotate-3`}>
+                                <card.icon className={`w-4 h-4 bg-gradient-to-br ${card.gradient} bg-clip-text`} style={{ color: 'inherit' }} />
+                            </div>
+                        </CardHeader>
+                        <CardContent className="pb-5 pl-5 z-10 relative">
+                            <div className="text-3xl font-bold tracking-tighter text-foreground transition-all">
+                                {card.value.toLocaleString()}
+                            </div>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
 
-                    {/* Main Analytics Grid: 3 Columns */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Main Analytics Grid: 3 Columns - 占满剩余空间，每个卡片独立滚动 */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0 overflow-hidden">
 
                         {/* Column 1: Regions */}
                         <Card className="overflow-hidden flex flex-col border-border/50 shadow-sm">
@@ -205,9 +201,9 @@ export default function Dashboard() {
                                     </div>
                                 </div>
                             </CardHeader>
-                            <CardContent className="p-0 flex-1 relative">
+                            <CardContent className="p-0 flex-1 overflow-hidden">
                                 {regionStats.length > 0 ? (
-                                    <SimpleBar className="h-full min-h-[320px] max-h-[400px] p-5">
+                                    <div className="h-full overflow-y-auto p-5" style={{ overscrollBehavior: 'contain' }}>
                                         <div className="space-y-4">
                                             {regionStats.map(([code, count], index) => {
                                                 const percent = totalRegionCount > 0 ? (count / totalRegionCount) * 100 : 0;
@@ -241,7 +237,7 @@ export default function Dashboard() {
                                                 );
                                             })}
                                         </div>
-                                    </SimpleBar>
+                                    </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center p-12 text-muted-foreground h-[320px]">
                                         <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
@@ -266,9 +262,9 @@ export default function Dashboard() {
                                     </div>
                                 </div>
                             </CardHeader>
-                            <CardContent className="p-0 flex-1 relative">
+                            <CardContent className="p-0 flex-1 overflow-hidden">
                                 {stats?.by_category && Object.keys(stats.by_category).length > 0 ? (
-                                    <SimpleBar className="h-full min-h-[320px] max-h-[400px] p-5">
+                                    <div className="h-full overflow-y-auto p-5" style={{ overscrollBehavior: 'contain' }}>
                                         <div className="space-y-4">
                                             {Object.entries(stats.by_category)
                                                 .sort(([, a], [, b]) => b - a)
@@ -296,7 +292,7 @@ export default function Dashboard() {
                                                     );
                                                 })}
                                         </div>
-                                    </SimpleBar>
+                                    </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center p-12 text-muted-foreground h-[320px]">
                                         <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
@@ -324,9 +320,9 @@ export default function Dashboard() {
                                     </div>
                                 </div>
                             </CardHeader>
-                            <CardContent className="p-0 flex-1 relative">
+                            <CardContent className="p-0 flex-1 overflow-hidden">
                                 {(buoyCount > 0 || tileStats.total > 0) ? (
-                                    <SimpleBar className="h-full min-h-[320px] max-h-[400px]">
+                                    <div className="h-full overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
                                         {/* Hero Stats Banner */}
                                         <div className="p-5 pb-0">
                                             <div className="grid grid-cols-3 gap-3">
@@ -437,7 +433,7 @@ export default function Dashboard() {
                                                 })}
                                             </div>
                                         )}
-                                    </SimpleBar>
+                                    </div>
                                 ) : (
                                     <div className="flex flex-col items-center justify-center p-12 text-muted-foreground h-[320px]">
                                         <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center mb-4">
@@ -450,8 +446,6 @@ export default function Dashboard() {
                             </CardContent>
                         </Card>
                     </div>
-                </div>
-            </SimpleBar>
         </div>
     );
 }
