@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import { invoke } from '@tauri-apps/api/core';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -27,12 +27,20 @@ export interface POI {
     platform: string;
 }
 
+export interface MapBounds {
+    south: number;
+    west: number;
+    north: number;
+    east: number;
+}
+
 export interface POIMapProps {
     pois: POI[];
     center?: [number, number];
     zoom?: number;
     selectedId?: number | null;
     onMarkerClick?: (poi: POI) => void;
+    onBoundsChange?: (bounds: MapBounds) => void;
     showChartOverlay?: boolean;
     chartTilePath?: string;
     /** [south, west, north, east] */
@@ -116,14 +124,55 @@ function createColoredIcon(color: string) {
 // 选中标记时居中显示
 function CenterOnSelected({ selectedId, pois }: { selectedId: number | null | undefined; pois: POI[] }) {
     const map = useMap();
+    const poisRef = useRef(pois);
+    const lastCenteredRef = useRef<number | null>(null);
+    poisRef.current = pois;
 
     useEffect(() => {
-        if (selectedId == null) return;
-        const poi = pois.find(p => p.id === selectedId);
+        if (selectedId == null || selectedId === lastCenteredRef.current) return;
+        const poi = poisRef.current.find(p => p.id === selectedId);
         if (poi) {
+            lastCenteredRef.current = selectedId;
             map.setView([poi.lat, poi.lon], Math.max(map.getZoom(), 14), { animate: true });
         }
-    }, [selectedId, pois, map]);
+    }, [selectedId, map]);
+
+    return null;
+}
+
+// 视窗变化通知（debounced）
+function ViewportLoader({ onBoundsChange }: { onBoundsChange: (bounds: MapBounds) => void }) {
+    const map = useMap();
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastBoundsRef = useRef<string>('');
+
+    useEffect(() => {
+        function notify() {
+            if (timerRef.current) clearTimeout(timerRef.current);
+            timerRef.current = setTimeout(() => {
+                const b = map.getBounds();
+                // 去重：只有视窗真正变化时才通知
+                const key = `${b.getSouth().toFixed(4)},${b.getWest().toFixed(4)},${b.getNorth().toFixed(4)},${b.getEast().toFixed(4)}`;
+                if (key === lastBoundsRef.current) return;
+                lastBoundsRef.current = key;
+                onBoundsChange({
+                    south: b.getSouth(),
+                    west: b.getWest(),
+                    north: b.getNorth(),
+                    east: b.getEast(),
+                });
+            }, 500);
+        }
+
+        map.on('moveend', notify);
+        // 首次触发
+        notify();
+
+        return () => {
+            map.off('moveend', notify);
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, [map, onBoundsChange]);
 
     return null;
 }
@@ -326,6 +375,7 @@ export function POIMap({
     zoom = 10,
     selectedId,
     onMarkerClick,
+    onBoundsChange,
     showChartOverlay,
     chartTilePath,
     chartBounds
@@ -346,7 +396,8 @@ export function POIMap({
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
 
-                <FitBounds pois={pois} />
+                {/* 只在非视窗加载模式下自动调整视野，避免无限循环 */}
+                {!onBoundsChange && <FitBounds pois={pois} />}
                 <ResizeHandler />
                 <CenterOnSelected selectedId={selectedId} pois={pois} />
 
@@ -354,12 +405,15 @@ export function POIMap({
                     <ChartOverlayLayer basePath={chartTilePath} visible={true} />
                 )}
 
+                {onBoundsChange && <ViewportLoader onBoundsChange={onBoundsChange} />}
+
                 <FitChartBounds bounds={chartBounds} />
                 <ZoomIndicator showChart={!!showChartOverlay} />
 
                 {pois.map((poi) => {
                     const isSelected = poi.id === selectedId;
                     const color = isSelected ? SELECTED_COLOR : (platformColors[poi.platform] || '#3b82f6');
+                    const showPermanentLabel = pois.length <= 200;
 
                     return (
                         <Marker
@@ -371,6 +425,14 @@ export function POIMap({
                                 click: () => onMarkerClick?.(poi),
                             }}
                         >
+                            <Tooltip
+                                permanent={showPermanentLabel}
+                                direction="bottom"
+                                offset={[0, 8]}
+                                className="poi-name-label"
+                            >
+                                {poi.name}
+                            </Tooltip>
                             <Popup>
                                 <div className="text-sm">
                                     <div className="font-semibold text-gray-900">{poi.name}</div>

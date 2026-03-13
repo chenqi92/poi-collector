@@ -74,6 +74,11 @@ impl ChartDatabase {
             WHERE buoy_type IS NULL
               AND json_extract(raw_json, '$.hbxz') IS NOT NULL
               AND json_extract(raw_json, '$.hbxz') != '';
+
+            -- 迁移: 修复 total_items 为 0 但 completed_items 有值的任务
+            UPDATE chart_tasks
+            SET total_items = completed_items + failed_items
+            WHERE total_items = 0 AND (completed_items > 0 OR failed_items > 0);
             ",
         )
         .map_err(|e| format!("初始化数据表失败: {}", e))?;
@@ -360,15 +365,23 @@ impl ChartDatabase {
         task_id: i64,
         completed: i64,
         failed: i64,
+        total: Option<i64>,
     ) -> Result<(), String> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        conn.execute(
-            "UPDATE chart_tasks SET completed_items = ?1, failed_items = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3",
-            params![completed, failed, task_id],
-        ).map_err(|e| format!("更新任务进度失败: {}", e))?;
+        if let Some(t) = total {
+            conn.execute(
+                "UPDATE chart_tasks SET completed_items = ?1, failed_items = ?2, total_items = ?3, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
+                params![completed, failed, t, task_id],
+            ).map_err(|e| format!("更新任务进度失败: {}", e))?;
+        } else {
+            conn.execute(
+                "UPDATE chart_tasks SET completed_items = ?1, failed_items = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3",
+                params![completed, failed, task_id],
+            ).map_err(|e| format!("更新任务进度失败: {}", e))?;
+        }
         Ok(())
     }
 
@@ -385,7 +398,7 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         conn.execute(
-            "UPDATE chart_tasks SET status = ?1, completed_items = ?2, failed_items = ?3, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
+            "UPDATE chart_tasks SET status = ?1, completed_items = ?2, failed_items = ?3, total_items = ?2 + ?3, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?4",
             params![status, completed, failed, task_id],
         ).map_err(|e| format!("完成任务失败: {}", e))?;
         Ok(())

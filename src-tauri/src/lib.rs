@@ -40,6 +40,8 @@ pub fn run() {
             reset_collector,
             // Search
             search_poi,
+            search_poi_by_bounds,
+            search_buoys_by_bounds,
             // 行政区划
             get_regions,
             get_provinces,

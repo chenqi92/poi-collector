@@ -567,6 +567,47 @@ pub fn search_poi(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn search_poi_by_bounds(
+    south: f64,
+    west: f64,
+    north: f64,
+    east: f64,
+    query: Option<String>,
+    platform: Option<String>,
+) -> Result<Vec<POI>, String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    let query_filter = query
+        .as_ref()
+        .filter(|q| !q.trim().is_empty())
+        .map(|s| s.as_str());
+    let platform_filter = platform
+        .as_ref()
+        .filter(|p| p.as_str() != "all")
+        .map(|s| s.as_str());
+    db.get_poi_in_bounds(south, west, north, east, query_filter, platform_filter, 2000)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn search_buoys_by_bounds(
+    south: f64,
+    west: f64,
+    north: f64,
+    east: f64,
+) -> Result<Vec<crate::chart_collector::types::BuoyInfo>, String> {
+    use crate::chart_collector::commands::get_db_path;
+    use crate::chart_collector::database::ChartDatabase;
+    use crate::chart_collector::types::ChartBounds;
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_buoys_in_bounds(&ChartBounds {
+        west,
+        south,
+        east,
+        north,
+    })
+}
+
 // 行政区划相关命令
 use crate::regions;
 

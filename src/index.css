@@ -607,3 +607,30 @@ html.dark .simplebar-track:hover .simplebar-scrollbar::before {
   animation: shimmer 1.5s ease-in-out infinite;
   border-radius: var(--radius);
 }
+
+/* ============================================
+   Map POI/Buoy Name Labels
+   ============================================ */
+
+.poi-name-label {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: none !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15) !important;
+  padding: 1px 6px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #1e293b !important;
+  border-radius: 4px !important;
+  white-space: nowrap !important;
+  pointer-events: none !important;
+}
+
+.poi-name-label::before {
+  display: none !important;
+}
+
+.dark .poi-name-label {
+  background: rgba(30, 41, 59, 0.9) !important;
+  color: #e2e8f0 !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+}

@@ -109,6 +109,7 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_poi_platform ON poi_data(platform);
             CREATE INDEX IF NOT EXISTS idx_poi_category ON poi_data(category);
             CREATE INDEX IF NOT EXISTS idx_poi_region ON poi_data(region_code);
+            CREATE INDEX IF NOT EXISTS idx_poi_coords ON poi_data(lat, lon);
 
             CREATE TABLE IF NOT EXISTS poi_collection_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -262,6 +263,65 @@ impl Database {
             }
         }
 
+        Ok(results)
+    }
+
+    /// 按视窗范围查询 POI（支持可选关键词和平台过滤）
+    pub fn get_poi_in_bounds(
+        &self,
+        south: f64,
+        west: f64,
+        north: f64,
+        east: f64,
+        query: Option<&str>,
+        platform: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<POI>> {
+        let mut sql = String::from(
+            "SELECT id, name, lon, lat, address, category, platform FROM poi_data WHERE lat >= ?1 AND lat <= ?2 AND lon >= ?3 AND lon <= ?4"
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
+            Box::new(south),
+            Box::new(north),
+            Box::new(west),
+            Box::new(east),
+        ];
+
+        if let Some(q) = query {
+            if !q.is_empty() {
+                let pattern = format!("%{}%", q);
+                sql.push_str(" AND (name LIKE ?5 OR address LIKE ?5)");
+                params_vec.push(Box::new(pattern));
+            }
+        }
+
+        if let Some(p) = platform {
+            let idx = params_vec.len() + 1;
+            sql.push_str(&format!(" AND platform = ?{}", idx));
+            params_vec.push(Box::new(p.to_string()));
+        }
+
+        sql.push_str(&format!(" LIMIT ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(limit));
+
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_refs.as_slice(), |row| {
+            Ok(POI {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                lon: row.get(2)?,
+                lat: row.get(3)?,
+                address: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                category: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                platform: row.get(6)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
         Ok(results)
     }
 

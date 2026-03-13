@@ -1,9 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Search as SearchIcon, MapPin, List, Columns, Loader2, Anchor, Map as MapIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import POIMap, { POI } from '@/components/POIMap';
+import POIMap, { POI, MapBounds } from '@/components/POIMap';
 import SimpleBar from 'simplebar-react';
 
 type ViewMode = 'list' | 'map' | 'split';
@@ -37,12 +36,6 @@ const platformColors: Record<string, string> = {
     osm: 'bg-emerald-500/20 text-emerald-500',
 };
 
-const modeOptions = [
-    { value: 'contains', label: '包含' },
-    { value: 'exact', label: '精确' },
-    { value: 'prefix', label: '前缀' },
-];
-
 interface BuoyInfo {
     id: string;
     name: string | null;
@@ -65,7 +58,6 @@ export default function Search() {
     // POI 搜索状态
     const [query, setQuery] = useState('');
     const [platform, setPlatform] = useState('all');
-    const [mode, setMode] = useState('contains');
     const [results, setResults] = useState<POI[]>([]);
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<ViewMode>('split');
@@ -75,7 +67,6 @@ export default function Search() {
     const [buoyQuery, setBuoyQuery] = useState('');
     const [allBuoys, setAllBuoys] = useState<BuoyInfo[]>([]);
     const [buoyLoading, setBuoyLoading] = useState(false);
-    const [buoyLoaded, setBuoyLoaded] = useState(false);
 
     // 航道图状态
     const [cjhyTasks, setCjhyTasks] = useState<CjhyTask[]>([]);
@@ -83,12 +74,8 @@ export default function Search() {
     const [showChartOverlay, setShowChartOverlay] = useState(false);
     const [cjhyLoaded, setCjhyLoaded] = useState(false);
 
-    // 加载航标数据
-    useEffect(() => {
-        if (searchTab === 'buoy' && !buoyLoaded) {
-            loadBuoys();
-        }
-    }, [searchTab, buoyLoaded]);
+    // 地图视窗范围
+    const [mapBounds, setMapBounds] = useState<MapBounds | null>(null);
 
     // 加载航道图任务列表
     useEffect(() => {
@@ -102,7 +89,6 @@ export default function Search() {
             const data = await invoke<CjhyTask[]>('get_cjhy_tile_tasks');
             setCjhyTasks(data);
             setCjhyLoaded(true);
-            // 自动选择第一个
             if (data.length > 0 && !selectedCjhyTask) {
                 setSelectedCjhyTask(data[0].id);
                 setShowChartOverlay(true);
@@ -112,20 +98,62 @@ export default function Search() {
         }
     };
 
-    const loadBuoys = async () => {
-        setBuoyLoading(true);
+    // 视窗变化时加载POI数据（带 debounce 和请求序号防竞态）
+    const poiSeqRef = useRef(0);
+    useEffect(() => {
+        if (searchTab !== 'poi' || !mapBounds) return;
+        const seq = ++poiSeqRef.current;
+        const timer = setTimeout(() => {
+            loadPOIByBounds(mapBounds, seq);
+        }, 400);
+        return () => clearTimeout(timer);
+    }, [mapBounds, searchTab, query, platform]);
+
+    // 视窗变化时加载航标数据
+    const buoySeqRef = useRef(0);
+    useEffect(() => {
+        if (searchTab !== 'buoy' || !mapBounds) return;
+        const seq = ++buoySeqRef.current;
+        loadBuoysByBounds(mapBounds, seq);
+    }, [mapBounds, searchTab]);
+
+    const loadPOIByBounds = async (bounds: MapBounds, seq: number) => {
+        setLoading(true);
         try {
-            const data = await invoke<BuoyInfo[]>('chart_get_all_buoys');
-            setAllBuoys(data);
-            setBuoyLoaded(true);
+            const data = await invoke<POI[]>('search_poi_by_bounds', {
+                south: bounds.south,
+                west: bounds.west,
+                north: bounds.north,
+                east: bounds.east,
+                query: query.trim() || null,
+                platform: platform === 'all' ? null : platform,
+            });
+            if (seq === poiSeqRef.current) setResults(data);
         } catch (e) {
-            console.error('加载航标数据失败:', e);
+            console.error('加载POI失败:', e);
         } finally {
-            setBuoyLoading(false);
+            if (seq === poiSeqRef.current) setLoading(false);
         }
     };
 
-    // 航标搜索过滤
+    const loadBuoysByBounds = async (bounds: MapBounds, seq: number) => {
+        setBuoyLoading(true);
+        try {
+            const data = await invoke<BuoyInfo[]>('search_buoys_by_bounds', {
+                south: bounds.south,
+                west: bounds.west,
+                north: bounds.north,
+                east: bounds.east,
+            });
+            if (seq === buoySeqRef.current) setAllBuoys(data);
+        } catch (e) {
+            console.error('加载航标失败:', e);
+        } finally {
+            if (seq === buoySeqRef.current) setBuoyLoading(false);
+        }
+    };
+
+    // 航标搜索过滤（在已加载的视窗数据中搜索）
     const filteredBuoys = useMemo(() => {
         if (!buoyQuery.trim()) return allBuoys;
         const q = buoyQuery.trim().toLowerCase();
@@ -153,24 +181,6 @@ export default function Search() {
                 platform: 'buoy',
             }));
     }, [filteredBuoys]);
-
-    const handleSearch = async () => {
-        if (!query.trim()) return;
-
-        setLoading(true);
-        try {
-            const data = await invoke<POI[]>('search_poi', {
-                query: query.trim(),
-                platform: platform === 'all' ? null : platform,
-                mode,
-            });
-            setResults(data);
-        } catch (e) {
-            console.error('搜索失败:', e);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleMarkerClick = (poi: POI) => {
         setSelectedId(poi.id);
@@ -322,7 +332,6 @@ export default function Search() {
                                     type="text"
                                     value={query}
                                     onChange={(e) => setQuery(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                                     placeholder="输入名称搜索 POI..."
                                     className="w-full pl-10 pr-4 py-2.5 border border-input bg-background rounded-xl
                                              text-foreground placeholder:text-muted-foreground focus:outline-none
@@ -341,24 +350,7 @@ export default function Search() {
                                 ))}
                             </select>
 
-                            <select
-                                value={mode}
-                                onChange={(e) => setMode(e.target.value)}
-                                className="px-4 py-2.5 border border-input bg-background rounded-xl text-foreground
-                                         focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary cursor-pointer transition-all"
-                            >
-                                {modeOptions.map((opt) => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                ))}
-                            </select>
-
-                            <Button onClick={handleSearch} disabled={loading} className="gradient-primary text-white border-0 hover:opacity-90 px-6">
-                                {loading ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    '搜索'
-                                )}
-                            </Button>
+                            {loading && <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />}
                         </div>
                     ) : searchTab === 'buoy' ? (
                         <div className="flex items-center gap-3">
@@ -503,6 +495,7 @@ export default function Search() {
                                     pois={currentResults}
                                     selectedId={selectedId}
                                     onMarkerClick={handleMarkerClick}
+                                    onBoundsChange={setMapBounds}
                                     showChartOverlay={searchTab === 'chart' && showChartOverlay}
                                     chartTilePath={chartTilePath}
                                     chartBounds={searchTab === 'chart' ? chartBounds : undefined}

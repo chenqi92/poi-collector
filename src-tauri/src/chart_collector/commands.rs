@@ -110,11 +110,30 @@ pub async fn chart_start_buoy_collection(
     // 日志通道
     let (log_tx, mut log_rx) = mpsc::channel::<String>(500);
 
-    // 转发进度事件到前端
+    // 创建任务记录（在进度转发之前创建，保证 task_id 可共享）
+    let db_path = get_db_path();
+    let task_id = match ChartDatabase::new(&db_path) {
+        Ok(db) => db.create_chart_task("buoy", 0).unwrap_or(0),
+        Err(_) => 0,
+    };
+
+    // 转发进度事件到前端，同时更新 DB
     let app_progress = app.clone();
+    let db_path_progress = db_path.clone();
     tokio::spawn(async move {
         while let Some(event) = progress_rx.recv().await {
             let _ = app_progress.emit("chart-progress", &event);
+            // 将进度同步到数据库（任务历史可见）
+            if task_id > 0 && event.total > 0 {
+                if let Ok(db) = ChartDatabase::new(&db_path_progress) {
+                    let _ = db.update_chart_task_progress(
+                        task_id,
+                        event.current as i64,
+                        0,
+                        Some(event.total as i64),
+                    );
+                }
+            }
         }
     });
 
@@ -128,13 +147,7 @@ pub async fn chart_start_buoy_collection(
 
     // 后台执行采集，不阻塞 Tauri command
     let app_final = app.clone();
-    let db_path = get_db_path();
     tokio::spawn(async move {
-        // 创建任务记录
-        let task_id = match ChartDatabase::new(&db_path) {
-            Ok(db) => db.create_chart_task("buoy", 0).unwrap_or(0),
-            Err(_) => 0,
-        };
 
         let collector = BuoyCollector::new(step);
         let result = collector
