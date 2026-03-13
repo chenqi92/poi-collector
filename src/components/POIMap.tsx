@@ -157,6 +157,7 @@ function ChartOverlayLayer({ basePath, visible }: { basePath: string; visible: b
 
     useEffect(() => {
         const tiles = tilesRef.current;
+        let mounted = true;
 
         function clearTiles() {
             for (const key in tiles) {
@@ -167,6 +168,7 @@ function ChartOverlayLayer({ basePath, visible }: { basePath: string; visible: b
         }
 
         function update() {
+            if (!mounted) return;
             const bounds = map.getBounds();
             const zoom = map.getZoom();
             const mapZoom = Math.round(zoom) + 1;
@@ -218,6 +220,7 @@ function ChartOverlayLayer({ basePath, visible }: { basePath: string; visible: b
 
                     invoke<string>('serve_local_tile', { basePath, z: customZ, x, y })
                         .then((b64: string) => {
+                            if (!mounted) return; // 组件已卸载，忽略回调
                             if (b64 && tiles[tileKey] !== undefined) {
                                 const overlay = L.imageOverlay(
                                     `data:image/png;base64,${b64}`,
@@ -242,9 +245,16 @@ function ChartOverlayLayer({ basePath, visible }: { basePath: string; visible: b
         update();
 
         return () => {
+            mounted = false; // 阻止后续IPC回调添加瓦片
             map.off('moveend', update);
             map.off('zoomend', update);
             clearTiles();
+            // 兜底：遍历地图上所有图层，移除残留的ImageOverlay
+            map.eachLayer((layer) => {
+                if (layer instanceof L.ImageOverlay && layer.options.interactive === false) {
+                    map.removeLayer(layer);
+                }
+            });
         };
     }, [map, basePath]);
 
@@ -340,8 +350,8 @@ export function POIMap({
                 <ResizeHandler />
                 <CenterOnSelected selectedId={selectedId} pois={pois} />
 
-                {chartTilePath && (
-                    <ChartOverlayLayer basePath={chartTilePath} visible={!!showChartOverlay} />
+                {showChartOverlay && chartTilePath && (
+                    <ChartOverlayLayer basePath={chartTilePath} visible={true} />
                 )}
 
                 <FitChartBounds bounds={chartBounds} />
