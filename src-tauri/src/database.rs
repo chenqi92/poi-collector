@@ -16,7 +16,30 @@ impl Database {
         let db = Self { conn };
         db.migrate()?;
         db.init_tables()?;
+        db.cleanup_stale_tasks();
         Ok(db)
+    }
+
+    /// 应用启动时清理卡在"运行中"状态的任务
+    /// 进程退出时未正常完成的任务会永远卡在 running/downloading 状态
+    fn cleanup_stale_tasks(&self) {
+        // POI 采集任务
+        let count1 = self.conn.execute(
+            "UPDATE poi_collection_tasks SET status = 'interrupted', completed_at = CURRENT_TIMESTAMP WHERE status = 'running'",
+            [],
+        ).unwrap_or(0);
+        if count1 > 0 {
+            log::info!("启动清理: {} 个 POI 采集任务标记为 interrupted", count1);
+        }
+
+        // 航道图采集任务（chart_tasks 在另一个数据库，这里尝试更新，表不存在则忽略）
+        let count2 = self.conn.execute(
+            "UPDATE chart_tasks SET status = 'interrupted', completed_at = CURRENT_TIMESTAMP WHERE status = 'running'",
+            [],
+        ).unwrap_or(0);
+        if count2 > 0 {
+            log::info!("启动清理: {} 个航道图任务标记为 interrupted", count2);
+        }
     }
 
     /// 数据库迁移：检查表结构版本并升级

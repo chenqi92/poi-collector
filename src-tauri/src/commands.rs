@@ -858,6 +858,11 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                             serde_json::json!({
                                 "layers": t.layers,
                                 "zoom_levels": t.zoom_levels,
+                                "bounds_west": t.bounds_west,
+                                "bounds_south": t.bounds_south,
+                                "bounds_east": t.bounds_east,
+                                "bounds_north": t.bounds_north,
+                                "grid_step": t.grid_step,
                             })
                             .to_string(),
                         ),

@@ -58,6 +58,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: typeof Ch
     failed: { label: '失败', color: 'text-red-500 bg-red-500/10', icon: XCircle },
     error: { label: '出错', color: 'text-red-500 bg-red-500/10', icon: AlertTriangle },
     cancelled: { label: '已取消', color: 'text-muted-foreground bg-muted', icon: Square },
+    interrupted: { label: '已中断', color: 'text-orange-500 bg-orange-500/10', icon: AlertTriangle },
     pending: { label: '等待中', color: 'text-muted-foreground bg-muted', icon: Clock },
     idle: { label: '空闲', color: 'text-muted-foreground bg-muted', icon: Clock },
 };
@@ -161,7 +162,7 @@ export default function TaskHistory() {
     // 按状态分组
     const activeGroup = filteredTasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
     const completedGroup = filteredTasks.filter(t => t.status === 'completed');
-    const otherGroup = filteredTasks.filter(t => ['failed', 'error', 'cancelled', 'idle'].includes(t.status));
+    const otherGroup = filteredTasks.filter(t => ['failed', 'error', 'cancelled', 'interrupted', 'idle'].includes(t.status));
 
     // ---- 操作函数 ----
 
@@ -258,6 +259,68 @@ export default function TaskHistory() {
         }
     };
 
+    // 航标任务：继续执行（使用原始 bounds 重新开始采集）
+    const handleBuoyResume = async (task: UnifiedTask) => {
+        let extra: Record<string, unknown> = {};
+        try { if (task.extra) extra = JSON.parse(task.extra); } catch { /* ignore */ }
+        const w = extra.bounds_west as number;
+        const s = extra.bounds_south as number;
+        const e = extra.bounds_east as number;
+        const n = extra.bounds_north as number;
+        if (!w && !s && !e && !n) {
+            alert('该任务没有记录边界范围，无法继续执行');
+            return;
+        }
+        setOperatingTaskId(task.id);
+        try {
+            await invoke('chart_start_buoy_collection', {
+                west: w, south: s, east: e, north: n,
+                gridStep: (extra.grid_step as number) || 0.1,
+            });
+            loadTasks();
+        } catch (err) {
+            alert(`启动采集失败: ${err}`);
+        } finally {
+            setOperatingTaskId(null);
+        }
+    };
+
+    // POI 任务：继续执行（使用原始 platform/region 重新开始采集）
+    const handlePoiResume = async (task: UnifiedTask) => {
+        let extra: Record<string, unknown> = {};
+        try { if (task.extra) extra = JSON.parse(task.extra); } catch { /* ignore */ }
+        const platform = task.platform;
+        const regionCode = extra.region_code as string;
+        if (!platform || !regionCode) {
+            alert('该任务缺少平台或区域信息，无法继续执行');
+            return;
+        }
+        setOperatingTaskId(task.id);
+        try {
+            // categories 传 null 使用全部类别（任务记录的是类别名称不是ID，且 upsert 不会重复插入）
+            await invoke('start_collector', {
+                platform,
+                categories: null,
+                regions: [regionCode],
+            });
+            loadTasks();
+        } catch (err) {
+            alert(`启动采集失败: ${err}`);
+        } finally {
+            setOperatingTaskId(null);
+        }
+    };
+
+    // 查看任务详情（通用 - 非瓦片任务展示基本信息）
+    const handleViewTaskDetails = (task: UnifiedTask) => {
+        setLogTaskId(task.id);
+        setLogLoading(false);
+        // 构造通用详情数据
+        let extra: Record<string, unknown> = {};
+        try { if (task.extra) extra = JSON.parse(task.extra); } catch { /* ignore */ }
+        setLogData({ _taskDetail: true, task, extra });
+    };
+
     // 格式化时间 - SQLite CURRENT_TIMESTAMP 存储UTC时间，需转为本地时间显示
     const formatTime = (timeStr: string | null) => {
         if (!timeStr) return '-';
@@ -291,7 +354,11 @@ export default function TaskHistory() {
         const isActive = ['running', 'downloading'].includes(task.status);
         const isPaused = task.status === 'paused';
         const isPending = task.status === 'pending';
+        const isInterrupted = task.status === 'interrupted';
+        const isFailed = ['failed', 'error'].includes(task.status);
         const hasFailed = task.failed > 0;
+        const isBuoy = task.task_type === 'buoy';
+        const isPoi = task.task_type === 'poi';
 
         // Parse extra
         let extra: Record<string, unknown> = {};
@@ -363,6 +430,22 @@ export default function TaskHistory() {
                             </Button>
                         )}
 
+                        {/* 航标任务：继续执行 */}
+                        {isBuoy && (isInterrupted || isFailed) && !isActive && (
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                                onClick={() => handleBuoyResume(task)} title="继续采集" disabled={isOperating}>
+                                <Play className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
+
+                        {/* POI 任务：继续执行 */}
+                        {isPoi && (isInterrupted || isFailed) && !isActive && (
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                                onClick={() => handlePoiResume(task)} title="继续采集" disabled={isOperating}>
+                                <Play className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
+
                         {/* 打开文件夹 */}
                         {task.output_path && (
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
@@ -371,12 +454,16 @@ export default function TaskHistory() {
                             </Button>
                         )}
 
-
-
-                        {/* 日志 - 仅瓦片任务 */}
+                        {/* 日志/详情 */}
                         {isTile && (
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                                 onClick={() => handleViewLogs(task.id)} title="查看日志">
+                                <FileText className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
+                        {(isBuoy || isPoi) && (
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                onClick={() => handleViewTaskDetails(task)} title="查看详情">
                                 <FileText className="h-3.5 w-3.5" />
                             </Button>
                         )}
@@ -526,7 +613,7 @@ export default function TaskHistory() {
             <Dialog open={!!logTaskId} onOpenChange={(open) => !open && setLogTaskId(null)}>
                 <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
                     <DialogHeader className="shrink-0">
-                        <DialogTitle>任务日志</DialogTitle>
+                        <DialogTitle>{logData?._taskDetail ? '任务详情' : '任务日志'}</DialogTitle>
                     </DialogHeader>
                     {logLoading ? (
                         <div className="flex items-center justify-center h-40">
@@ -535,84 +622,176 @@ export default function TaskHistory() {
                     ) : logData ? (
                         <SimpleBar className="flex-1 min-h-0">
                             <div className="space-y-4 pr-2">
-                                {/* 统计概览 */}
-                                <div className="grid grid-cols-4 gap-2 text-center text-sm">
-                                    <div className="bg-muted/50 rounded-lg p-2">
-                                        <div className="text-lg font-bold">{logData.stats.total.toLocaleString()}</div>
-                                        <div className="text-xs text-muted-foreground">总计</div>
-                                    </div>
-                                    <div className="bg-green-500/10 rounded-lg p-2">
-                                        <div className="text-lg font-bold text-green-500">{logData.stats.completed.toLocaleString()}</div>
-                                        <div className="text-xs text-muted-foreground">已完成</div>
-                                    </div>
-                                    <div className="bg-red-500/10 rounded-lg p-2">
-                                        <div className="text-lg font-bold text-red-500">{logData.stats.failed.toLocaleString()}</div>
-                                        <div className="text-xs text-muted-foreground">失败</div>
-                                    </div>
-                                    <div className="bg-blue-500/10 rounded-lg p-2">
-                                        <div className="text-lg font-bold text-blue-500">{logData.stats.pending.toLocaleString()}</div>
-                                        <div className="text-xs text-muted-foreground">待下载</div>
-                                    </div>
-                                </div>
+                                {logData._taskDetail ? (
+                                    /* 通用任务详情视图 */
+                                    <>
+                                        <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                                            <div className="bg-muted/50 rounded-lg p-2">
+                                                <div className="text-lg font-bold">{logData.task.total.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">总计</div>
+                                            </div>
+                                            <div className="bg-green-500/10 rounded-lg p-2">
+                                                <div className="text-lg font-bold text-green-500">{logData.task.completed.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">已完成</div>
+                                            </div>
+                                            <div className="bg-red-500/10 rounded-lg p-2">
+                                                <div className="text-lg font-bold text-red-500">{logData.task.failed.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">失败</div>
+                                            </div>
+                                        </div>
 
-                                {/* 错误摘要 */}
-                                {logData.error_summary.length > 0 && (
-                                    <div>
-                                        <h4 className="text-sm font-medium mb-2">❌ 错误摘要</h4>
-                                        <div className="space-y-1.5">
-                                            {logData.error_summary.map((item: any, i: number) => (
-                                                <div key={i} className="flex items-start gap-2 text-xs bg-red-500/5 border border-red-500/10 rounded-md p-2">
-                                                    <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0">
-                                                        {item.count}
-                                                    </span>
-                                                    <span className="text-red-400 break-all font-mono">{item.error}</span>
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                <span className="text-muted-foreground">任务名称</span>
+                                                <span className="font-medium">{logData.task.name}</span>
+                                            </div>
+                                            <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                <span className="text-muted-foreground">状态</span>
+                                                <span className={cn('text-xs px-2 py-0.5 rounded-full', (STATUS_MAP[logData.task.status] || STATUS_MAP['idle']).color)}>
+                                                    {(STATUS_MAP[logData.task.status] || STATUS_MAP['idle']).label}
+                                                </span>
+                                            </div>
+                                            <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                <span className="text-muted-foreground">创建时间</span>
+                                                <span>{formatTime(logData.task.created_at)}</span>
+                                            </div>
+                                            {logData.task.completed_at && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">完成时间</span>
+                                                    <span>{formatTime(logData.task.completed_at)}</span>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
+                                            )}
+                                            {logData.task.platform && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">平台</span>
+                                                    <span>{logData.task.platform}</span>
+                                                </div>
+                                            )}
 
-                                {/* 失败瓦片详情 */}
-                                {logData.failed_tiles.length > 0 && (
-                                    <div>
-                                        <h4 className="text-sm font-medium mb-2">
-                                            📍 失败瓦片详情
-                                            <span className="text-muted-foreground font-normal ml-1">
-                                                (显示前 {Math.min(logData.failed_tiles.length, 200)} 条)
-                                            </span>
-                                        </h4>
-                                        <div className="border rounded-md overflow-hidden">
-                                            <table className="w-full text-xs">
-                                                <thead className="bg-muted/50 sticky top-0 z-10">
-                                                    <tr>
-                                                        <th className="text-left px-2 py-1.5 font-medium">Z</th>
-                                                        <th className="text-left px-2 py-1.5 font-medium">X</th>
-                                                        <th className="text-left px-2 py-1.5 font-medium">Y</th>
-                                                        <th className="text-left px-2 py-1.5 font-medium">重试</th>
-                                                        <th className="text-left px-2 py-1.5 font-medium">错误信息</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {logData.failed_tiles.map((t: any, i: number) => (
-                                                        <tr key={i} className="border-t border-border/50 hover:bg-muted/30">
-                                                            <td className="px-2 py-1 font-mono">{t.z}</td>
-                                                            <td className="px-2 py-1 font-mono">{t.x}</td>
-                                                            <td className="px-2 py-1 font-mono">{t.y}</td>
-                                                            <td className="px-2 py-1 font-mono">{t.retries}</td>
-                                                            <td className="px-2 py-1 text-red-400 break-all max-w-[200px]">{t.error}</td>
-                                                        </tr>
+                                            {/* 动态显示 extra 属性 */}
+                                            {logData.extra.total_collected != null && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">采集数据量</span>
+                                                    <span className="font-medium text-green-500">{Number(logData.extra.total_collected).toLocaleString()} 条</span>
+                                                </div>
+                                            )}
+                                            {logData.extra.categories && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">采集类别</span>
+                                                    <span className="text-right max-w-[200px] truncate" title={String(logData.extra.categories)}>
+                                                        {String(logData.extra.categories)}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {logData.extra.region_code && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">区域代码</span>
+                                                    <span className="font-mono text-xs">{String(logData.extra.region_code)}</span>
+                                                </div>
+                                            )}
+                                            {logData.extra.bounds_west != null && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">采集范围</span>
+                                                    <span className="font-mono text-xs">
+                                                        {Number(logData.extra.bounds_west).toFixed(2)}~{Number(logData.extra.bounds_east).toFixed(2)}°E,{' '}
+                                                        {Number(logData.extra.bounds_south).toFixed(2)}~{Number(logData.extra.bounds_north).toFixed(2)}°N
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {logData.extra.grid_step != null && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">网格步长</span>
+                                                    <span>{logData.extra.grid_step}°</span>
+                                                </div>
+                                            )}
+                                            {logData.extra.layers && (
+                                                <div className="flex justify-between py-1.5 border-b border-border/50">
+                                                    <span className="text-muted-foreground">图层</span>
+                                                    <span>{String(logData.extra.layers)}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
+                                ) : (
+                                    /* 瓦片任务日志视图（原有逻辑） */
+                                    <>
+                                        <div className="grid grid-cols-4 gap-2 text-center text-sm">
+                                            <div className="bg-muted/50 rounded-lg p-2">
+                                                <div className="text-lg font-bold">{logData.stats.total.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">总计</div>
+                                            </div>
+                                            <div className="bg-green-500/10 rounded-lg p-2">
+                                                <div className="text-lg font-bold text-green-500">{logData.stats.completed.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">已完成</div>
+                                            </div>
+                                            <div className="bg-red-500/10 rounded-lg p-2">
+                                                <div className="text-lg font-bold text-red-500">{logData.stats.failed.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">失败</div>
+                                            </div>
+                                            <div className="bg-blue-500/10 rounded-lg p-2">
+                                                <div className="text-lg font-bold text-blue-500">{logData.stats.pending.toLocaleString()}</div>
+                                                <div className="text-xs text-muted-foreground">待下载</div>
+                                            </div>
+                                        </div>
+
+                                        {logData.error_summary.length > 0 && (
+                                            <div>
+                                                <h4 className="text-sm font-medium mb-2">❌ 错误摘要</h4>
+                                                <div className="space-y-1.5">
+                                                    {logData.error_summary.map((item: any, i: number) => (
+                                                        <div key={i} className="flex items-start gap-2 text-xs bg-red-500/5 border border-red-500/10 rounded-md p-2">
+                                                            <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0">
+                                                                {item.count}
+                                                            </span>
+                                                            <span className="text-red-400 break-all font-mono">{item.error}</span>
+                                                        </div>
                                                     ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
-                                )}
+                                                </div>
+                                            </div>
+                                        )}
 
-                                {logData.error_summary.length === 0 && logData.failed_tiles.length === 0 && (
-                                    <div className="text-center text-muted-foreground py-8">
-                                        <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
-                                        <p>没有失败记录，任务运行正常</p>
-                                    </div>
+                                        {logData.failed_tiles.length > 0 && (
+                                            <div>
+                                                <h4 className="text-sm font-medium mb-2">
+                                                    📍 失败瓦片详情
+                                                    <span className="text-muted-foreground font-normal ml-1">
+                                                        (显示前 {Math.min(logData.failed_tiles.length, 200)} 条)
+                                                    </span>
+                                                </h4>
+                                                <div className="border rounded-md overflow-hidden">
+                                                    <table className="w-full text-xs">
+                                                        <thead className="bg-muted/50 sticky top-0 z-10">
+                                                            <tr>
+                                                                <th className="text-left px-2 py-1.5 font-medium">Z</th>
+                                                                <th className="text-left px-2 py-1.5 font-medium">X</th>
+                                                                <th className="text-left px-2 py-1.5 font-medium">Y</th>
+                                                                <th className="text-left px-2 py-1.5 font-medium">重试</th>
+                                                                <th className="text-left px-2 py-1.5 font-medium">错误信息</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {logData.failed_tiles.map((t: any, i: number) => (
+                                                                <tr key={i} className="border-t border-border/50 hover:bg-muted/30">
+                                                                    <td className="px-2 py-1 font-mono">{t.z}</td>
+                                                                    <td className="px-2 py-1 font-mono">{t.x}</td>
+                                                                    <td className="px-2 py-1 font-mono">{t.y}</td>
+                                                                    <td className="px-2 py-1 font-mono">{t.retries}</td>
+                                                                    <td className="px-2 py-1 text-red-400 break-all max-w-[200px]">{t.error}</td>
+                                                                </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {logData.error_summary.length === 0 && logData.failed_tiles.length === 0 && (
+                                            <div className="text-center text-muted-foreground py-8">
+                                                <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-500" />
+                                                <p>没有失败记录，任务运行正常</p>
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </SimpleBar>

@@ -1,6 +1,6 @@
 [package]
 name = "poi-collector-app"
-version = "0.2.5"
+version = "0.2.6"
 description = "Multi-platform POI data collector"
 authors = ["chenqi92"]
 edition = "2021"

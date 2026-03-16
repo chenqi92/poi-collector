@@ -113,7 +113,7 @@ pub async fn chart_start_buoy_collection(
     // 创建任务记录（在进度转发之前创建，保证 task_id 可共享）
     let db_path = get_db_path();
     let task_id = match ChartDatabase::new(&db_path) {
-        Ok(db) => db.create_chart_task("buoy", 0).unwrap_or(0),
+        Ok(db) => db.create_chart_task("buoy", 0, Some(&bounds), Some(step)).unwrap_or(0),
         Err(_) => 0,
     };
 

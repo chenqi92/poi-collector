@@ -18,7 +18,21 @@ impl ChartDatabase {
             conn: Mutex::new(conn),
         };
         db.init_tables()?;
+        db.cleanup_stale_tasks();
         Ok(db)
+    }
+
+    /// 应用启动时清理卡在"运行中"状态的任务
+    fn cleanup_stale_tasks(&self) {
+        if let Ok(conn) = self.conn.lock() {
+            let count = conn.execute(
+                "UPDATE chart_tasks SET status = 'interrupted', completed_at = CURRENT_TIMESTAMP WHERE status = 'running'",
+                [],
+            ).unwrap_or(0);
+            if count > 0 {
+                log::info!("启动清理: {} 个航道图任务标记为 interrupted", count);
+            }
+        }
     }
 
     /// 初始化数据表
@@ -346,16 +360,30 @@ impl ChartDatabase {
     }
 
     /// 创建航标采集任务
-    pub fn create_chart_task(&self, task_type: &str, total: i64) -> Result<i64, String> {
+    pub fn create_chart_task(
+        &self,
+        task_type: &str,
+        total: i64,
+        bounds: Option<&super::types::ChartBounds>,
+        grid_step: Option<f64>,
+    ) -> Result<i64, String> {
         let conn = self
             .conn
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
-        conn.execute(
-            "INSERT INTO chart_tasks (task_type, status, total_items) VALUES (?1, 'running', ?2)",
-            params![task_type, total],
-        )
-        .map_err(|e| format!("创建任务失败: {}", e))?;
+        if let Some(b) = bounds {
+            conn.execute(
+                "INSERT INTO chart_tasks (task_type, status, total_items, bounds_west, bounds_south, bounds_east, bounds_north, grid_step) VALUES (?1, 'running', ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![task_type, total, b.west, b.south, b.east, b.north, grid_step],
+            )
+            .map_err(|e| format!("创建任务失败: {}", e))?;
+        } else {
+            conn.execute(
+                "INSERT INTO chart_tasks (task_type, status, total_items) VALUES (?1, 'running', ?2)",
+                params![task_type, total],
+            )
+            .map_err(|e| format!("创建任务失败: {}", e))?;
+        }
         Ok(conn.last_insert_rowid())
     }
 
@@ -411,7 +439,7 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         let mut stmt = conn.prepare(
-            "SELECT id, task_type, status, total_items, completed_items, failed_items, output_path, zoom_levels, layers, created_at, completed_at FROM chart_tasks ORDER BY id DESC"
+            "SELECT id, task_type, status, total_items, completed_items, failed_items, output_path, zoom_levels, layers, created_at, completed_at, bounds_west, bounds_south, bounds_east, bounds_north, grid_step FROM chart_tasks ORDER BY id DESC"
         ).map_err(|e| format!("准备查询失败: {}", e))?;
 
         let rows = stmt
@@ -428,6 +456,11 @@ impl ChartDatabase {
                     layers: row.get(8)?,
                     created_at: row.get(9)?,
                     completed_at: row.get(10)?,
+                    bounds_west: row.get(11).ok(),
+                    bounds_south: row.get(12).ok(),
+                    bounds_east: row.get(13).ok(),
+                    bounds_north: row.get(14).ok(),
+                    grid_step: row.get(15).ok(),
                 })
             })
             .map_err(|e| format!("查询失败: {}", e))?;
@@ -454,4 +487,9 @@ pub struct ChartTask {
     pub layers: Option<String>,
     pub created_at: Option<String>,
     pub completed_at: Option<String>,
+    pub bounds_west: Option<f64>,
+    pub bounds_south: Option<f64>,
+    pub bounds_east: Option<f64>,
+    pub bounds_north: Option<f64>,
+    pub grid_step: Option<f64>,
 }

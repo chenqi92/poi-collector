@@ -102,6 +102,34 @@ function BoundsFitter({ bounds }: { bounds: Bounds }) {
     return null;
 }
 
+// 地图层级显示组件
+function ZoomLevelDisplay() {
+    const map = useMap();
+    const [zoom, setZoom] = useState(map.getZoom());
+    useEffect(() => {
+        const onZoom = () => setZoom(map.getZoom());
+        map.on('zoomend', onZoom);
+        return () => { map.off('zoomend', onZoom); };
+    }, [map]);
+    return (
+        <div className="leaflet-bottom leaflet-right" style={{ pointerEvents: 'none' }}>
+            <div className="leaflet-control" style={{
+                pointerEvents: 'auto',
+                background: 'rgba(0,0,0,0.6)',
+                color: '#fff',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontFamily: 'monospace',
+                margin: '10px',
+                backdropFilter: 'blur(4px)',
+            }}>
+                层级：<span style={{ fontWeight: 'bold' }}>{Math.round(zoom)}</span>
+            </div>
+        </div>
+    );
+}
+
 // 地图内搜索框包装组件 - 放在右上角避免与缩放按钮重叠
 function MapSearchWrapper() {
     return (
@@ -385,6 +413,7 @@ export function TileBoundsMap({
                         )}
 
                         <ResizeHandler />
+                        <ZoomLevelDisplay />
 
                         {/* 地图内搜索框 */}
                         <MapSearchWrapper />
