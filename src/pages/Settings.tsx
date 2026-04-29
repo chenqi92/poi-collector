@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Key, Plus, Trash2, Eye, EyeOff, Loader2, Shield, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { refreshTiandituKey } from '@/lib/baseMaps';
 
 interface ApiKey {
     id: number;
@@ -53,6 +54,7 @@ export default function Settings() {
             });
             setNewKey({ ...newKey, [platform]: { name: '', key: '' } });
             loadData();
+            if (platform === 'tianditu') refreshTiandituKey();
         } catch (e) {
             console.error('添加Key失败:', e);
         } finally {
@@ -65,6 +67,7 @@ export default function Settings() {
         try {
             await invoke('delete_api_key', { platform, keyId });
             loadData();
+            if (platform === 'tianditu') refreshTiandituKey();
         } catch (e) {
             console.error('删除失败:', e);
         }

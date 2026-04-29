@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, Marker, Popup, Tooltip, useMap } from 'react-leaflet';
 import { invoke } from '@tauri-apps/api/core';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { BaseMapLayer, BaseMapSwitcher } from './BaseMap';
+import { BaseMapType } from '@/lib/baseMaps';
 
 // 修复 Leaflet 默认图标问题
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -381,9 +383,10 @@ export function POIMap({
     chartBounds
 }: POIMapProps) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const [baseMapType, setBaseMapType] = useState<BaseMapType>('street');
 
     return (
-        <div ref={containerRef} className="w-full h-full" style={{ minHeight: '300px' }}>
+        <div ref={containerRef} className="w-full h-full relative" style={{ minHeight: '300px' }}>
             <MapContainer
                 center={center}
                 zoom={zoom}
@@ -391,10 +394,7 @@ export function POIMap({
                 style={{ height: '100%', width: '100%' }}
                 attributionControl={false}
             >
-                <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
+                <BaseMapLayer baseMapType={baseMapType} />
 
                 {/* 只在非视窗加载模式下自动调整视野，避免无限循环 */}
                 {!onBoundsChange && <FitBounds pois={pois} />}
@@ -457,6 +457,11 @@ export function POIMap({
                     );
                 })}
             </MapContainer>
+
+            {/* 底图切换（悬浮在地图右上角） */}
+            <div className="absolute top-2 right-2 z-[1000]">
+                <BaseMapSwitcher value={baseMapType} onChange={setBaseMapType} />
+            </div>
         </div>
     );
 }

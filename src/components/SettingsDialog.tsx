@@ -10,6 +10,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { refreshTiandituKey } from '@/lib/baseMaps';
 
 interface ApiKey {
     id: number;
@@ -98,6 +99,7 @@ export function SettingsDialog({ open, onOpenChange, onRegionsChange }: Settings
             });
             setNewKey({ ...newKey, [platform]: { name: '', key: '' } });
             loadApiKeys();
+            if (platform === 'tianditu') refreshTiandituKey();
         } catch (e) {
             console.error('添加Key失败:', e);
         } finally {
@@ -110,6 +112,7 @@ export function SettingsDialog({ open, onOpenChange, onRegionsChange }: Settings
         try {
             await invoke('delete_api_key', { platform, keyId });
             loadApiKeys();
+            if (platform === 'tianditu') refreshTiandituKey();
         } catch (e) {
             console.error('删除失败:', e);
         }

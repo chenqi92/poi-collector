@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -7,6 +7,8 @@ import { DrawPolygon, Bounds } from './DrawPolygon';
 import { MapSearchBox } from './MapSearchBox';
 import { TilePreviewLayer } from './TilePreviewLayer';
 import { RegionBoundary } from './RegionBoundary';
+import { BaseMapLayer, BaseMapSwitcher } from './BaseMap';
+import { BaseMapType } from '@/lib/baseMaps';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -42,6 +44,8 @@ interface FullscreenMapDialogProps {
     selectedRegionCode?: string | null;
     selectionMode: 'draw' | 'region';
     onSelectionModeChange: (mode: 'draw' | 'region') => void;
+    baseMapType?: BaseMapType;
+    onBaseMapTypeChange?: (type: BaseMapType) => void;
 }
 
 // 地图尺寸变化处理组件
@@ -108,13 +112,19 @@ export function FullscreenMapDialog({
     selectedRegionCode,
     selectionMode,
     onSelectionModeChange,
+    baseMapType,
+    onBaseMapTypeChange,
 }: FullscreenMapDialogProps) {
     const [localBounds, setLocalBounds] = useState<Bounds>(initialBounds);
     const [shouldFitBounds, setShouldFitBounds] = useState(false);
     const [isDrawingMode, setIsDrawingMode] = useState(false);
+    const [internalBaseMapType, setInternalBaseMapType] = useState<BaseMapType>('street');
+    // 父组件未受控时使用内部状态
+    const effectiveBaseMapType = baseMapType ?? internalBaseMapType;
+    const setEffectiveBaseMapType = onBaseMapTypeChange ?? setInternalBaseMapType;
 
-    // 是否使用 OSM 底图（osm 平台或 cjhy 航道图都使用 OSM 底图）
-    const useOsmTiles = platform === 'osm' || platform === 'cjhy';
+    // 是否使用通用底图（osm 平台或 cjhy 航道图）
+    const useBaseMapLayer = platform === 'osm' || platform === 'cjhy';
 
     // 检查是否有有效边界
     const hasValidBounds = localBounds.north > localBounds.south && localBounds.east > localBounds.west;
@@ -225,6 +235,15 @@ export function FullscreenMapDialog({
                             </Button>
                         )}
                     </div>
+
+                    {/* 底图切换（osm / cjhy 模式可切换） */}
+                    {useBaseMapLayer && (
+                        <BaseMapSwitcher
+                            value={effectiveBaseMapType}
+                            onChange={setEffectiveBaseMapType}
+                            size="md"
+                        />
+                    )}
                 </div>
 
                 {/* 地图容器 */}
@@ -237,11 +256,8 @@ export function FullscreenMapDialog({
                         attributionControl={false}
                     >
                         {/* 底图层 */}
-                        {useOsmTiles ? (
-                            <TileLayer
-                                attribution="&copy; OpenStreetMap"
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            />
+                        {useBaseMapLayer ? (
+                            <BaseMapLayer baseMapType={effectiveBaseMapType} />
                         ) : (
                             <TilePreviewLayer
                                 platform={platform}

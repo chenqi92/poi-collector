@@ -1,17 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, useMap } from 'react-leaflet';
+import { MapContainer, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { invoke } from '@tauri-apps/api/core';
 import 'leaflet/dist/leaflet.css';
 
-// 底图类型配置
-type BaseMapType = 'street' | 'terrain' | 'satellite';
-const BASE_MAP_OPTIONS: { key: BaseMapType; label: string; url: string; attr: string }[] = [
-    { key: 'street', label: '街道', url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attr: '&copy; OSM' },
-    { key: 'terrain', label: '地形', url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', attr: '&copy; OpenTopoMap' },
-    { key: 'satellite', label: '卫星', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attr: '&copy; Esri' },
-];
-
+import { BaseMapLayer, BaseMapSwitcher } from './BaseMap';
+import { BaseMapType } from '@/lib/baseMaps';
 import { TilePreviewLayer } from './TilePreviewLayer';
 import { DrawPolygon, Bounds } from './DrawPolygon';
 import { MapSearchBox } from './MapSearchBox';
@@ -154,9 +148,9 @@ export function TileBoundsMap({
     const [isDrawingMode, setIsDrawingMode] = useState(false);
     const [baseMapType, setBaseMapType] = useState<BaseMapType>('street');
 
-    // 是否使用 OSM 底图（osm 平台或 cjhy 航道图都使用 OSM 底图）
+    // 是否使用通用底图（osm 或 cjhy 航道图）
     // cjhy 航道图的瓦片是叠加图层，需要独立的底图支撑
-    const useOsmTiles = platform === 'osm' || platform === 'cjhy';
+    const useBaseMapLayer = platform === 'osm' || platform === 'cjhy';
 
     // 行政区域搜索状态
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
@@ -357,22 +351,9 @@ export function TileBoundsMap({
                     </div>
 
                     <div className="flex items-center gap-2">
-                        {/* 航道图底图切换 */}
-                        {platform === 'cjhy' && (
-                            <div className="flex items-center gap-0.5 p-0.5 bg-muted rounded-md">
-                                {BASE_MAP_OPTIONS.map(opt => (
-                                    <button
-                                        key={opt.key}
-                                        onClick={() => setBaseMapType(opt.key)}
-                                        className={`px-2 py-0.5 text-[11px] rounded transition-all ${baseMapType === opt.key
-                                            ? 'bg-background text-foreground shadow-sm font-medium'
-                                            : 'text-muted-foreground hover:text-foreground'
-                                            }`}
-                                    >
-                                        {opt.label}
-                                    </button>
-                                ))}
-                            </div>
+                        {/* 底图切换（osm / cjhy 模式可切换） */}
+                        {useBaseMapLayer && (
+                            <BaseMapSwitcher value={baseMapType} onChange={setBaseMapType} />
                         )}
 
                         {/* 全屏编辑按钮 */}
@@ -398,12 +379,8 @@ export function TileBoundsMap({
                         attributionControl={false}
                     >
                         {/* 底图层 */}
-                        {useOsmTiles ? (
-                            <TileLayer
-                                key={baseMapType}
-                                attribution={BASE_MAP_OPTIONS.find(o => o.key === baseMapType)?.attr || ''}
-                                url={BASE_MAP_OPTIONS.find(o => o.key === baseMapType)?.url || BASE_MAP_OPTIONS[0].url}
-                            />
+                        {useBaseMapLayer ? (
+                            <BaseMapLayer baseMapType={baseMapType} />
                         ) : (
                             <TilePreviewLayer
                                 platform={platform}
@@ -481,6 +458,8 @@ export function TileBoundsMap({
                 selectedRegionCode={selectedRegionCode}
                 selectionMode={selectionMode}
                 onSelectionModeChange={onSelectionModeChange}
+                baseMapType={baseMapType}
+                onBaseMapTypeChange={setBaseMapType}
             />
         </>
     );
