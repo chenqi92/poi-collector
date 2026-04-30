@@ -1,5 +1,6 @@
 use super::TilePlatform;
 use crate::tile_downloader::types::MapType;
+use std::collections::HashMap;
 
 pub struct TiandituPlatform {
     api_key: Option<String>,
@@ -33,7 +34,7 @@ impl TilePlatform for TiandituPlatform {
         };
 
         Some(format!(
-            "http://t{}.tianditu.gov.cn/{}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER={}&STYLE={}&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={}&TILEROW={}&TILEMATRIX={}&tk={}",
+            "https://t{}.tianditu.gov.cn/{}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER={}&STYLE={}&TILEMATRIXSET=w&FORMAT=tiles&TILECOL={}&TILEROW={}&TILEMATRIX={}&tk={}",
             s, layer, layer, style, x, y, z, key
         ))
     }
@@ -60,5 +61,13 @@ impl TilePlatform for TiandituPlatform {
 
     fn subdomains(&self) -> Vec<&str> {
         vec!["0", "1", "2", "3", "4", "5", "6", "7"]
+    }
+
+    /// 天地图 WAF 会拒绝携带 Chrome 类 User-Agent 的请求（实测:无 UA → 200, Chrome UA → 403）
+    /// 此处覆盖父 trait 默认 UA, 改用类 curl/服务端调用风格的 UA
+    fn get_headers(&self) -> HashMap<String, String> {
+        let mut headers = HashMap::new();
+        headers.insert("User-Agent".to_string(), "curl/8.5.0".to_string());
+        headers
     }
 }

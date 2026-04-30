@@ -7,6 +7,8 @@ interface TilePreviewLayerProps {
     platform: string;
     mapType: string;
     apiKey?: string;
+    /** 显式 z-index, 注记叠加层应设大于底图层（Leaflet 默认 1） */
+    zIndex?: number;
 }
 
 interface TileRequest {
@@ -17,6 +19,8 @@ interface TileRequest {
     y: number;
     api_key: string | null;
 }
+
+const KEY_REQUIRED_PLATFORMS = new Set(['tianditu', 'amap', 'baidu', 'tencent', 'bing']);
 
 // 自定义瓦片层，通过 Tauri 代理获取瓦片
 class TauriTileLayer extends L.TileLayer {
@@ -49,6 +53,15 @@ class TauriTileLayer extends L.TileLayer {
         const cached = this.tileCache.get(cacheKey);
         if (cached) {
             tile.src = cached;
+            done(undefined, tile);
+            return tile;
+        }
+
+        // 已知需要 API Key 的平台：未拿到 key 时直接返回占位，不去调后端，避免首屏 race
+        // 拿到 key 后 updateParams 会清缓存重画
+        if (KEY_REQUIRED_PLATFORMS.has(this.platform) && !this.apiKey) {
+            tile.style.background = '#f3f4f6';
+            // 立即标记完成但不报错，让 Leaflet 后续根据 redraw 重取
             done(undefined, tile);
             return tile;
         }
@@ -98,7 +111,7 @@ class TauriTileLayer extends L.TileLayer {
     }
 }
 
-export function TilePreviewLayer({ platform, mapType, apiKey }: TilePreviewLayerProps) {
+export function TilePreviewLayer({ platform, mapType, apiKey, zIndex }: TilePreviewLayerProps) {
     const map = useMap();
     const layerRef = useRef<TauriTileLayer | null>(null);
 
@@ -107,10 +120,14 @@ export function TilePreviewLayer({ platform, mapType, apiKey }: TilePreviewLayer
             layerRef.current = new TauriTileLayer(platform, mapType, apiKey, {
                 maxZoom: 19,
                 minZoom: 1,
+                ...(zIndex !== undefined ? { zIndex } : {}),
             });
             map.addLayer(layerRef.current);
         } else {
             layerRef.current.updateParams(platform, mapType, apiKey);
+            if (zIndex !== undefined) {
+                layerRef.current.setZIndex(zIndex);
+            }
         }
 
         return () => {
@@ -119,7 +136,7 @@ export function TilePreviewLayer({ platform, mapType, apiKey }: TilePreviewLayer
                 layerRef.current = null;
             }
         };
-    }, [map, platform, mapType, apiKey]);
+    }, [map, platform, mapType, apiKey, zIndex]);
 
     return null;
 }

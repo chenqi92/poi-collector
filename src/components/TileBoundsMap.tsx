@@ -150,6 +150,7 @@ export function TileBoundsMap({
 
     // 是否使用通用底图（osm 或 cjhy 航道图）
     // cjhy 航道图的瓦片是叠加图层，需要独立的底图支撑
+    // 注意: 天地图必须走 Rust 代理（webview 自带 Chrome UA 会被天地图 WAF 拒绝）
     const useBaseMapLayer = platform === 'osm' || platform === 'cjhy';
 
     // 行政区域搜索状态
@@ -382,11 +383,26 @@ export function TileBoundsMap({
                         {useBaseMapLayer ? (
                             <BaseMapLayer baseMapType={baseMapType} />
                         ) : (
-                            <TilePreviewLayer
-                                platform={platform}
-                                mapType={mapType}
-                                apiKey={apiKey}
-                            />
+                            <>
+                                <TilePreviewLayer
+                                    platform={platform}
+                                    mapType={mapType}
+                                    apiKey={apiKey}
+                                    zIndex={1}
+                                />
+                                {/* 天地图三种底图都需要叠 cva 才能看到中文地名（mapType=annotation 时本身就是注记层，不再重复叠） */}
+                                {platform === 'tianditu' &&
+                                    (mapType === 'street' ||
+                                        mapType === 'satellite' ||
+                                        mapType === 'terrain') && (
+                                        <TilePreviewLayer
+                                            platform="tianditu"
+                                            mapType="annotation"
+                                            apiKey={apiKey}
+                                            zIndex={10}
+                                        />
+                                    )}
+                            </>
                         )}
 
                         <ResizeHandler />

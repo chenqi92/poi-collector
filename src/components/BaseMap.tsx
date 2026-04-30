@@ -12,11 +12,20 @@ import {
 
 interface BaseMapLayerProps {
     baseMapType: BaseMapType;
+    /** 外部传入的天地图 Key 覆盖（如下载页输入框中实时输入的 key） */
+    tiandituKeyOverride?: string;
 }
 
 /** 渲染当前选中的底图（含天地图卫星/地形的注记叠加） */
-export const BaseMapLayer = memo(function BaseMapLayer({ baseMapType }: BaseMapLayerProps) {
-    const tiandituKey = useTiandituKey();
+export const BaseMapLayer = memo(function BaseMapLayer({
+    baseMapType,
+    tiandituKeyOverride,
+}: BaseMapLayerProps) {
+    const savedKey = useTiandituKey();
+    // 优先使用外部传入的 key，便于 key 还未持久化到数据库时也能即时生效
+    const tiandituKey = tiandituKeyOverride && tiandituKeyOverride.length > 0
+        ? tiandituKeyOverride
+        : savedKey;
     const available = useAvailableBaseMaps(tiandituKey);
     const current = useMemo(() => resolveBaseMap(baseMapType, available), [baseMapType, available]);
     const url = useMemo(

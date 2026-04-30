@@ -25,7 +25,7 @@ struct SearchParams {
 }
 
 impl TianDiTuCollector {
-    const API_URL: &'static str = "http://api.tianditu.gov.cn/v2/search";
+    const API_URL: &'static str = "https://api.tianditu.gov.cn/v2/search";
     const PAGE_SIZE: i32 = 100;
 
     pub fn new(api_key: String) -> Self {

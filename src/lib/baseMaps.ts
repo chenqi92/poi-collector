@@ -81,6 +81,19 @@ export function resolveBaseMap(
     return options.find((o) => o.key === type) || options[0];
 }
 
+/** 把下载平台的 mapType 映射为对应的天地图底图键 */
+export function tiandituBaseMapForMapType(mapType: string): BaseMapType {
+    switch (mapType) {
+        case 'satellite':
+            return 'tianditu_img';
+        case 'terrain':
+            return 'tianditu_ter';
+        case 'street':
+        default:
+            return 'tianditu_vec';
+    }
+}
+
 // ---- 天地图 API Key 模块级缓存 ----
 // undefined: 未加载；string（含空字符串）: 已加载完成
 let cachedTiandituKey: string | undefined;

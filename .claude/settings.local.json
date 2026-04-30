@@ -7,7 +7,10 @@
       "Bash(npm run build:*)",
       "Bash(ls -la \"E:\\\\workspace-freq\\\\poi-collector-app\\\\src\\\\components\"\" | grep -i \"map|region|boundary \")",
       "Bash(npx tsc *)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(curl *)",
+      "Bash(cargo build *)",
+      "Bash(pnpm tsc *)"
     ]
   }
 }

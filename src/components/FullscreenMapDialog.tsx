@@ -124,6 +124,7 @@ export function FullscreenMapDialog({
     const setEffectiveBaseMapType = onBaseMapTypeChange ?? setInternalBaseMapType;
 
     // 是否使用通用底图（osm 平台或 cjhy 航道图）
+    // 注意: 天地图必须走 Rust 代理（webview 自带 Chrome UA 会被天地图 WAF 拒绝）
     const useBaseMapLayer = platform === 'osm' || platform === 'cjhy';
 
     // 检查是否有有效边界
@@ -259,11 +260,26 @@ export function FullscreenMapDialog({
                         {useBaseMapLayer ? (
                             <BaseMapLayer baseMapType={effectiveBaseMapType} />
                         ) : (
-                            <TilePreviewLayer
-                                platform={platform}
-                                mapType={mapType}
-                                apiKey={apiKey}
-                            />
+                            <>
+                                <TilePreviewLayer
+                                    platform={platform}
+                                    mapType={mapType}
+                                    apiKey={apiKey}
+                                    zIndex={1}
+                                />
+                                {/* 天地图三种底图都需要叠 cva 才能看到中文地名（mapType=annotation 时本身就是注记层，不再重复叠） */}
+                                {platform === 'tianditu' &&
+                                    (mapType === 'street' ||
+                                        mapType === 'satellite' ||
+                                        mapType === 'terrain') && (
+                                        <TilePreviewLayer
+                                            platform="tianditu"
+                                            mapType="annotation"
+                                            apiKey={apiKey}
+                                            zIndex={10}
+                                        />
+                                    )}
+                            </>
                         )}
 
                         <ResizeHandler />
