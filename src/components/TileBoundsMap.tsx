@@ -152,6 +152,8 @@ export function TileBoundsMap({
     // cjhy 航道图的瓦片是叠加图层，需要独立的底图支撑
     // 注意: 天地图必须走 Rust 代理（webview 自带 Chrome UA 会被天地图 WAF 拒绝）
     const useBaseMapLayer = platform === 'osm' || platform === 'cjhy';
+    const showBaseMapSwitcher = platform === 'cjhy';
+    const previewBaseMapType: BaseMapType = platform === 'osm' ? 'street' : baseMapType;
 
     // 行政区域搜索状态
     const [regionSearchQuery, setRegionSearchQuery] = useState('');
@@ -352,9 +354,13 @@ export function TileBoundsMap({
                     </div>
 
                     <div className="flex items-center gap-2">
-                        {/* 底图切换（osm / cjhy 模式可切换） */}
-                        {useBaseMapLayer && (
-                            <BaseMapSwitcher value={baseMapType} onChange={setBaseMapType} />
+                        {/* 航道图是叠加图层，保留预览底图切换 */}
+                        {showBaseMapSwitcher && (
+                            <BaseMapSwitcher
+                                value={baseMapType}
+                                onChange={setBaseMapType}
+                                showTiandituOptions={false}
+                            />
                         )}
 
                         {/* 全屏编辑按钮 */}
@@ -381,7 +387,7 @@ export function TileBoundsMap({
                     >
                         {/* 底图层 */}
                         {useBaseMapLayer ? (
-                            <BaseMapLayer baseMapType={baseMapType} />
+                            <BaseMapLayer baseMapType={previewBaseMapType} />
                         ) : (
                             <>
                                 <TilePreviewLayer

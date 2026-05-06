@@ -66,6 +66,7 @@ interface BaseMapSwitcherProps {
     onChange: (type: BaseMapType) => void;
     className?: string;
     size?: 'sm' | 'md';
+    showTiandituOptions?: boolean;
 }
 
 /** 底图切换工具条；未配置天地图 Key 时自动隐藏天地图选项 */
@@ -74,9 +75,17 @@ export const BaseMapSwitcher = memo(function BaseMapSwitcher({
     onChange,
     className,
     size = 'sm',
+    showTiandituOptions = true,
 }: BaseMapSwitcherProps) {
     const tiandituKey = useTiandituKey();
-    const available = useAvailableBaseMaps(tiandituKey);
+    const availableBaseMaps = useAvailableBaseMaps(tiandituKey);
+    const available = useMemo(
+        () =>
+            showTiandituOptions
+                ? availableBaseMaps
+                : availableBaseMaps.filter((opt) => !opt.key.startsWith('tianditu_')),
+        [availableBaseMaps, showTiandituOptions]
+    );
     const sizeCls = size === 'md' ? 'px-2.5 py-1 text-xs' : 'px-2 py-0.5 text-[11px]';
 
     return (

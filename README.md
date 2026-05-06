@@ -6,6 +6,22 @@
 ![Tech](https://img.shields.io/badge/Built%20with-Tauri%202.x%20+%20React-orange)
 ![Version](https://img.shields.io/badge/Version-0.2.2-green)
 
+## 界面预览
+
+![首页仪表盘](docs/img/homepage.png)
+
+| 兴趣点和航标数据采集                                               | 数据查询和航道图预览                                              |
+|----------------------------------------------------------|---------------------------------------------------------|
+| <img src="docs/img/collect.png" alt="数据采集" width="100%"> | <img src="docs/img/search.png" alt="数据查询" width="100%"> |
+
+| 瓦片下载                                                 | 任务管理 |
+|------------------------------------------------------|---|
+| <img src="docs/img/map.png" alt="地图视图" width="100%"> | <img src="docs/img/task.png" alt="任务管理" width="100%"> |
+
+| 数据导出 | API Key 设置 |
+|---|---|
+| <img src="docs/img/export.png" alt="数据导出" width="100%"> | <img src="docs/img/key.png" alt="API Key 设置" width="100%"> |
+
 ## 功能特性
 
 ### 🗺️ 多平台 POI 采集

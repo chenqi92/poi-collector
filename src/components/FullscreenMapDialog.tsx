@@ -126,6 +126,8 @@ export function FullscreenMapDialog({
     // 是否使用通用底图（osm 平台或 cjhy 航道图）
     // 注意: 天地图必须走 Rust 代理（webview 自带 Chrome UA 会被天地图 WAF 拒绝）
     const useBaseMapLayer = platform === 'osm' || platform === 'cjhy';
+    const showBaseMapSwitcher = platform === 'cjhy';
+    const previewBaseMapType: BaseMapType = platform === 'osm' ? 'street' : effectiveBaseMapType;
 
     // 检查是否有有效边界
     const hasValidBounds = localBounds.north > localBounds.south && localBounds.east > localBounds.west;
@@ -237,12 +239,13 @@ export function FullscreenMapDialog({
                         )}
                     </div>
 
-                    {/* 底图切换（osm / cjhy 模式可切换） */}
-                    {useBaseMapLayer && (
+                    {/* 航道图是叠加图层，保留预览底图切换 */}
+                    {showBaseMapSwitcher && (
                         <BaseMapSwitcher
                             value={effectiveBaseMapType}
                             onChange={setEffectiveBaseMapType}
                             size="md"
+                            showTiandituOptions={false}
                         />
                     )}
                 </div>
@@ -258,7 +261,7 @@ export function FullscreenMapDialog({
                     >
                         {/* 底图层 */}
                         {useBaseMapLayer ? (
-                            <BaseMapLayer baseMapType={effectiveBaseMapType} />
+                            <BaseMapLayer baseMapType={previewBaseMapType} />
                         ) : (
                             <>
                                 <TilePreviewLayer
