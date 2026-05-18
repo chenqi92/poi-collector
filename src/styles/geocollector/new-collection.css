@@ -71,8 +71,6 @@
   grid-template-columns: 1fr 300px;
   gap: 16px;
   padding: 18px 22px 24px;
-  flex: 1;
-  min-height: 0;
 }
 .nc-form-main { min-width: 0; }
 .nc-form-side { min-width: 0; }
