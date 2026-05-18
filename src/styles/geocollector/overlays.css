@@ -94,6 +94,52 @@
   display: flex; align-items: center; gap: 6px;
 }
 
+/* ── Context menu ────────────────────────────────────────── */
+.ctx-menu {
+  position: fixed; z-index: 9999;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-pop), 0 0 0 1px rgba(0,0,0,0.04);
+  font-size: 12px;
+  color: var(--text);
+  animation: ctx-pop 0.08s ease-out;
+  -webkit-user-select: none;
+  user-select: none;
+}
+@keyframes ctx-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.ctx-item {
+  width: 100%;
+  display: flex; align-items: center; gap: 8px;
+  height: 26px;
+  padding: 0 8px;
+  background: transparent; border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+.ctx-item:hover:not(.disabled) { background: var(--accent); color: #fff; }
+.ctx-item:hover:not(.disabled) .ctx-icon { color: rgba(255,255,255,0.85); }
+.ctx-item.disabled { color: var(--text-4); cursor: default; }
+.ctx-item .ctx-icon {
+  width: 14px; flex-shrink: 0;
+  color: var(--text-3);
+  display: inline-flex; align-items: center;
+}
+.ctx-item .ctx-label { flex: 1; }
+.ctx-divider {
+  height: 1px;
+  margin: 4px 4px;
+  background: var(--hairline);
+}
+
 /* ── Command Palette ─────────────────────────────────────── */
 .cmdk-backdrop {
   position: fixed; inset: 0;

@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { StatusBar } from './StatusBar'
 import { CommandPalette } from './CommandPalette'
+import { ContextMenuHost } from './ContextMenu'
 import { Onboarding, shouldShowOnboarding } from './Onboarding'
 import { APP_VERSION } from '@/lib/version'
 
@@ -102,6 +103,7 @@ export function Shell() {
 
             <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
             <Onboarding open={onbOpen} onClose={() => setOnbOpen(false)} />
+            <ContextMenuHost />
         </div>
     )
 }

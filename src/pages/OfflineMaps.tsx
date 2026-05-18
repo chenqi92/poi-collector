@@ -218,6 +218,7 @@ function PackagesList({
                                         className={`pkg-card${pkg.id === selected ? ' selected' : ''}`}
                                         onClick={() => onSelect(pkg.id)}
                                         onDoubleClick={() => onPreview(pkg.id)}
+                                        data-context-path={pkg.outputPath || undefined}
                                     >
                                         <PkgThumb pkg={pkg} />
                                         <div className="pkg-card-body">

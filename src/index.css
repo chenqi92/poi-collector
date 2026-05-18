@@ -17,22 +17,51 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 桌面应用：禁止全局文本选择和拖拽 */
-*,
-*::before,
-*::after {
+/* 桌面应用：内容区可选中，Chrome / 交互控件不可选；图片/拖拽全局禁用 */
+* { -webkit-user-drag: none; }
+img, svg { -webkit-user-drag: none; pointer-events: auto; }
+
+/* Chrome 与交互控件不允许选中文本 */
+.titlebar, .titlebar *,
+.sidebar, .sidebar *,
+.topbar, .topbar *,
+.statusbar, .statusbar *,
+.page-header, .page-header *,
+.td-footer, .td-footer *,
+.btn, .iconbtn, .link-btn,
+.seg, .seg button,
+.tag, .tag *,
+.field-chip, .field-chip *,
+.field-label,
+.region-check, .region-tree-item .chevron,
+.tc-card .tc-icon, .tc-card .tc-check, .tc-pf,
+.pf-card .pf-card-head, .pf-card .pf-card-foot, .pf-card .pf-cat-btn,
+.pkg-card-actions, .pkg-card-actions *,
+.pkg-card-meta, .pkg-card-foot,
+.pkg-thumb, .pkg-thumb *,
+.cmdk-row, .cmdk-row *,
+.cmdk-input-wrap, .cmdk-foot, .cmdk-foot *,
+.toast-x,
+.task-tray-row, .task-tray-row *,
+.onb-card .onb-actions, .onb-card .onb-skip,
+.ctx-menu, .ctx-menu *,
+.region-tree-item .level-pill, .region-tree-item .crumb,
+.rp-head, .rp-foot, .rp-foot *,
+.selected-tags-head,
+.section-head h2,
+.page-title, .page-subtitle,
+.lab-tiny, .step-no, .badge, .pf-badge, .type-badge,
+.td-block-title, .panel-head,
+.empty .empty-icon,
+[role="button"]:not(input):not(textarea),
+[role="menuitem"],
+[role="tab"] {
   -webkit-user-select: none;
   user-select: none;
-  -webkit-user-drag: none;
 }
 
-/* 允许输入框和文本域中的文本选择 */
-input,
-textarea,
-[contenteditable="true"],
-pre,
-code,
-.selectable {
+/* 输入控件保持可输入与选中 */
+input, textarea, [contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
 }

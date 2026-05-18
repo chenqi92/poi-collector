@@ -235,7 +235,7 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                             const t = inferType(h.task_type)
                             const s = STATUS_NORMALIZE[h.status.toLowerCase()] ?? 'idle'
                             return (
-                                <tr key={h.id}>
+                                <tr key={h.id} data-context-path={h.output_path || undefined}>
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <GcIcon
