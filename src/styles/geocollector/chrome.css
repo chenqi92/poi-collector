@@ -1,0 +1,486 @@
+/* Window chrome + shell + sidebar + topbar */
+
+/* Tauri host: fills the entire OS window. The .app-root → .win is fluid;
+   set tauri.conf.json windowsConfig { width: 1320, height: 820, minWidth: 1100,
+   minHeight: 680 } to match this design's breathing room. */
+.app-root {
+  width:100vw; height:100vh;
+  display:flex; flex-direction:column;
+  background: var(--bg);
+  overflow:hidden;
+}
+
+.win {
+  flex:1;
+  min-width: 0;
+  display:flex; flex-direction:column;
+  background:var(--bg);
+  color:var(--text);
+  overflow:hidden;
+  position:relative;
+}
+/* Rounded corners disabled — with transparent:false on the Tauri window the
+   rounding would clip contents over an opaque background and look wrong.
+   Re-enable along with transparent:true if we ship native shadow + radius. */
+
+/* ── Titlebar (custom chrome — decorations:false in tauri.conf.json) ─
+   Whole bar gets data-tauri-drag-region. Interactive children (menu items,
+   window controls) cancel it with data-tauri-drag-region="false". */
+.titlebar {
+  /* Hard constraints — nothing inside (long title text, long flex children,
+     Tailwind utilities) may grow this past 32px. */
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  flex: none;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow: hidden;
+  width: 100%;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--hairline);
+  user-select: none;
+  position: relative;
+  z-index: 5;
+  -webkit-app-region: drag;  /* fallback for non-Tauri preview */
+}
+.titlebar.mac { padding: 0 12px; gap: 10px; }
+.titlebar.win { padding: 0; gap: 0; }
+/* All wincontrols / titlebar items must respect the 32px envelope */
+.titlebar > * { min-height: 0; }
+
+/* macOS traffic lights */
+.traffic { display:flex; gap:8px; align-items:center; -webkit-app-region: no-drag; }
+.traffic > i {
+  width:12px; height:12px; border-radius:50%;
+  display:inline-block;
+  box-shadow:inset 0 0 0 0.5px rgba(0,0,0,0.18);
+  position:relative;
+}
+.traffic > i:nth-child(1){ background:#ff5f57; }
+.traffic > i:nth-child(2){ background:#febc2e; }
+.traffic > i:nth-child(3){ background:#28c840; }
+.traffic > i:hover::after {
+  content:""; position:absolute; inset:0; border-radius:50%;
+  background: rgba(0,0,0,0.15);
+}
+[data-theme="dark"] .traffic > i { box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.1); }
+
+/* Windows window controls (right side) */
+.wincontrols {
+  display: flex; align-items: stretch;
+  height: 32px;
+  flex: none;
+  -webkit-app-region: no-drag;
+}
+.wincontrols button {
+  width: 46px; height: 32px;
+  background: transparent;
+  border: 0;
+  color: var(--text-2);
+  display: grid; place-items: center;
+  cursor: default;
+  padding: 0;
+}
+.wincontrols button:hover { background: var(--hover); color: var(--text); }
+.wincontrols button.close:hover { background: #e81123; color: #fff; }
+
+.titlebar-title {
+  font-size: 11.5px; color: var(--text-3);
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.titlebar.mac .titlebar-title {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 60%;
+}
+.titlebar.win .titlebar-title {
+  flex: 1; min-width: 0;
+  text-align: center;
+  padding: 0 12px;
+}
+
+/* Embedded menu bar (Windows style) — File / Edit / View / Task / Help */
+.menubar {
+  display:flex; gap:0;
+  height: 100%;
+  -webkit-app-region: no-drag;
+  font-size: 12.5px;
+}
+.menubar > button {
+  height: 100%;
+  padding: 0 10px;
+  background: transparent;
+  border: 0;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: default;
+  display: flex; align-items: center;
+}
+.menubar > button:hover { background: var(--hover); color: var(--text); }
+.menubar > button .acc {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.menubar-app-name {
+  font-weight: 600;
+  color: var(--text);
+  padding: 0 10px 0 12px;
+  display: flex; align-items: center; gap: 6px;
+  height: 32px;
+  flex: none;
+  font-size: 12.5px;
+}
+.menubar-app-name .brand-mark { width:16px; height:16px; border-radius:4px; }
+.menubar-app-name .brand-mark::before { width:6px; height:6px; }
+.menubar-app-name .brand-mark::after  { width:2px; height:2px; }
+
+.shell {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Status bar (footer) — desktop apps' lower information strip.
+   Connection state, active tasks, key quota, version. Right click → context menu. */
+.statusbar {
+  height: 24px; min-height: 24px; max-height: 24px;
+  flex: none;
+  flex-shrink: 0;
+  background: var(--panel-2);
+  border-top: 1px solid var(--hairline);
+  display: flex; align-items: center;
+  padding: 0 0 0 6px;
+  font-size: 11px;
+  color: var(--text-3);
+  -webkit-user-select: none;
+}
+.sb-item {
+  display: flex; align-items: center; gap: 5px;
+  height: 100%;
+  padding: 0 9px;
+  cursor: default;
+  white-space: nowrap;
+}
+.sb-item:hover { background: var(--hover); color: var(--text-2); }
+.sb-item.accent { color: var(--accent); }
+.sb-item .sb-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--st-green);
+}
+.sb-item .sb-dot.warn { background: var(--st-amber); }
+.sb-item .sb-dot.err  { background: var(--st-red); }
+.sb-item.right { margin-left: auto; }
+.sb-sep { width:1px; height: 12px; background: var(--border); margin: 0 2px; }
+.sb-grip {
+  position: relative;
+  width: 16px; height: 100%;
+  margin-left: 2px;
+  cursor: nwse-resize;
+}
+.sb-grip::after {
+  content: "";
+  position: absolute; right: 3px; bottom: 3px;
+  width: 10px; height: 10px;
+  background-image:
+    linear-gradient(135deg, transparent 0 6px, var(--text-4) 6px 7px, transparent 7px 8px,
+                            var(--text-4) 8px 9px, transparent 9px 10px,
+                            var(--text-4) 10px 11px);
+  background-size: 100% 100%;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────── */
+.sidebar {
+  width:224px; flex-shrink:0;
+  background:var(--bg);
+  border-right:1px solid var(--hairline);
+  display:flex; flex-direction:column;
+  transition: width .18s cubic-bezier(.4,0,.2,1);
+}
+.sidebar.collapsed { width:54px; }
+
+.sidebar-brand {
+  height:44px; flex-shrink:0;
+  display:flex; align-items:center; gap:10px;
+  padding:0 14px;
+  font-weight:600; font-size:13px;
+  letter-spacing:-0.005em;
+  color:var(--text);
+}
+.brand-mark {
+  width:22px; height:22px; border-radius:6px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  display:grid; place-items:center;
+  flex-shrink:0; position:relative;
+  box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.2);
+}
+.brand-mark::before {
+  content:""; width:8px; height:8px;
+  border:1.5px solid #fff; border-radius:50%;
+  box-sizing:border-box;
+}
+.brand-mark::after {
+  content:""; position:absolute;
+  width:3px; height:3px; background:#fff;
+  border-radius:50%;
+}
+.sidebar.collapsed .brand-text { display:none; }
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .nav-badge { display:none; }
+.sidebar.collapsed .sidebar-section-title { display:none; }
+.sidebar.collapsed .nav-item { justify-content:center; padding:0; margin:1px 8px; }
+.sidebar.collapsed .sidebar-brand { padding:0 0 0 16px; }
+.sidebar.collapsed .sidebar-account { justify-content:center; padding:0; }
+.sidebar.collapsed .account-info { display:none; }
+
+.sidebar-section-title {
+  font-size:10.5px;
+  font-weight:600;
+  letter-spacing:0.06em;
+  text-transform:uppercase;
+  color:var(--text-4);
+  padding:14px 14px 6px;
+}
+
+.nav-item {
+  display:flex; align-items:center; gap:9px;
+  height:28px;
+  margin:1px 8px;
+  padding:0 8px;
+  border-radius:6px;
+  font-size:13px;
+  font-weight:500;
+  color:var(--text-2);
+  cursor:default;
+  position:relative;
+}
+.nav-item:hover { background:var(--hover); color:var(--text); }
+.nav-item.active { background:var(--selected); color:var(--text); }
+.nav-item.active .nav-icon { color:var(--accent); }
+.nav-icon {
+  width:16px; height:16px;
+  display:grid; place-items:center;
+  color:var(--text-3);
+  flex-shrink:0;
+}
+.nav-label { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nav-badge {
+  font-size:10.5px;
+  font-variant-numeric: tabular-nums;
+  padding:1px 6px;
+  min-width:18px; text-align:center;
+  border-radius:9px;
+  background:var(--hover-2);
+  color:var(--text-3);
+  font-weight:500;
+}
+.nav-badge.live {
+  background:var(--accent);
+  color:var(--accent-fg);
+}
+
+.sidebar-foot {
+  margin-top:auto;
+  padding:8px;
+  border-top:1px solid var(--hairline);
+  display:flex; flex-direction:column; gap:4px;
+}
+.sidebar-account {
+  display:flex; align-items:center; gap:9px;
+  height:32px; padding:0 6px;
+  border-radius:6px;
+}
+.sidebar-account:hover { background:var(--hover); }
+.account-info { flex:1; min-width:0; }
+.account-name {
+  font-size:12px; font-weight:500; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.account-sub {
+  font-size:10.5px; color:var(--text-3);
+}
+.avatar {
+  width:22px; height:22px; border-radius:50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color:#fff;
+  display:grid; place-items:center;
+  font-size:10.5px; font-weight:600;
+  flex-shrink:0;
+  box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.2);
+}
+
+/* ── Main ─────────────────────────────────────────────────── */
+.main {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  overflow: hidden;
+}
+.topbar {
+  height: 44px; min-height: 44px; max-height: 44px;
+  flex: none;
+  display: flex; align-items: center;
+  flex-wrap: nowrap;
+  padding: 0 14px; gap: 10px;
+  border-bottom:1px solid var(--hairline);
+  background:var(--panel);
+}
+.crumb {
+  display:flex; align-items:center; gap:7px;
+  font-size:13px;
+  color:var(--text-3);
+  font-weight:500;
+  white-space: nowrap;
+}
+.crumb b { color:var(--text); font-weight:600; }
+.crumb-sep { color:var(--text-4); font-size:11px; }
+.topbar-spacer { flex:1; }
+.topbar-divider {
+  width:1px; height:18px; background:var(--border);
+}
+
+.iconbtn {
+  width:28px; height:28px;
+  border-radius:6px;
+  background:transparent;
+  border:0;
+  color:var(--text-3);
+  display:grid; place-items:center;
+  cursor:default;
+  position:relative;
+}
+.iconbtn:hover { background:var(--hover); color:var(--text); }
+.iconbtn.has-dot::after {
+  content:""; position:absolute;
+  width:7px; height:7px;
+  background:var(--st-red);
+  border-radius:50%;
+  top:5px; right:5px;
+  box-shadow:0 0 0 1.5px var(--panel);
+}
+
+.search-pill {
+  display:flex; align-items:center; gap:7px;
+  height:28px; padding:0 8px 0 9px;
+  border-radius:6px;
+  background:var(--panel-3);
+  color:var(--text-3);
+  font-size:12.5px;
+  border:1px solid transparent;
+  min-width:200px;
+  cursor:default;
+}
+.search-pill:hover { background:var(--hover-2); color:var(--text-2); }
+.search-pill kbd {
+  font: 500 10px/1 var(--mono);
+  padding:2px 5px;
+  border-radius:4px;
+  background:var(--hover-2);
+  color:var(--text-3);
+  border:1px solid var(--border);
+  margin-left:auto;
+}
+
+/* ── Task tray pill in topbar ────────────────────────────── */
+.tray-btn {
+  display:flex; align-items:center; gap:8px;
+  height:28px; padding:0 10px 0 9px;
+  border-radius:6px;
+  background:var(--accent-soft);
+  border:1px solid var(--accent-soft-border);
+  color:var(--accent);
+  font-size:11.5px; font-weight:600;
+  cursor:default;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.005em;
+  position:relative;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .tray-btn { color: oklch(0.85 0.08 var(--accent-h)); }
+.tray-btn:hover { background: oklch(0.9 0.05 var(--accent-h)); }
+[data-theme="dark"] .tray-btn:hover { background: oklch(0.30 0.08 var(--accent-h)); }
+.tray-btn .pulse {
+  width:6px; height:6px; border-radius:50%;
+  background:var(--accent);
+  animation: pulse 1.8s ease-out infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 oklch(0.62 0.16 var(--accent-h) / 0.6); }
+  70%  { box-shadow: 0 0 0 6px oklch(0.62 0.16 var(--accent-h) / 0); }
+  100% { box-shadow: 0 0 0 0 oklch(0.62 0.16 var(--accent-h) / 0); }
+}
+.tray-mini-bar {
+  width:38px; height:4px; border-radius:2px;
+  background: color-mix(in oklch, var(--accent), transparent 70%);
+  overflow:hidden;
+  position:relative;
+}
+.tray-mini-bar > i {
+  position:absolute; top:0; bottom:0; left:0;
+  background:var(--accent);
+  border-radius:2px;
+}
+
+/* ── Tray popover ─────────────────────────────────────────── */
+.tray-pop {
+  position:absolute;
+  top:42px; right:14px;
+  width:380px;
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:10px;
+  box-shadow: var(--shadow-pop);
+  z-index:50;
+  overflow:hidden;
+}
+.tray-pop-head {
+  padding:10px 12px;
+  border-bottom:1px solid var(--hairline);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.tray-pop-head h4 {
+  margin:0; font-size:12px; font-weight:600;
+  letter-spacing:0.04em; text-transform:uppercase;
+  color:var(--text-3);
+}
+.tray-pop-list {
+  max-height: 360px; overflow:auto;
+}
+.tray-row {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 12px;
+  border-bottom:1px solid var(--hairline);
+}
+.tray-row:last-child { border-bottom:0; }
+.tray-row:hover { background: var(--hover); }
+.tray-row-main { flex:1; min-width:0; }
+.tray-row-title {
+  display:flex; align-items:center; gap:8px;
+  font-size:12.5px; font-weight:500;
+  color: var(--text);
+}
+.tray-row-title .tt-name {
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  flex:1;
+}
+.tray-row-meta {
+  display:flex; gap:8px;
+  font-size:11px; color:var(--text-3);
+  font-variant-numeric: tabular-nums;
+  margin-top:4px;
+}
+.tray-row-actions {
+  display:flex; gap:2px;
+}

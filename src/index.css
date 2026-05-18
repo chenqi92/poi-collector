@@ -2,6 +2,17 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 @import 'simplebar-react/dist/simplebar.min.css';
 
+/* Design CSS is unlayered. Together with the deletion of `--accent` /
+   `--accent-foreground` / `--border` from @layer base :root below, the design's
+   :root tokens are the only definition of those names — cascade picks them. */
+@import './styles/geocollector/base.css';
+@import './styles/geocollector/chrome.css';
+@import './styles/geocollector/ui.css';
+@import './styles/geocollector/modules.css';
+@import './styles/geocollector/overlays.css';
+@import './styles/geocollector/new-collection.css';
+@import './styles/geocollector/settings.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -29,7 +40,11 @@ code,
 
 @layer base {
   :root {
-    /* Light Mode - Clean Professional */
+    /* shadcn-style tokens kept ONLY for the few components/ui shadcn primitives
+       still referenced by legacy map/dialog widgets (TileBoundsMap, etc.).
+       --accent / --border are intentionally omitted here because the design
+       CSS in @layer geocollector owns those names and uses oklch() / hex
+       colors — having HSL component triplets here would collide. */
     --background: 220 14% 96%;
     --foreground: 222 84% 5%;
     --card: 0 0% 100%;
@@ -42,16 +57,13 @@ code,
     --secondary-foreground: 222 47% 11%;
     --muted: 220 14% 92%;
     --muted-foreground: 215 16% 47%;
-    --accent: 220 14% 92%;
-    --accent-foreground: 222 47% 11%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
-    --border: 220 13% 91%;
     --input: 220 13% 91%;
     --ring: 217 91% 50%;
     --radius: 0.75rem;
 
-    /* Sidebar - Light */
+    /* Sidebar tokens used by leftover shadcn pieces; design owns the real shell */
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
     --sidebar-primary: 217 91% 50%;
@@ -59,20 +71,9 @@ code,
     --sidebar-accent: 220 14% 94%;
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
-
-    /* Platform Colors */
-    --tianditu: 187 94% 43%;
-    --amap: 239 84% 67%;
-    --baidu: 0 84% 60%;
-    --osm: 142 71% 45%;
-
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 50%) 0%, hsl(246 80% 60%) 100%);
-    --gradient-accent: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(246 80% 60%) 50%, hsl(280 80% 60%) 100%);
   }
 
   .dark {
-    /* Dark Mode - Premium Deep Blue */
     --background: 222 47% 6%;
     --foreground: 210 40% 98%;
     --card: 222 47% 10%;
@@ -85,15 +86,11 @@ code,
     --secondary-foreground: 210 40% 98%;
     --muted: 217 32% 17%;
     --muted-foreground: 215 20% 65%;
-    --accent: 217 32% 17%;
-    --accent-foreground: 210 40% 98%;
     --destructive: 0 63% 31%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217 32% 18%;
     --input: 217 32% 18%;
     --ring: 217 91% 60%;
 
-    /* Sidebar - Dark */
     --sidebar-background: 222 47% 8%;
     --sidebar-foreground: 210 40% 90%;
     --sidebar-primary: 217 91% 60%;
@@ -105,13 +102,12 @@ code,
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
-
+  /* Don't apply Tailwind body bg/text here — the design CSS (in @layer
+     geocollector) sets `body { background: var(--bg); color: var(--text); ... }`
+     which we want to win. Inheriting font-feature-settings only. */
   body {
-    @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    @apply antialiased;
   }
 }
 

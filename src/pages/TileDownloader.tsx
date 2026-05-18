@@ -130,7 +130,11 @@ const statusInfo: Record<string, { name: string; color: string }> = {
     cancelled: { name: '已取消', color: 'text-muted-foreground' },
 };
 
-export default function TileDownloader() {
+interface TileDownloaderProps {
+    embedded?: boolean;
+}
+
+export default function TileDownloader({ embedded = false }: TileDownloaderProps = {}) {
     const [tasks, setTasks] = useState<TaskInfo[]>([]);
     const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
     const [showConvertDialog, setShowConvertDialog] = useState(false);
@@ -463,41 +467,43 @@ export default function TileDownloader() {
 
     return (
         <div className="h-full flex flex-col gap-4">
-            {/* 页面标题 */}
-            <div className="flex items-center justify-between shrink-0">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">瓦片下载</h1>
-                    <p className="text-muted-foreground">下载地图瓦片用于离线使用</p>
+            {/* 页面标题 — 嵌入到 NewCollection 时隐藏 */}
+            {!embedded && (
+                <div className="flex items-center justify-between shrink-0">
+                    <div>
+                        <h1 className="text-2xl font-bold text-foreground">瓦片下载</h1>
+                        <p className="text-muted-foreground">下载地图瓦片用于离线使用</p>
+                    </div>
+                    <div className="flex gap-2">
+                        {(() => {
+                            const activeTasks = tasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
+                            return (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setShowCurrentTasksDialog(true)}
+                                    className={cn(
+                                        "transition-all duration-300 relative overflow-hidden",
+                                        activeTasks.length > 0 ? "border-blue-500/40 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 bg-blue-500/5 shadow-[0_0_10px_rgba(59,130,246,0.15)]" : ""
+                                    )}
+                                >
+                                    <Download className={cn('h-4 w-4 mr-1.5', activeTasks.length > 0 && 'animate-bounce')} />
+                                    <span className="font-medium tracking-tight">当前任务</span>
+                                    {activeTasks.length > 0 && (
+                                        <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-blue-500 text-white rounded-full font-bold shadow-sm">
+                                            {activeTasks.length}
+                                        </span>
+                                    )}
+                                </Button>
+                            );
+                        })()}
+                        <Button variant="outline" size="sm" onClick={() => setShowConvertDialog(true)}>
+                            <FileArchive className="h-4 w-4 mr-1.5" />
+                            格式转换
+                        </Button>
+                    </div>
                 </div>
-                <div className="flex gap-2">
-                    {(() => {
-                        const activeTasks = tasks.filter(t => ['running', 'downloading', 'paused', 'pending'].includes(t.status));
-                        return (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setShowCurrentTasksDialog(true)}
-                                className={cn(
-                                    "transition-all duration-300 relative overflow-hidden",
-                                    activeTasks.length > 0 ? "border-blue-500/40 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 bg-blue-500/5 shadow-[0_0_10px_rgba(59,130,246,0.15)]" : ""
-                                )}
-                            >
-                                <Download className={cn('h-4 w-4 mr-1.5', activeTasks.length > 0 && 'animate-bounce')} />
-                                <span className="font-medium tracking-tight">当前任务</span>
-                                {activeTasks.length > 0 && (
-                                    <span className="ml-2 px-1.5 py-0.5 text-[10px] bg-blue-500 text-white rounded-full font-bold shadow-sm">
-                                        {activeTasks.length}
-                                    </span>
-                                )}
-                            </Button>
-                        );
-                    })()}
-                    <Button variant="outline" size="sm" onClick={() => setShowConvertDialog(true)}>
-                        <FileArchive className="h-4 w-4 mr-1.5" />
-                        格式转换
-                    </Button>
-                </div>
-            </div>
+            )}
 
             {/* 主内容区 */}
             <div className="flex-1 flex gap-4 min-h-0">

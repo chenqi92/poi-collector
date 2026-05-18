@@ -13,8 +13,13 @@
     "windows": [
       {
         "title": "GeoCollector",
-        "width": 1200,
-        "height": 800
+        "width": 1320,
+        "height": 820,
+        "minWidth": 1100,
+        "minHeight": 680,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true
       }
     ],
     "security": {

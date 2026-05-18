@@ -52,7 +52,11 @@ interface BuoyInfo {
     raw_json: string;
 }
 
-export default function Search() {
+interface SearchProps {
+    embedded?: boolean;
+}
+
+export default function Search({ embedded = false }: SearchProps = {}) {
     const [searchTab, setSearchTab] = useState<SearchTab>('poi');
 
     // POI 搜索状态
@@ -200,13 +204,15 @@ export default function Search() {
 
     return (
         <div className="h-full flex flex-col gap-4 overflow-hidden">
-            {/* 页面标题 */}
-            <div className="shrink-0 flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">数据搜索</h1>
-                    <p className="text-muted-foreground">从已采集的本地数据中搜索 POI 和航标</p>
+            {/* 页面标题 — 嵌入到 DataHub 时隐藏 */}
+            {!embedded && (
+                <div className="shrink-0 flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold text-foreground">数据搜索</h1>
+                        <p className="text-muted-foreground">从已采集的本地数据中搜索 POI 和航标</p>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* 搜索栏 */}
             <Card className="shrink-0 overflow-visible relative">

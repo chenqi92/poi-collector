@@ -1,0 +1,90 @@
+/* GeoCollector — tokens + base */
+
+:root {
+  --accent-h: 224; --accent-c: 0.18;
+  --accent: oklch(0.58 var(--accent-c) var(--accent-h));
+  --accent-hover: oklch(0.53 var(--accent-c) var(--accent-h));
+  --accent-soft: oklch(0.94 0.04 var(--accent-h));
+  --accent-soft-border: oklch(0.86 0.07 var(--accent-h));
+  --accent-fg: #fff;
+
+  --row-h: 30px; --row-h-sm: 24px;
+  --pad-x: 14px; --pad-y: 10px; --gap: 10px;
+  --fs: 13px; --fs-sm: 12px; --fs-xs: 11px; --fs-lg: 14px;
+  --fs-title: 18px; --fs-display: 24px;
+
+  --st-blue:   oklch(0.62 0.16 240);
+  --st-green:  oklch(0.62 0.14 150);
+  --st-amber:  oklch(0.74 0.14 80);
+  --st-orange: oklch(0.66 0.16 50);
+  --st-red:    oklch(0.62 0.20 25);
+  --st-gray:   oklch(0.65 0.01 270);
+  --st-violet: oklch(0.62 0.16 290);
+
+  --pf-tianditu: oklch(0.55 0.16 250);
+  --pf-amap:     oklch(0.65 0.18 35);
+  --pf-baidu:    oklch(0.58 0.18 25);
+  --pf-osm:      oklch(0.58 0.15 145);
+
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  /* System font stack — matches Tauri's native chrome on each platform.
+     macOS → SF Pro; Windows → Segoe UI Variable; CJK falls through to PingFang / 微软雅黑. */
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI",
+          "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
+          "Noto Sans SC", system-ui, sans-serif;
+}
+
+[data-theme="light"] {
+  --bg:#fafafa; --bg-sub:#f4f4f5; --panel:#ffffff;
+  --panel-2:#fbfbfb; --panel-3:#f6f6f7;
+  --border:#e8e8eb; --border-2:#ececef; --hairline:#f0f0f2;
+  --text:#0e0f11; --text-2:#42454b; --text-3:#71747a; --text-4:#a0a3a8;
+  --hover:rgba(0,0,0,0.045); --hover-2:rgba(0,0,0,0.08);
+  --selected:oklch(0.96 0.02 var(--accent-h));
+  --scrim:rgba(255,255,255,.72);
+  --shadow:0 1px 0 rgba(0,0,0,0.02),0 8px 24px rgba(0,0,0,0.06);
+  --shadow-pop:0 1px 0 rgba(0,0,0,0.02),0 14px 40px rgba(0,0,0,0.14);
+}
+[data-theme="dark"] {
+  --bg:#08090a; --bg-sub:#0c0d0f; --panel:#101113;
+  --panel-2:#131418; --panel-3:#181a1e;
+  --border:#1f2024; --border-2:#26272d; --hairline:#15161a;
+  --text:#ededee; --text-2:#b4b6bb; --text-3:#888a91; --text-4:#5d5f66;
+  --hover:rgba(255,255,255,0.05); --hover-2:rgba(255,255,255,0.09);
+  --selected:oklch(0.24 0.05 var(--accent-h));
+  --accent-soft:oklch(0.26 0.07 var(--accent-h));
+  --accent-soft-border:oklch(0.36 0.10 var(--accent-h));
+  --scrim:rgba(8,9,10,.72);
+  --shadow:0 1px 0 rgba(0,0,0,.5),0 12px 32px rgba(0,0,0,.4);
+  --shadow-pop:0 1px 0 rgba(0,0,0,.5),0 18px 48px rgba(0,0,0,.6);
+}
+
+[data-density="compact"] {
+  --row-h:26px; --row-h-sm:22px;
+  --pad-x:10px; --pad-y:6px; --gap:8px;
+  --fs:12px; --fs-sm:11px; --fs-xs:10.5px; --fs-lg:13px;
+  --fs-title:16px; --fs-display:22px;
+}
+[data-density="comfy"] {
+  --row-h:36px; --row-h-sm:28px;
+  --pad-x:18px; --pad-y:14px; --gap:14px;
+  --fs:14px; --fs-sm:13px; --fs-xs:12px; --fs-lg:15px;
+  --fs-title:20px; --fs-display:28px;
+}
+
+/* base body / html — geocollector shell host
+   Tailwind preflight already sets box-sizing and margin reset. We only add the
+   frameless-window backdrop and design font here. The body bg uses --bg so the
+   theme switch is consistent; window corner color shows only when frameless. */
+html, body { height:100%; }
+html { background: #0c0d0f; }
+body {
+  font-family: var(--sans);
+  font-size: var(--fs);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--accent-soft); color: var(--text); }

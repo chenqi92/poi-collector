@@ -50,7 +50,11 @@ const statusConfig = {
     error: { text: '出错', color: 'text-destructive', bg: 'bg-destructive/10' },
 };
 
-export default function Collector() {
+interface CollectorProps {
+    embedded?: boolean;
+}
+
+export default function Collector({ embedded = false }: CollectorProps = {}) {
     const [statuses, setStatuses] = useState<Record<string, CollectorStatus>>({});
     const [categories, setCategories] = useState<Category[]>([]);
     const [selectedCategories, setSelectedCategories] = useState<Record<string, string[]>>({});
@@ -359,29 +363,31 @@ export default function Collector() {
 
     return (
         <div className="h-full flex flex-col gap-3">
-            {/* Header */}
-            <div className="shrink-0 flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">数据采集</h1>
-                    <p className="text-sm text-muted-foreground">多平台 POI / 航标数据采集与管理</p>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="text-right">
-                        <div className="text-2xl font-bold text-foreground">
-                            {overallStats.totalCollected.toLocaleString()}
-                        </div>
-                        <div className="text-xs text-muted-foreground">总采集量</div>
+            {/* Header — hidden when embedded inside the NewCollection shell */}
+            {!embedded && (
+                <div className="shrink-0 flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl font-bold text-foreground">数据采集</h1>
+                        <p className="text-sm text-muted-foreground">多平台 POI / 航标数据采集与管理</p>
                     </div>
-                    {overallStats.runningCount > 0 && (
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-lg border border-primary/20 animate-pulse-glow">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-                            <span className="text-primary text-xs font-medium">
-                                {overallStats.runningCount} 个任务运行中
-                            </span>
+                    <div className="flex items-center gap-4">
+                        <div className="text-right">
+                            <div className="text-2xl font-bold text-foreground">
+                                {overallStats.totalCollected.toLocaleString()}
+                            </div>
+                            <div className="text-xs text-muted-foreground">总采集量</div>
                         </div>
-                    )}
+                        {overallStats.runningCount > 0 && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 rounded-lg border border-primary/20 animate-pulse-glow">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                <span className="text-primary text-xs font-medium">
+                                    {overallStats.runningCount} 个任务运行中
+                                </span>
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* 左右分栏主体 */}
             <div className="flex-1 flex gap-0 min-h-0">

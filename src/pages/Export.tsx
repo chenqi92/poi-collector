@@ -91,7 +91,11 @@ const formats = [
   { id: "mysql", icon: Database, label: "MySQL", desc: ".sql", ext: "sql", gradient: "from-blue-500 to-blue-600" },
 ];
 
-export default function Export() {
+interface ExportProps {
+    embedded?: boolean;
+}
+
+export default function Export({ embedded = false }: ExportProps = {}) {
   const [platform, setPlatform] = useState("all");
   const { success: showSuccess, error: showError } = useToast();
 
@@ -491,13 +495,15 @@ export default function Export() {
 
   return (
     <div className="h-full flex flex-col gap-4">
-      <div className="shrink-0 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">数据导出</h1>
-          <p className="text-muted-foreground">
-            导出已采集的 POI 和航标数据
-          </p>
-        </div>
+      <div className={`shrink-0 flex items-center ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">数据导出</h1>
+            <p className="text-muted-foreground">
+              导出已采集的 POI 和航标数据
+            </p>
+          </div>
+        )}
         {/* Tab 切换 */}
         <div className="flex items-center bg-muted/50 rounded-xl p-1">
           <button

@@ -15,7 +15,11 @@ interface Region {
 }
 
 
-export default function DataManagement() {
+interface DataManagementProps {
+    embedded?: boolean;
+}
+
+export default function DataManagement({ embedded = false }: DataManagementProps = {}) {
     const { success, error: showError } = useToast();
     const [loading, setLoading] = useState(false);
     const [stats, setStats] = useState<[string, number][]>([]);
@@ -137,11 +141,13 @@ export default function DataManagement() {
 
     return (
         <div className="h-full flex flex-col gap-4">
-            <div className="flex items-center justify-between shrink-0">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">数据管理</h1>
-                    <p className="text-muted-foreground">管理已采集的 POI 和航标数据</p>
-                </div>
+            <div className={`flex items-center shrink-0 ${embedded ? 'justify-end' : 'justify-between'}`}>
+                {!embedded && (
+                    <div>
+                        <h1 className="text-2xl font-bold text-foreground">数据管理</h1>
+                        <p className="text-muted-foreground">管理已采集的 POI 和航标数据</p>
+                    </div>
+                )}
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary/10 border border-primary/20">
                         <HardDrive className="w-4 h-4 text-primary" />
