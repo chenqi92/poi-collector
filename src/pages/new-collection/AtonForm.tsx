@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { GcIcon } from '@/components/shell'
@@ -47,7 +46,6 @@ interface ChartProgress {
 }
 
 export function AtonForm() {
-    const navigate = useNavigate()
     const { success, error: errorToast, warning } = useToast()
 
     const [taskName, setTaskName] = useState('长江航标采集任务')
@@ -267,9 +265,6 @@ export function AtonForm() {
             </div>
 
             <div className="td-footer">
-                <button type="button" className="btn ghost" onClick={() => navigate('/workspace')}>
-                    取消
-                </button>
                 <div style={{ flex: 1 }} />
                 {status === 'running' ? (
                     <button type="button" className="btn danger" onClick={stop}>

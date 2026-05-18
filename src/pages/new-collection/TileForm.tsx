@@ -457,9 +457,6 @@ export function TileForm() {
                 )}
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <button type="button" className="btn ghost" onClick={() => navigate('/workspace')}>
-                        取消
-                    </button>
                     <div style={{ flex: 1 }} />
                     <button
                         type="button"

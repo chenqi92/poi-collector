@@ -436,7 +436,6 @@ export function POIForm() {
             </div>
 
             <div className="td-footer">
-                <button type="button" className="btn ghost" onClick={() => navigate('/workspace')}>取消</button>
                 <div style={{ flex: 1 }} />
                 <button type="button" className="btn" onClick={stopAll} disabled={activePlatforms.length === 0}>
                     <GcIcon name="pause" size={11} />全部暂停
