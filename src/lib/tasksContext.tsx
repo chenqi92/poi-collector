@@ -26,42 +26,41 @@ const TYPE_LABEL: Record<ShellTask['type'], string> = {
 export function TasksProvider({ children }: { children: ReactNode }) {
     const [tasks, setTasks] = useState<ShellTask[]>([])
     const prevStatusRef = useRef<Map<string, TaskStatus>>(new Map())
-    const initializedRef = useRef(false)
 
     useEffect(() => {
         const prev = prevStatusRef.current
+        for (const t of tasks) {
+            const before = prev.get(t.id)
+            // First time we see this task: don't notify, just record its status.
+            // Prevents historical terminal tasks from being announced on every
+            // app launch when Dashboard hydrates the task list.
+            if (before === undefined) continue
+            if (before === t.status) continue
+            if (!TERMINAL_STATUSES.includes(t.status)) continue
+            if (TERMINAL_STATUSES.includes(before)) continue
+
+            const variant =
+                t.status === 'done' ? 'success'
+                : t.status === 'canceled' || t.status === 'interrupted' ? 'warn'
+                : 'error'
+            const statusLabel =
+                t.status === 'done' ? '已完成'
+                : t.status === 'failed' ? '失败'
+                : t.status === 'error' ? '出错'
+                : t.status === 'canceled' ? '已取消'
+                : '已中断'
+            const title = `${TYPE_LABEL[t.type] ?? '任务'} ${statusLabel}`
+            externalPushNotification({
+                title,
+                description: t.name,
+                variant,
+                source: 'task',
+            })
+            osNotify(title, t.name)
+        }
         const next = new Map<string, TaskStatus>()
         for (const t of tasks) next.set(t.id, t.status)
-
-        if (initializedRef.current) {
-            for (const t of tasks) {
-                const before = prev.get(t.id)
-                if (before === t.status) continue
-                if (!TERMINAL_STATUSES.includes(t.status)) continue
-                if (before && TERMINAL_STATUSES.includes(before)) continue
-
-                const variant =
-                    t.status === 'done' ? 'success'
-                    : t.status === 'canceled' || t.status === 'interrupted' ? 'warn'
-                    : 'error'
-                const statusLabel =
-                    t.status === 'done' ? '已完成'
-                    : t.status === 'failed' ? '失败'
-                    : t.status === 'error' ? '出错'
-                    : t.status === 'canceled' ? '已取消'
-                    : '已中断'
-                const title = `${TYPE_LABEL[t.type] ?? '任务'} ${statusLabel}`
-                externalPushNotification({
-                    title,
-                    description: t.name,
-                    variant,
-                    source: 'task',
-                })
-                osNotify(title, t.name)
-            }
-        }
         prevStatusRef.current = next
-        initializedRef.current = true
     }, [tasks])
 
     const value = useMemo<TasksContextValue>(() => {
