@@ -6,6 +6,7 @@ import {
     XCircle,
     X,
 } from 'lucide-react'
+import { externalPushNotification } from '@/lib/notificationsContext'
 
 export type ToastVariant = 'info' | 'success' | 'warn' | 'error'
 
@@ -69,6 +70,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== id))
         }, 4000)
+        externalPushNotification({
+            title: toast.title ?? '',
+            description: toast.description,
+            variant: toast.variant ?? 'info',
+            source: 'toast',
+        })
     }, [])
 
     const removeToast = React.useCallback((id: string) => {
