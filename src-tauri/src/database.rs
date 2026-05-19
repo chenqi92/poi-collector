@@ -16,6 +16,7 @@ impl Database {
         let db = Self { conn };
         db.migrate()?;
         db.init_tables()?;
+        db.ensure_fts()?;
         db.cleanup_stale_tasks();
         Ok(db)
     }
@@ -94,6 +95,58 @@ impl Database {
             );
         }
 
+        Ok(())
+    }
+
+    /// 建立 / 校准 FTS5 三字组索引。Trigram tokenizer 让 LIKE %xxx% 风格的子串匹配
+    /// 走索引而非全表扫，对中文同样有效（每 3 个 Unicode 字符为一个 token）。
+    fn ensure_fts(&self) -> Result<()> {
+        // 已经存在则不重建，避免每次启动都重新 INDEX 23k+ 条。
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'poi_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !exists {
+            log::info!("建立 poi_fts (FTS5 trigram) 索引");
+            self.conn.execute_batch(
+                r#"
+                CREATE VIRTUAL TABLE IF NOT EXISTS poi_fts USING fts5(
+                    name, address, category,
+                    content='poi_data',
+                    content_rowid='id',
+                    tokenize='trigram'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS poi_fts_ai AFTER INSERT ON poi_data BEGIN
+                    INSERT INTO poi_fts(rowid, name, address, category)
+                    VALUES (new.id, new.name, COALESCE(new.address,''), COALESCE(new.category,''));
+                END;
+                CREATE TRIGGER IF NOT EXISTS poi_fts_ad AFTER DELETE ON poi_data BEGIN
+                    INSERT INTO poi_fts(poi_fts, rowid, name, address, category)
+                    VALUES ('delete', old.id, old.name, COALESCE(old.address,''), COALESCE(old.category,''));
+                END;
+                CREATE TRIGGER IF NOT EXISTS poi_fts_au AFTER UPDATE ON poi_data BEGIN
+                    INSERT INTO poi_fts(poi_fts, rowid, name, address, category)
+                    VALUES ('delete', old.id, old.name, COALESCE(old.address,''), COALESCE(old.category,''));
+                    INSERT INTO poi_fts(rowid, name, address, category)
+                    VALUES (new.id, new.name, COALESCE(new.address,''), COALESCE(new.category,''));
+                END;
+                "#,
+            )?;
+
+            // 回填存量
+            let backfilled = self.conn.execute(
+                "INSERT INTO poi_fts(rowid, name, address, category)
+                 SELECT id, name, COALESCE(address,''), COALESCE(category,'') FROM poi_data",
+                [],
+            )?;
+            log::info!("FTS5 回填 {} 行", backfilled);
+        }
         Ok(())
     }
 
@@ -250,7 +303,7 @@ impl Database {
 
         if let Some(p) = platform {
             let mut stmt = self.conn.prepare(
-                "SELECT id, name, lon, lat, address, category, platform FROM poi_data WHERE (name LIKE ?1 OR address LIKE ?1) AND platform = ?2 LIMIT ?3"
+                "SELECT id, name, lon, lat, address, phone, category, platform, region_code FROM poi_data WHERE (name LIKE ?1 OR address LIKE ?1) AND platform = ?2 LIMIT ?3"
             )?;
             let rows = stmt.query_map(params![pattern, p, limit], |row| {
                 Ok(POI {
@@ -259,8 +312,10 @@ impl Database {
                     lon: row.get(2)?,
                     lat: row.get(3)?,
                     address: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                    category: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    platform: row.get(6)?,
+                    phone: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                    category: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                    platform: row.get(7)?,
+                    region_code: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
                 })
             })?;
             for row in rows {
@@ -268,7 +323,7 @@ impl Database {
             }
         } else {
             let mut stmt = self.conn.prepare(
-                "SELECT id, name, lon, lat, address, category, platform FROM poi_data WHERE (name LIKE ?1 OR address LIKE ?1) LIMIT ?2"
+                "SELECT id, name, lon, lat, address, phone, category, platform, region_code FROM poi_data WHERE (name LIKE ?1 OR address LIKE ?1) LIMIT ?2"
             )?;
             let rows = stmt.query_map(params![pattern, limit], |row| {
                 Ok(POI {
@@ -277,8 +332,10 @@ impl Database {
                     lon: row.get(2)?,
                     lat: row.get(3)?,
                     address: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                    category: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    platform: row.get(6)?,
+                    phone: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                    category: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                    platform: row.get(7)?,
+                    region_code: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
                 })
             })?;
             for row in rows {
@@ -287,6 +344,190 @@ impl Database {
         }
 
         Ok(results)
+    }
+
+    /// 构造 search_pois / export_pois 共用的 FROM + WHERE + 参数列表。
+    fn build_poi_filter(
+        &self,
+        query: Option<&str>,
+        platforms: &[String],
+        bounds: Option<(f64, f64, f64, f64)>,
+        region_codes: &[String],
+    ) -> (String, String, Vec<Box<dyn rusqlite::ToSql>>) {
+        let q_trim = query.unwrap_or("").trim();
+        let use_fts = !q_trim.is_empty();
+
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut where_clauses: Vec<String> = Vec::new();
+
+        let from_clause = if use_fts {
+            "FROM poi_data p JOIN poi_fts f ON f.rowid = p.id".to_string()
+        } else {
+            "FROM poi_data p".to_string()
+        };
+
+        if use_fts {
+            let escaped = q_trim.replace('"', "\"\"");
+            where_clauses.push("poi_fts MATCH ?".to_string());
+            params.push(Box::new(format!("\"{}\"", escaped)));
+        }
+
+        if !platforms.is_empty() {
+            let ph = vec!["?"; platforms.len()].join(",");
+            where_clauses.push(format!("p.platform IN ({})", ph));
+            for p in platforms {
+                params.push(Box::new(p.clone()));
+            }
+        }
+
+        if let Some((s, w, n, e)) = bounds {
+            where_clauses.push("p.lat BETWEEN ? AND ?".to_string());
+            where_clauses.push("p.lon BETWEEN ? AND ?".to_string());
+            params.push(Box::new(s));
+            params.push(Box::new(n));
+            params.push(Box::new(w));
+            params.push(Box::new(e));
+        }
+
+        if !region_codes.is_empty() {
+            let ph = vec!["?"; region_codes.len()].join(",");
+            where_clauses.push(format!("p.region_code IN ({})", ph));
+            for c in region_codes {
+                params.push(Box::new(c.clone()));
+            }
+        }
+
+        let where_sql = if where_clauses.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", where_clauses.join(" AND "))
+        };
+
+        (from_clause, where_sql, params)
+    }
+
+    /// 综合过滤 + 分页查询。支持任意组合的：
+    ///   - 全文 query（走 FTS5 trigram 索引）
+    ///   - platforms IN (...)
+    ///   - bounds（lat/lon BETWEEN）
+    ///   - region_codes IN (...)
+    pub fn search_pois_filtered(
+        &self,
+        query: Option<&str>,
+        platforms: &[String],
+        bounds: Option<(f64, f64, f64, f64)>,
+        region_codes: &[String],
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<POI>, i64)> {
+        let (from_clause, where_sql, mut params) =
+            self.build_poi_filter(query, platforms, bounds, region_codes);
+
+        let count_sql = format!("SELECT COUNT(*) {}{}", from_clause, where_sql);
+        let total: i64 = {
+            let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+            self.conn
+                .query_row(&count_sql, rusqlite::params_from_iter(refs), |r| r.get(0))?
+        };
+
+        let page_sql = format!(
+            "SELECT p.id, p.name, p.lon, p.lat, p.address, p.phone, p.category, p.platform, p.region_code \
+             {}{}  ORDER BY p.id LIMIT ? OFFSET ?",
+            from_clause, where_sql
+        );
+        params.push(Box::new(limit));
+        params.push(Box::new(offset));
+
+        let mut stmt = self.conn.prepare(&page_sql)?;
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(refs), |row| {
+            Ok(POI {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                lon: row.get(2)?,
+                lat: row.get(3)?,
+                address: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                phone: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                category: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                platform: row.get(7)?,
+                region_code: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            })
+        })?;
+        let mut items = Vec::new();
+        for r in rows {
+            items.push(r?);
+        }
+        Ok((items, total))
+    }
+
+    /// 同 search_pois_filtered 但返回 ExportPOI（含 phone/region_code）且不分页。
+    pub fn search_export_pois_filtered(
+        &self,
+        query: Option<&str>,
+        platforms: &[String],
+        bounds: Option<(f64, f64, f64, f64)>,
+        region_codes: &[String],
+    ) -> Result<Vec<ExportPOI>> {
+        let (from_clause, where_sql, params) =
+            self.build_poi_filter(query, platforms, bounds, region_codes);
+
+        let sql = format!(
+            "SELECT p.id, p.name, p.lon, p.lat, p.address, p.phone, p.category, p.platform, p.region_code \
+             {}{}  ORDER BY p.id",
+            from_clause, where_sql
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(refs), |row| {
+            Ok(ExportPOI {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                lon: row.get(2)?,
+                lat: row.get(3)?,
+                address: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                phone: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                category: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                platform: row.get(7)?,
+                region_code: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            })
+        })?;
+        let mut items = Vec::new();
+        for r in rows {
+            items.push(r?);
+        }
+        Ok(items)
+    }
+
+    /// 返回 POI 表数据外接矩形（用于地图初始 fit）
+    pub fn get_poi_extent(
+        &self,
+        platforms: &[String],
+    ) -> Result<Option<(f64, f64, f64, f64)>> {
+        let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = if platforms.is_empty() {
+            (
+                "SELECT MIN(lat), MAX(lat), MIN(lon), MAX(lon) FROM poi_data".to_string(),
+                Vec::new(),
+            )
+        } else {
+            let ph = vec!["?"; platforms.len()].join(",");
+            (
+                format!(
+                    "SELECT MIN(lat), MAX(lat), MIN(lon), MAX(lon) FROM poi_data WHERE platform IN ({})",
+                    ph
+                ),
+                platforms.iter().map(|p| Box::new(p.clone()) as Box<dyn rusqlite::ToSql>).collect(),
+            )
+        };
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let row: (Option<f64>, Option<f64>, Option<f64>, Option<f64>) =
+            self.conn.query_row(&sql, rusqlite::params_from_iter(refs), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?;
+        match row {
+            (Some(s), Some(n), Some(w), Some(e)) => Ok(Some((s, w, n, e))),
+            _ => Ok(None),
+        }
     }
 
     /// 按视窗范围查询 POI（支持可选关键词和平台过滤）
@@ -301,7 +542,7 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<POI>> {
         let mut sql = String::from(
-            "SELECT id, name, lon, lat, address, category, platform FROM poi_data WHERE lat >= ?1 AND lat <= ?2 AND lon >= ?3 AND lon <= ?4"
+            "SELECT id, name, lon, lat, address, phone, category, platform, region_code FROM poi_data WHERE lat >= ?1 AND lat <= ?2 AND lon >= ?3 AND lon <= ?4"
         );
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
             Box::new(south),
@@ -336,8 +577,10 @@ impl Database {
                 lon: row.get(2)?,
                 lat: row.get(3)?,
                 address: row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                category: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                platform: row.get(6)?,
+                phone: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
+                category: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                platform: row.get(7)?,
+                region_code: row.get::<_, Option<String>>(8)?.unwrap_or_default(),
             })
         })?;
 

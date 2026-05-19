@@ -60,8 +60,10 @@ pub struct POI {
     pub lon: f64,
     pub lat: f64,
     pub address: String,
+    pub phone: String,
     pub category: String,
     pub platform: String,
+    pub region_code: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -639,6 +641,84 @@ pub fn get_district_codes_for_region(code: String) -> Vec<String> {
 // 导出相关命令
 use crate::database::ExportPOI;
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct PoiSearchFilters {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    #[serde(default)]
+    pub bounds: Option<BoundsArg>,
+    #[serde(default)]
+    pub region_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BoundsArg {
+    pub south: f64,
+    pub west: f64,
+    pub north: f64,
+    pub east: f64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Pagination {
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PoiPage {
+    pub items: Vec<POI>,
+    pub total: i64,
+}
+
+/// 综合过滤 + 分页查询。底层使用 FTS5 trigram 索引做文本搜索。
+#[tauri::command]
+pub fn search_pois(
+    filters: PoiSearchFilters,
+    pagination: Pagination,
+) -> Result<PoiPage, String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    let bounds_tuple = filters
+        .bounds
+        .as_ref()
+        .map(|b| (b.south, b.west, b.north, b.east));
+    let (items, total) = db
+        .search_pois_filtered(
+            filters.query.as_deref(),
+            &filters.platforms,
+            bounds_tuple,
+            &filters.region_codes,
+            pagination.limit.max(0),
+            pagination.offset.max(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(PoiPage { items, total })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DataExtent {
+    pub south: f64,
+    pub west: f64,
+    pub north: f64,
+    pub east: f64,
+}
+
+/// 返回 POI 数据外接矩形。用于地图首次 fit。
+#[tauri::command]
+pub fn get_poi_data_extent(platforms: Option<Vec<String>>) -> Result<Option<DataExtent>, String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    let pf = platforms.unwrap_or_default();
+    let r = db.get_poi_extent(&pf).map_err(|e| e.to_string())?;
+    Ok(r.map(|(s, w, n, e)| DataExtent {
+        south: s,
+        west: w,
+        north: n,
+        east: e,
+    }))
+}
+
 #[tauri::command]
 pub fn get_all_poi_data(platform: Option<String>) -> Result<Vec<ExportPOI>, String> {
     let db = DB.lock().map_err(|e| e.to_string())?;
@@ -649,76 +729,27 @@ pub fn get_all_poi_data(platform: Option<String>) -> Result<Vec<ExportPOI>, Stri
     db.get_all_poi(platform_filter).map_err(|e| e.to_string())
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct PoiBatch {
-    pub items: Vec<ExportPOI>,
-    pub done: bool,
-    pub total: usize,
-}
-
-/// 流式推送全部 POI 数据。前端可一批一批渲染，避免一次性 JSON 解析 23k 条。
-#[tauri::command]
-pub fn stream_all_poi(
-    platform: Option<String>,
-    batch_size: Option<usize>,
-    on_event: tauri::ipc::Channel<PoiBatch>,
-) -> Result<(), String> {
-    let db = DB.lock().map_err(|e| e.to_string())?;
-    let platform_filter = platform
-        .as_ref()
-        .filter(|p| p.as_str() != "all")
-        .map(|s| s.as_str());
-    let all = db.get_all_poi(platform_filter).map_err(|e| e.to_string())?;
-    let total = all.len();
-    let bs = batch_size.unwrap_or(5000).max(500);
-
-    if total == 0 {
-        on_event
-            .send(PoiBatch {
-                items: Vec::new(),
-                done: true,
-                total: 0,
-            })
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let mut sent = 0usize;
-    let mut iter = all.into_iter();
-    while sent < total {
-        let chunk: Vec<ExportPOI> = (&mut iter).take(bs).collect();
-        let chunk_len = chunk.len();
-        sent += chunk_len;
-        on_event
-            .send(PoiBatch {
-                items: chunk,
-                done: sent >= total,
-                total,
-            })
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub fn export_poi_to_file(
     path: String,
     format: String,
-    platform: Option<String>,
-    ids: Option<Vec<i64>>,
+    filters: Option<PoiSearchFilters>,
 ) -> Result<usize, String> {
     let db = DB.lock().map_err(|e| e.to_string())?;
-    let platform_filter = platform
-        .as_ref()
-        .filter(|p| p.as_str() != "all")
-        .map(|s| s.as_str());
-    let mut data = db.get_all_poi(platform_filter).map_err(|e| e.to_string())?;
 
-    // 如果指定了 IDs，只导出这些 IDs 的数据
-    if let Some(ref id_list) = ids {
-        let id_set: std::collections::HashSet<i64> = id_list.iter().copied().collect();
-        data.retain(|poi| id_set.contains(&poi.id));
-    }
+    // 用过滤条件直接在 SQLite 内 SELECT 出符合的所有行，避免前端把 23k 全拉到 JS。
+    let data: Vec<ExportPOI> = if let Some(f) = filters {
+        let bounds_tuple = f.bounds.as_ref().map(|b| (b.south, b.west, b.north, b.east));
+        db.search_export_pois_filtered(
+            f.query.as_deref(),
+            &f.platforms,
+            bounds_tuple,
+            &f.region_codes,
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        db.get_all_poi(None).map_err(|e| e.to_string())?
+    };
 
     let count = data.len();
 

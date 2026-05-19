@@ -3,22 +3,20 @@ import { MapContainer, useMap, useMapEvents } from 'react-leaflet'
 import { CachedOsmTileLayer } from '@/components/CachedOsmTileLayer'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
-import { usePoiData, type FullPOI, type FullBuoy } from '@/lib/poiDataContext'
+import {
+    useSearchPois,
+    useAllBuoys,
+    fetchPoiExtent,
+    fetchBuoyExtent,
+    type POI,
+    type FullBuoy as BuoyInfo,
+    type BoundsArg as Bounds,
+} from '@/lib/searchHooks'
 import { ClusteredMarkers, type ClusterPoint } from './ClusteredMarkers'
 import 'leaflet/dist/leaflet.css'
 
 type ViewMode = 'list' | 'split' | 'map'
 type DataType = 'poi' | 'buoy'
-
-type POI = FullPOI
-type BuoyInfo = FullBuoy
-
-interface Bounds {
-    south: number
-    west: number
-    north: number
-    east: number
-}
 
 const PLATFORMS: PlatformKey[] = ['tianditu', 'amap', 'baidu', 'osm']
 
@@ -154,97 +152,97 @@ const BuoyListRow = memo(function BuoyListRow({ buoy: b, index, active, onSelect
 })
 
 export function BrowseView() {
-    const { poi, buoy } = usePoiData()
     const [dataType, setDataType] = useState<DataType>('poi')
     const [view, setView] = useState<ViewMode>('split')
     const [query, setQuery] = useState('')
     const [debouncedQuery, setDebouncedQuery] = useState('')
-    // useDeferredValue lets typing stay snappy: query updates UI immediately,
-    // but the 23k filter only re-runs with this deferred value at React's leisure.
     const deferredQuery = useDeferredValue(debouncedQuery)
     const [activePf, setActivePf] = useState<Set<PlatformKey>>(new Set(PLATFORMS))
     const [bounds, setBounds] = useState<Bounds | null>(null)
     const [activeId, setActiveId] = useState<string | number | null>(null)
     const [page, setPage] = useState(1)
-    const fitOnceRef = useRef(false)
+    const fitOnceRef = useRef<string | null>(null)
     const [initialFit, setInitialFit] = useState<Bounds | null>(null)
 
-    const allPois = poi.items
-    const allBuoys = buoy.items
-    const allLoading = (dataType === 'poi' ? poi.loading : buoy.loading)
-
-    // Debounce search input so 23k filter doesn't run on every keystroke.
+    // Debounce search input.
     useEffect(() => {
         const t = setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 180)
         return () => clearTimeout(t)
     }, [query])
 
-    // One-shot map fit once data has loaded (not on every batch update).
+    // One-shot fit map to overall data extent per dataType.
     useEffect(() => {
-        if (fitOnceRef.current) return
-        const src: [number, number][] = dataType === 'poi'
-            ? allPois.map(p => [p.lat, p.lon])
-            : allBuoys
-                .filter(b => b.lat_84 != null && b.lon_84 != null)
-                .map(b => [b.lat_84!, b.lon_84!])
-        if (src.length < 50) return
-        let s = 90, w = 180, n = -90, e = -180
-        for (const [la, lo] of src) {
-            if (la < s) s = la
-            if (la > n) n = la
-            if (lo < w) w = lo
-            if (lo > e) e = lo
-        }
-        fitOnceRef.current = true
-        setInitialFit({ south: s, west: w, north: n, east: e })
-    }, [dataType, allPois, allBuoys])
-
-    // Reset fit lock when dataType switches so the new dataset re-fits once.
-    useEffect(() => {
-        fitOnceRef.current = false
+        const key = dataType
+        if (fitOnceRef.current === key) return
+        fitOnceRef.current = key
         setInitialFit(null)
+        const job = dataType === 'poi' ? fetchPoiExtent() : fetchBuoyExtent()
+        job.then((ext) => {
+            if (ext && fitOnceRef.current === key) setInitialFit(ext)
+        }).catch(() => { /* ignore */ })
     }, [dataType])
 
-    const togglePf = (p: PlatformKey) => {
-        setActivePf(s => {
-            const n = new Set(s)
-            if (n.has(p)) n.delete(p); else n.add(p)
-            return n
-        })
-    }
+    const platformsArr = useMemo(
+        () => activePf.size === PLATFORMS.length ? [] : Array.from(activePf),
+        [activePf]
+    )
 
-    // List pane filtering — by query + platform, no bounds.
-    // Uses the pre-lowercased `_search` field built once at stream time.
-    const filteredPois = useMemo(() => {
-        const q = deferredQuery
-        const list = allPois.filter(p => activePf.has(p.platform as PlatformKey))
-        if (!q) return list
-        return list.filter(p => p._search.includes(q))
-    }, [allPois, deferredQuery, activePf])
+    // List pane: paginated server search, no bounds.
+    const listFilters = useMemo(
+        () => dataType === 'poi'
+            ? { query: deferredQuery || null, platforms: platformsArr, bounds: null }
+            : null,
+        [dataType, deferredQuery, platformsArr]
+    )
+    const listPagination = useMemo(
+        () => ({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+        [page]
+    )
+    const listResult = useSearchPois(
+        listFilters ?? { query: null, platforms: [], bounds: null },
+        listPagination
+    )
+    const poiListLoading = dataType === 'poi' && listResult.loading
+    const pagedPois = dataType === 'poi' ? listResult.items : []
+    const poiTotal = dataType === 'poi' ? listResult.total : 0
 
+    // Buoys: full dataset cached client-side, filter locally (small data).
+    const buoyAll = useAllBuoys()
+    const buoyListLoading = dataType === 'buoy' && buoyAll.loading
     const filteredBuoys = useMemo(() => {
+        if (dataType !== 'buoy') return [] as BuoyInfo[]
         const q = deferredQuery
-        if (!q) return allBuoys
-        return allBuoys.filter(b => b._search.includes(q))
-    }, [allBuoys, deferredQuery])
+        if (!q) return buoyAll.items
+        return buoyAll.items.filter(b => {
+            const s = `${b.id ?? ''}|${b.name ?? ''}|${b.waterway ?? ''}|${b.region ?? ''}|${b.shape ?? ''}|${b.buoy_type ?? ''}`.toLowerCase()
+            return s.includes(q)
+        })
+    }, [dataType, deferredQuery, buoyAll.items])
+    const pagedBuoys = useMemo(
+        () => filteredBuoys.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+        [filteredBuoys, page]
+    )
+    const buoyTotal = filteredBuoys.length
 
-    // Map markers — filteredPois intersected with current viewport.
-    // Capped so dense viewports stay smooth; cluster layer handles aggregation.
-    const mapPois = useMemo(() => {
-        if (!bounds || view === 'list') return [] as POI[]
-        const { south, west, north, east } = bounds
-        const out: POI[] = []
-        for (const p of filteredPois) {
-            if (p.lat >= south && p.lat <= north && p.lon >= west && p.lon <= east) {
-                out.push(p)
-                if (out.length >= MAP_MARKER_CAP) break
-            }
-        }
-        return out
-    }, [filteredPois, bounds, view])
+    // Map markers: same filter as list, but with current bounds and large limit.
+    const mapFilters = useMemo(
+        () => dataType === 'poi' && view !== 'list' && bounds
+            ? { query: deferredQuery || null, platforms: platformsArr, bounds }
+            : null,
+        [dataType, view, deferredQuery, platformsArr, bounds]
+    )
+    const mapPagination = useMemo(
+        () => ({ limit: MAP_MARKER_CAP, offset: 0 }),
+        []
+    )
+    const mapResult = useSearchPois(
+        mapFilters ?? { query: null, platforms: ['__none__'], bounds: null },
+        mapPagination
+    )
+    const mapPois: POI[] = mapFilters ? mapResult.items : []
 
     const mapBuoys = useMemo(() => {
-        if (!bounds || view === 'list') return [] as BuoyInfo[]
+        if (dataType !== 'buoy' || view === 'list' || !bounds) return [] as BuoyInfo[]
         const { south, west, north, east } = bounds
         const out: BuoyInfo[] = []
         for (const b of filteredBuoys) {
@@ -255,7 +253,17 @@ export function BrowseView() {
             }
         }
         return out
-    }, [filteredBuoys, bounds, view])
+    }, [filteredBuoys, bounds, view, dataType])
+
+    const allLoading = poiListLoading || buoyListLoading
+
+    const togglePf = (p: PlatformKey) => {
+        setActivePf(s => {
+            const n = new Set(s)
+            if (n.has(p)) n.delete(p); else n.add(p)
+            return n
+        })
+    }
 
     const poiClusterPoints = useMemo<ClusterPoint[]>(
         () => mapPois.map((p, i) => ({
@@ -277,29 +285,20 @@ export function BrowseView() {
     const selectPoi = useCallback((id: number) => setActiveId(id), [])
     const selectBuoy = useCallback((id: string) => setActiveId(id), [])
 
-    const totalItems = dataType === 'poi' ? filteredPois.length : filteredBuoys.length
+    const totalItems = dataType === 'poi' ? poiTotal : buoyTotal
     const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
     const currentPage = Math.min(page, totalPages)
     const pageStart = (currentPage - 1) * PAGE_SIZE
 
-    const pagedPois = useMemo(
-        () => filteredPois.slice(pageStart, pageStart + PAGE_SIZE),
-        [filteredPois, pageStart]
-    )
-    const pagedBuoys = useMemo(
-        () => filteredBuoys.slice(pageStart, pageStart + PAGE_SIZE),
-        [filteredBuoys, pageStart]
-    )
-
     const activePoint = useMemo<[number, number] | null>(() => {
         if (activeId == null) return null
         if (dataType === 'poi') {
-            const p = filteredPois.find(x => x.id === activeId)
+            const p = pagedPois.find(x => x.id === activeId) ?? mapPois.find(x => x.id === activeId)
             return p ? [p.lat, p.lon] : null
         }
-        const b = filteredBuoys.find(x => x.id === activeId)
+        const b = pagedBuoys.find(x => x.id === activeId) ?? mapBuoys.find(x => x.id === activeId)
         return b && b.lat_84 != null && b.lon_84 != null ? [b.lat_84, b.lon_84] : null
-    }, [activeId, filteredPois, filteredBuoys, dataType])
+    }, [activeId, pagedPois, pagedBuoys, mapPois, mapBuoys, dataType])
 
     // Per-platform viewport count for the legend
     const viewportByPlatform = useMemo(() => {

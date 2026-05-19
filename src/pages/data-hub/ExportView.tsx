@@ -3,7 +3,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import { useToast } from '@/components/ui/toast'
-import { usePoiData } from '@/lib/poiDataContext'
+import {
+    useSearchPois,
+    useAllBuoys,
+    type PoiSearchFilters,
+    type POI,
+} from '@/lib/searchHooks'
 
 type DataType = 'poi' | 'buoy'
 type Format = 'csv' | 'json' | 'mysql' | 'excel'
@@ -15,17 +20,7 @@ interface Region {
     parent_code: string | null
 }
 
-interface ExportPOI {
-    id: number
-    name: string
-    lon: number
-    lat: number
-    address: string
-    phone: string
-    category: string
-    platform: string
-    region_code: string
-}
+type ExportPOI = POI
 
 interface BuoyInfo {
     id: string
@@ -160,7 +155,6 @@ export function ExportView() {
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
     const [regionSearch, setRegionSearch] = useState('')
 
-    const { poi: poiSlice, buoy: buoySlice } = usePoiData()
     const [platform, setPlatform] = useState<string>('all')
     const [search, setSearch] = useState('')
 
@@ -206,15 +200,6 @@ export function ExportView() {
         invoke<[number, number]>('fix_region_codes').catch(() => { /* ignore */ })
     }, [])
 
-    const allPois = useMemo(
-        () => platform === 'all'
-            ? poiSlice.items
-            : poiSlice.items.filter(p => p.platform === platform),
-        [poiSlice.items, platform]
-    )
-    const allBuoys = buoySlice.items
-    const loading = dataType === 'poi' ? poiSlice.loading : buoySlice.loading
-
     const matchCodes = useMemo(() => {
         const m = new Set<string>()
         for (const code of selected) {
@@ -229,19 +214,27 @@ export function ExportView() {
         return m
     }, [selected, childrenMap])
 
-    const filteredPois = useMemo(() => {
-        let data = allPois
-        if (selected.size > 0) data = data.filter(p => matchCodes.has(p.region_code))
-        const q = search.trim().toLowerCase()
-        if (q) data = data.filter(p => p._search.includes(q))
-        return data
-    }, [allPois, matchCodes, selected, search])
+    // Compose backend filters from current UI state.
+    const poiFilters = useMemo<PoiSearchFilters>(() => ({
+        query: search.trim() || null,
+        platforms: platform === 'all' ? [] : [platform],
+        bounds: null,
+        region_codes: matchCodes.size > 0 ? Array.from(matchCodes) : [],
+    }), [search, platform, matchCodes])
 
-    const filteredBuoys = useMemo(() => {
+    const poiPreview = useSearchPois(poiFilters, { limit: 200, offset: 0 })
+    const allBuoys = useAllBuoys()
+
+    const filteredBuoys = useMemo<BuoyInfo[]>(() => {
         const q = search.trim().toLowerCase()
-        if (!q) return allBuoys
-        return allBuoys.filter(b => b._search.includes(q))
-    }, [allBuoys, search])
+        if (!q) return allBuoys.items
+        return allBuoys.items.filter(b => {
+            const s = `${b.id ?? ''}|${b.name ?? ''}|${b.waterway ?? ''}|${b.region ?? ''}|${b.shape ?? ''}|${b.buoy_type ?? ''}`.toLowerCase()
+            return s.includes(q)
+        })
+    }, [search, allBuoys.items])
+
+    const loading = dataType === 'poi' ? poiPreview.loading : allBuoys.loading
 
     const fieldsCur = dataType === 'poi' ? poiFields : buoyFields
     const toggleField = (id: string) => {
@@ -253,9 +246,8 @@ export function ExportView() {
         })
     }
     const FIELDS_CUR = dataType === 'poi' ? POI_FIELDS : BUOY_FIELDS
-    const rows = dataType === 'poi' ? filteredPois : filteredBuoys
-    const totalCount = rows.length
-    const previewRows = useMemo(() => rows.slice(0, 200), [rows])
+    const totalCount = dataType === 'poi' ? poiPreview.total : filteredBuoys.length
+    const previewRows = dataType === 'poi' ? poiPreview.items : filteredBuoys.slice(0, 200)
 
     const visibleProvinces = useMemo(() => {
         if (!regionSearch.trim()) return provinces
@@ -279,12 +271,10 @@ export function ExportView() {
             if (!path) return
             setExporting(true)
             if (dataType === 'poi') {
-                const ids = filteredPois.map(p => p.id)
                 const n = await invoke<number>('export_poi_to_file', {
                     path,
                     format,
-                    platform: platform === 'all' ? null : platform,
-                    ids,
+                    filters: poiFilters,
                 })
                 success('导出成功', `已导出 ${n.toLocaleString()} 条 POI`)
             } else {
@@ -336,8 +326,8 @@ export function ExportView() {
                     {loading
                         ? '正在加载...'
                         : dataType === 'poi'
-                            ? <>POI 共 <b className="mono" style={{ color: 'var(--text)' }}>{allPois.length.toLocaleString()}</b> 条</>
-                            : <>航标共 <b className="mono" style={{ color: 'var(--text)' }}>{allBuoys.length.toLocaleString()}</b> 条</>
+                            ? <>匹配 <b className="mono" style={{ color: 'var(--text)' }}>{poiPreview.total.toLocaleString()}</b> 条</>
+                            : <>航标共 <b className="mono" style={{ color: 'var(--text)' }}>{allBuoys.items.length.toLocaleString()}</b> 条</>
                     }
                 </span>
             </div>

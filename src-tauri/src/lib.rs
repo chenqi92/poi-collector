@@ -43,6 +43,8 @@ pub fn run() {
             search_poi,
             search_poi_by_bounds,
             search_buoys_by_bounds,
+            search_pois,
+            get_poi_data_extent,
             // 行政区划
             get_regions,
             get_provinces,
@@ -51,7 +53,6 @@ pub fn run() {
             get_district_codes_for_region,
             // 导出
             get_all_poi_data,
-            stream_all_poi,
             export_poi_to_file,
             fix_region_codes,
             // 数据管理
@@ -95,7 +96,7 @@ pub fn run() {
             chart_commands::chart_get_tile_count,
             chart_commands::chart_get_buoy_stats,
             chart_commands::chart_get_all_buoys,
-            chart_commands::chart_stream_all_buoys,
+            chart_commands::chart_get_buoy_extent,
             // OSM 瓦片本地缓存
             tile_cache::cached_osm_tile,
             tile_cache::clear_osm_tile_cache,

@@ -154,6 +154,26 @@ impl ChartDatabase {
         Ok(count)
     }
 
+    /// 返回航标外接矩形（用于地图首次 fit）
+    pub fn get_buoy_extent(&self) -> Result<Option<(f64, f64, f64, f64)>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        let row: (Option<f64>, Option<f64>, Option<f64>, Option<f64>) = conn
+            .query_row(
+                "SELECT MIN(lat_84), MAX(lat_84), MIN(lon_84), MAX(lon_84) FROM chart_buoys
+                 WHERE lat_84 IS NOT NULL AND lon_84 IS NOT NULL",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .map_err(|e| format!("查询航标范围失败: {}", e))?;
+        match row {
+            (Some(s), Some(n), Some(w), Some(e)) => Ok(Some((s, w, n, e))),
+            _ => Ok(None),
+        }
+    }
+
     /// 获取所有航标数据
     pub fn get_all_buoys(&self) -> Result<Vec<BuoyInfo>, String> {
         let conn = self

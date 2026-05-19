@@ -4,7 +4,6 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { ToastProvider } from '@/components/ui/toast';
 import { TasksProvider } from '@/lib/tasksContext';
 import { NotificationsProvider, NotificationsBridge } from '@/lib/notificationsContext';
-import { PoiDataProvider } from '@/lib/poiDataContext';
 import { Shell } from '@/components/shell';
 import '@/index.css';
 
@@ -37,7 +36,6 @@ function App() {
                 <NotificationsBridge />
                 <ToastProvider>
                     <TasksProvider>
-                        <PoiDataProvider>
                         <BrowserRouter>
                             <Routes>
                                 <Route path="/" element={<Shell />}>
@@ -61,7 +59,6 @@ function App() {
                                 </Route>
                             </Routes>
                         </BrowserRouter>
-                        </PoiDataProvider>
                     </TasksProvider>
                 </ToastProvider>
             </NotificationsProvider>
