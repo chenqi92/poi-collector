@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from '@/components/theme-provider';
 import { ToastProvider } from '@/components/ui/toast';
@@ -5,12 +6,29 @@ import { TasksProvider } from '@/lib/tasksContext';
 import { NotificationsProvider, NotificationsBridge } from '@/lib/notificationsContext';
 import { PoiDataProvider } from '@/lib/poiDataContext';
 import { Shell } from '@/components/shell';
-import Dashboard from '@/pages/Dashboard';
-import NewCollection from '@/pages/NewCollection';
-import DataHub from '@/pages/DataHub';
-import OfflineMaps from '@/pages/OfflineMaps';
-import Settings from '@/pages/Settings';
 import '@/index.css';
+
+const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const NewCollection = lazy(() => import('@/pages/NewCollection'));
+const DataHub = lazy(() => import('@/pages/DataHub'));
+const OfflineMaps = lazy(() => import('@/pages/OfflineMaps'));
+const Settings = lazy(() => import('@/pages/Settings'));
+
+function RouteFallback() {
+    return (
+        <div
+            style={{
+                flex: 1,
+                display: 'grid',
+                placeItems: 'center',
+                color: 'var(--text-3)',
+                fontSize: 12,
+            }}
+        >
+            <span>加载模块...</span>
+        </div>
+    );
+}
 
 function App() {
     return (
@@ -26,11 +44,11 @@ function App() {
                                     <Route index element={<Navigate to="/workspace" replace />} />
 
                                     {/* 5 canonical modules */}
-                                    <Route path="workspace" element={<Dashboard />} />
-                                    <Route path="new" element={<NewCollection />} />
-                                    <Route path="data" element={<DataHub />} />
-                                    <Route path="offline" element={<OfflineMaps />} />
-                                    <Route path="settings" element={<Settings />} />
+                                    <Route path="workspace" element={<Suspense fallback={<RouteFallback />}><Dashboard /></Suspense>} />
+                                    <Route path="new" element={<Suspense fallback={<RouteFallback />}><NewCollection /></Suspense>} />
+                                    <Route path="data" element={<Suspense fallback={<RouteFallback />}><DataHub /></Suspense>} />
+                                    <Route path="offline" element={<Suspense fallback={<RouteFallback />}><OfflineMaps /></Suspense>} />
+                                    <Route path="settings" element={<Suspense fallback={<RouteFallback />}><Settings /></Suspense>} />
 
                                     {/* Legacy paths → new modules */}
                                     <Route path="dashboard" element={<Navigate to="/workspace" replace />} />
