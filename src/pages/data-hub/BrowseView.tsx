@@ -71,6 +71,29 @@ function BoundsTracker({ onChange }: { onChange: (b: Bounds) => void }) {
     return null
 }
 
+function MapResizeOnView({ trigger }: { trigger: unknown }) {
+    const map = useMap()
+    useEffect(() => {
+        // Run after the grid layout has applied the new column template.
+        const t1 = setTimeout(() => map.invalidateSize(), 50)
+        const t2 = setTimeout(() => map.invalidateSize(), 250)
+        return () => { clearTimeout(t1); clearTimeout(t2) }
+    }, [map, trigger])
+    return null
+}
+
+function FitToBounds({ bounds }: { bounds: Bounds | null }) {
+    const map = useMap()
+    useEffect(() => {
+        if (!bounds) return
+        map.fitBounds(
+            [[bounds.south, bounds.west], [bounds.north, bounds.east]],
+            { padding: [40, 40], maxZoom: 13 }
+        )
+    }, [map, bounds])
+    return null
+}
+
 function PanToWhenActive({ point }: { point: [number, number] | null }) {
     const map = useMap()
     useEffect(() => {
@@ -95,8 +118,50 @@ export function BrowseView() {
     const [loading, setLoading] = useState(false)
     const [activeId, setActiveId] = useState<string | number | null>(null)
     const [page, setPage] = useState(1)
+    const [initialFit, setInitialFit] = useState<Bounds | null>(null)
     const poiSeqRef = useRef(0)
     const buoySeqRef = useRef(0)
+
+    // One-shot: probe for the data extent so the map opens centered on the
+    // user's POIs instead of a hard-coded Shanghai default.
+    useEffect(() => {
+        let cancelled = false
+        ;(async () => {
+            try {
+                if (dataType === 'poi') {
+                    const probe = await invoke<POI[]>('search_poi_by_bounds', {
+                        south: 15, west: 70, north: 55, east: 140,
+                        query: null, platform: null,
+                    })
+                    if (cancelled || probe.length === 0) return
+                    let s = 90, w = 180, n = -90, e = -180
+                    for (const p of probe) {
+                        if (p.lat < s) s = p.lat
+                        if (p.lat > n) n = p.lat
+                        if (p.lon < w) w = p.lon
+                        if (p.lon > e) e = p.lon
+                    }
+                    setInitialFit({ south: s, west: w, north: n, east: e })
+                } else {
+                    const probe = await invoke<BuoyInfo[]>('search_buoys_by_bounds', {
+                        south: 15, west: 70, north: 55, east: 140,
+                    })
+                    if (cancelled) return
+                    let s = 90, w = 180, n = -90, e = -180, any = false
+                    for (const b of probe) {
+                        if (b.lat_84 == null || b.lon_84 == null) continue
+                        any = true
+                        if (b.lat_84 < s) s = b.lat_84
+                        if (b.lat_84 > n) n = b.lat_84
+                        if (b.lon_84 < w) w = b.lon_84
+                        if (b.lon_84 > e) e = b.lon_84
+                    }
+                    if (any) setInitialFit({ south: s, west: w, north: n, east: e })
+                }
+            } catch { /* ignore */ }
+        })()
+        return () => { cancelled = true }
+    }, [dataType])
 
     // Debounced reload on bounds / type / query / platforms
     useEffect(() => {
@@ -323,6 +388,8 @@ export function BrowseView() {
                         <BoundsTracker onChange={setBounds} />
                         <MapClickClearer onClickEmpty={() => setActiveId(null)} />
                         <PanToWhenActive point={activePoint} />
+                        <MapResizeOnView trigger={view} />
+                        <FitToBounds bounds={initialFit} />
                         {dataType === 'poi' && filteredPois.map((p, i) => (
                             <Marker
                                 key={p.id}
