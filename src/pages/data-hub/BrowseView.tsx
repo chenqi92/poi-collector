@@ -1,4 +1,4 @@
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { MapContainer, useMap, useMapEvents } from 'react-leaflet'
 import { CachedOsmTileLayer } from '@/components/CachedOsmTileLayer'
 import { GcIcon, PlatformBadge } from '@/components/shell'
@@ -163,10 +163,14 @@ export function BrowseView() {
     const [page, setPage] = useState(1)
     const fitOnceRef = useRef<string | null>(null)
     const [initialFit, setInitialFit] = useState<Bounds | null>(null)
+    const [, startTransition] = useTransition()
 
-    // Debounce search input.
+    // Debounce search input — push into a transition so React can interrupt
+    // the heavy filter / re-render if the user keeps typing.
     useEffect(() => {
-        const t = setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 180)
+        const t = setTimeout(() => {
+            startTransition(() => setDebouncedQuery(query.trim().toLowerCase()))
+        }, 180)
         return () => clearTimeout(t)
     }, [query])
 
@@ -258,10 +262,12 @@ export function BrowseView() {
     const allLoading = poiListLoading || buoyListLoading
 
     const togglePf = (p: PlatformKey) => {
-        setActivePf(s => {
-            const n = new Set(s)
-            if (n.has(p)) n.delete(p); else n.add(p)
-            return n
+        startTransition(() => {
+            setActivePf(s => {
+                const n = new Set(s)
+                if (n.has(p)) n.delete(p); else n.add(p)
+                return n
+            })
         })
     }
 

@@ -18,6 +18,54 @@ use crate::database::Database;
 static DB: Lazy<Mutex<Database>> =
     Lazy::new(|| Mutex::new(Database::new("poi_data.db").expect("Failed to init database")));
 
+/// 只读连接池：search/extent/preview 这类纯查询走这里，避免阻塞写入。
+/// WAL 模式下多读 + 单写互不阻塞，所以池里 4 把读连接基本能撑住界面所有并发查询。
+static READ_POOL: Lazy<Mutex<Vec<rusqlite::Connection>>> = Lazy::new(|| {
+    let mut pool = Vec::with_capacity(4);
+    for _ in 0..4 {
+        match rusqlite::Connection::open("poi_data.db") {
+            Ok(c) => {
+                let _ = c.execute_batch(
+                    "PRAGMA journal_mode=WAL;
+                     PRAGMA query_only=ON;
+                     PRAGMA temp_store=MEMORY;
+                     PRAGMA mmap_size=268435456;
+                     PRAGMA cache_size=-32768;
+                     PRAGMA busy_timeout=5000;",
+                );
+                pool.push(c);
+            }
+            Err(e) => log::warn!("read pool open failed: {}", e),
+        }
+    }
+    Mutex::new(pool)
+});
+
+/// 从读连接池借一个 conn，闭包用完自动还回去；池里没有则回退到主写连接。
+fn with_read_conn<F, R>(f: F) -> Result<R, String>
+where
+    F: FnOnce(&rusqlite::Connection) -> Result<R, String>,
+{
+    let conn_opt = {
+        let mut pool = READ_POOL.lock().map_err(|e| e.to_string())?;
+        pool.pop()
+    };
+    match conn_opt {
+        Some(conn) => {
+            let result = f(&conn);
+            // 还回池
+            if let Ok(mut pool) = READ_POOL.lock() {
+                pool.push(conn);
+            }
+            result
+        }
+        None => {
+            let db = DB.lock().map_err(|e| e.to_string())?;
+            f(db.raw_conn())
+        }
+    }
+}
+
 static COLLECTOR_STATUSES: Lazy<Mutex<HashMap<String, CollectorStatus>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -674,18 +722,19 @@ pub struct PoiPage {
 }
 
 /// 综合过滤 + 分页查询。底层使用 FTS5 trigram 索引做文本搜索。
+/// 走只读连接池，不阻塞写入。
 #[tauri::command]
 pub fn search_pois(
     filters: PoiSearchFilters,
     pagination: Pagination,
 ) -> Result<PoiPage, String> {
-    let db = DB.lock().map_err(|e| e.to_string())?;
     let bounds_tuple = filters
         .bounds
         .as_ref()
         .map(|b| (b.south, b.west, b.north, b.east));
-    let (items, total) = db
-        .search_pois_filtered(
+    let (items, total) = with_read_conn(|conn| {
+        crate::database::Database::search_pois_filtered_conn(
+            conn,
             filters.query.as_deref(),
             &filters.platforms,
             bounds_tuple,
@@ -693,7 +742,8 @@ pub fn search_pois(
             pagination.limit.max(0),
             pagination.offset.max(0),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+    })?;
     Ok(PoiPage { items, total })
 }
 
@@ -708,9 +758,10 @@ pub struct DataExtent {
 /// 返回 POI 数据外接矩形。用于地图首次 fit。
 #[tauri::command]
 pub fn get_poi_data_extent(platforms: Option<Vec<String>>) -> Result<Option<DataExtent>, String> {
-    let db = DB.lock().map_err(|e| e.to_string())?;
     let pf = platforms.unwrap_or_default();
-    let r = db.get_poi_extent(&pf).map_err(|e| e.to_string())?;
+    let r = with_read_conn(|conn| {
+        crate::database::Database::get_poi_extent_conn(conn, &pf).map_err(|e| e.to_string())
+    })?;
     Ok(r.map(|(s, w, n, e)| DataExtent {
         south: s,
         west: w,

@@ -9,16 +9,41 @@ pub struct Database {
 impl Database {
     pub fn new(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
-
-        // 启用 WAL 模式，避免 journal 文件频繁出现/消失
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        Self::tune_pragmas(&conn)?;
 
         let db = Self { conn };
         db.migrate()?;
         db.init_tables()?;
         db.ensure_fts()?;
+        db.ensure_rtree()?;
         db.cleanup_stale_tasks();
         Ok(db)
+    }
+
+    /// 暴露底层连接给独立读连接池使用。
+    pub fn raw_conn(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// 一次性把连接配置成读密集 + 写不丢的折中策略。
+    ///   - WAL 让读写并发不互相阻塞
+    ///   - synchronous=NORMAL：write 时不每次 fsync，掉电最多丢最近事务（对 POI 缓存数据可接受）
+    ///   - temp_store=MEMORY：ORDER BY / GROUP BY 的临时表走内存
+    ///   - mmap_size=256MB：让 SQLite 通过内存映射读 DB 文件，减少 syscall
+    ///   - cache_size=-65536：64 MB 页缓存
+    ///   - busy_timeout：避免 SQLITE_BUSY 直接报错，等 5s 再说
+    fn tune_pragmas(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA temp_store=MEMORY;
+             PRAGMA mmap_size=268435456;
+             PRAGMA cache_size=-65536;
+             PRAGMA wal_autocheckpoint=1000;
+             PRAGMA journal_size_limit=67108864;
+             PRAGMA busy_timeout=5000;",
+        )?;
+        Ok(())
     }
 
     /// 应用启动时清理卡在"运行中"状态的任务
@@ -146,6 +171,52 @@ impl Database {
                 [],
             )?;
             log::info!("FTS5 回填 {} 行", backfilled);
+        }
+        Ok(())
+    }
+
+    /// R-Tree 空间索引：bounds 查询从 O(n) 索引扫描变 O(log n)。
+    /// 即便 10w+ POI 在视野查询时也能 <5ms。
+    fn ensure_rtree(&self) -> Result<()> {
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'poi_rtree'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !exists {
+            log::info!("建立 poi_rtree 空间索引");
+            self.conn.execute_batch(
+                r#"
+                CREATE VIRTUAL TABLE IF NOT EXISTS poi_rtree USING rtree(
+                    id,
+                    min_lat, max_lat,
+                    min_lon, max_lon
+                );
+
+                CREATE TRIGGER IF NOT EXISTS poi_rtree_ai AFTER INSERT ON poi_data BEGIN
+                    INSERT INTO poi_rtree(id, min_lat, max_lat, min_lon, max_lon)
+                    VALUES (new.id, new.lat, new.lat, new.lon, new.lon);
+                END;
+                CREATE TRIGGER IF NOT EXISTS poi_rtree_ad AFTER DELETE ON poi_data BEGIN
+                    DELETE FROM poi_rtree WHERE id = old.id;
+                END;
+                CREATE TRIGGER IF NOT EXISTS poi_rtree_au AFTER UPDATE OF lat, lon ON poi_data BEGIN
+                    UPDATE poi_rtree SET min_lat=new.lat, max_lat=new.lat, min_lon=new.lon, max_lon=new.lon
+                    WHERE id = old.id;
+                END;
+                "#,
+            )?;
+
+            let backfilled = self.conn.execute(
+                "INSERT INTO poi_rtree(id, min_lat, max_lat, min_lon, max_lon)
+                 SELECT id, lat, lat, lon, lon FROM poi_data",
+                [],
+            )?;
+            log::info!("R-Tree 回填 {} 行", backfilled);
         }
         Ok(())
     }
@@ -347,8 +418,8 @@ impl Database {
     }
 
     /// 构造 search_pois / export_pois 共用的 FROM + WHERE + 参数列表。
-    fn build_poi_filter(
-        &self,
+    /// bounds 走 poi_rtree（O(log n)），text 走 poi_fts（trigram）。
+    pub fn build_poi_filter(
         query: Option<&str>,
         platforms: &[String],
         bounds: Option<(f64, f64, f64, f64)>,
@@ -356,20 +427,34 @@ impl Database {
     ) -> (String, String, Vec<Box<dyn rusqlite::ToSql>>) {
         let q_trim = query.unwrap_or("").trim();
         let use_fts = !q_trim.is_empty();
+        let use_rtree = bounds.is_some();
 
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         let mut where_clauses: Vec<String> = Vec::new();
 
-        let from_clause = if use_fts {
-            "FROM poi_data p JOIN poi_fts f ON f.rowid = p.id".to_string()
-        } else {
-            "FROM poi_data p".to_string()
-        };
+        let mut from = String::from("FROM poi_data p");
+        if use_fts {
+            from.push_str(" JOIN poi_fts f ON f.rowid = p.id");
+        }
+        if use_rtree {
+            from.push_str(" JOIN poi_rtree r ON r.id = p.id");
+        }
 
         if use_fts {
             let escaped = q_trim.replace('"', "\"\"");
             where_clauses.push("poi_fts MATCH ?".to_string());
             params.push(Box::new(format!("\"{}\"", escaped)));
+        }
+
+        if let Some((s, w, n, e)) = bounds {
+            // R-Tree 的约束写法：MBR 必须完全包含。这里我们要点 in box，所以
+            // min_lat >= south AND max_lat <= north（点的 min/max 相同所以这样就够）
+            where_clauses.push("r.min_lat >= ? AND r.max_lat <= ?".to_string());
+            where_clauses.push("r.min_lon >= ? AND r.max_lon <= ?".to_string());
+            params.push(Box::new(s));
+            params.push(Box::new(n));
+            params.push(Box::new(w));
+            params.push(Box::new(e));
         }
 
         if !platforms.is_empty() {
@@ -378,15 +463,6 @@ impl Database {
             for p in platforms {
                 params.push(Box::new(p.clone()));
             }
-        }
-
-        if let Some((s, w, n, e)) = bounds {
-            where_clauses.push("p.lat BETWEEN ? AND ?".to_string());
-            where_clauses.push("p.lon BETWEEN ? AND ?".to_string());
-            params.push(Box::new(s));
-            params.push(Box::new(n));
-            params.push(Box::new(w));
-            params.push(Box::new(e));
         }
 
         if !region_codes.is_empty() {
@@ -403,7 +479,7 @@ impl Database {
             format!(" WHERE {}", where_clauses.join(" AND "))
         };
 
-        (from_clause, where_sql, params)
+        (from, where_sql, params)
     }
 
     /// 综合过滤 + 分页查询。支持任意组合的：
@@ -411,6 +487,7 @@ impl Database {
     ///   - platforms IN (...)
     ///   - bounds（lat/lon BETWEEN）
     ///   - region_codes IN (...)
+    #[allow(dead_code)]
     pub fn search_pois_filtered(
         &self,
         query: Option<&str>,
@@ -420,14 +497,26 @@ impl Database {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<POI>, i64)> {
+        Self::search_pois_filtered_conn(&self.conn, query, platforms, bounds, region_codes, limit, offset)
+    }
+
+    /// 同上但接受任意 &Connection，用于读连接池。
+    pub fn search_pois_filtered_conn(
+        conn: &Connection,
+        query: Option<&str>,
+        platforms: &[String],
+        bounds: Option<(f64, f64, f64, f64)>,
+        region_codes: &[String],
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<POI>, i64)> {
         let (from_clause, where_sql, mut params) =
-            self.build_poi_filter(query, platforms, bounds, region_codes);
+            Self::build_poi_filter(query, platforms, bounds, region_codes);
 
         let count_sql = format!("SELECT COUNT(*) {}{}", from_clause, where_sql);
         let total: i64 = {
             let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
-            self.conn
-                .query_row(&count_sql, rusqlite::params_from_iter(refs), |r| r.get(0))?
+            conn.query_row(&count_sql, rusqlite::params_from_iter(refs), |r| r.get(0))?
         };
 
         let page_sql = format!(
@@ -438,7 +527,7 @@ impl Database {
         params.push(Box::new(limit));
         params.push(Box::new(offset));
 
-        let mut stmt = self.conn.prepare(&page_sql)?;
+        let mut stmt = conn.prepare(&page_sql)?;
         let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(refs), |row| {
             Ok(POI {
@@ -460,7 +549,6 @@ impl Database {
         Ok((items, total))
     }
 
-    /// 同 search_pois_filtered 但返回 ExportPOI（含 phone/region_code）且不分页。
     pub fn search_export_pois_filtered(
         &self,
         query: Option<&str>,
@@ -468,8 +556,18 @@ impl Database {
         bounds: Option<(f64, f64, f64, f64)>,
         region_codes: &[String],
     ) -> Result<Vec<ExportPOI>> {
+        Self::search_export_pois_filtered_conn(&self.conn, query, platforms, bounds, region_codes)
+    }
+
+    pub fn search_export_pois_filtered_conn(
+        conn: &Connection,
+        query: Option<&str>,
+        platforms: &[String],
+        bounds: Option<(f64, f64, f64, f64)>,
+        region_codes: &[String],
+    ) -> Result<Vec<ExportPOI>> {
         let (from_clause, where_sql, params) =
-            self.build_poi_filter(query, platforms, bounds, region_codes);
+            Self::build_poi_filter(query, platforms, bounds, region_codes);
 
         let sql = format!(
             "SELECT p.id, p.name, p.lon, p.lat, p.address, p.phone, p.category, p.platform, p.region_code \
@@ -477,7 +575,7 @@ impl Database {
             from_clause, where_sql
         );
 
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = conn.prepare(&sql)?;
         let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(refs), |row| {
             Ok(ExportPOI {
@@ -499,9 +597,16 @@ impl Database {
         Ok(items)
     }
 
-    /// 返回 POI 表数据外接矩形（用于地图初始 fit）
+    #[allow(dead_code)]
     pub fn get_poi_extent(
         &self,
+        platforms: &[String],
+    ) -> Result<Option<(f64, f64, f64, f64)>> {
+        Self::get_poi_extent_conn(&self.conn, platforms)
+    }
+
+    pub fn get_poi_extent_conn(
+        conn: &Connection,
         platforms: &[String],
     ) -> Result<Option<(f64, f64, f64, f64)>> {
         let (sql, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = if platforms.is_empty() {
@@ -521,7 +626,7 @@ impl Database {
         };
         let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
         let row: (Option<f64>, Option<f64>, Option<f64>, Option<f64>) =
-            self.conn.query_row(&sql, rusqlite::params_from_iter(refs), |r| {
+            conn.query_row(&sql, rusqlite::params_from_iter(refs), |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?;
         match row {

@@ -3,12 +3,52 @@ import { useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { invoke } from '@tauri-apps/api/core'
 
-/**
- * Leaflet TileLayer subclass that asks the Rust side for each tile.  The Rust
- * command (`cached_osm_tile`) serves from a local on-disk cache and falls back
- * to fetching from the public OSM endpoint, so subsequent visits to the same
- * area are instant and work offline.
- */
+const TRANSPARENT_1X1 =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII='
+
+const prefetched = new Set<string>()
+const prefetchQueue: Array<{ z: number; x: number; y: number }> = []
+let prefetchPumping = false
+
+function pumpPrefetch() {
+    if (prefetchPumping) return
+    prefetchPumping = true
+    const step = () => {
+        const job = prefetchQueue.shift()
+        if (!job) { prefetchPumping = false; return }
+        invoke('cached_osm_tile', job).catch(() => { /* swallow */ }).finally(() => {
+            // Throttle so prefetch never starves the foreground load.
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(step, { timeout: 200 })
+            } else {
+                setTimeout(step, 60)
+            }
+        })
+    }
+    if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(step, { timeout: 300 })
+    } else {
+        setTimeout(step, 60)
+    }
+}
+
+function schedulePrefetch(z: number, x: number, y: number) {
+    if (z < 4 || z > 18) return
+    const limit = 1 << z
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue
+            const nx = x + dx, ny = y + dy
+            if (nx < 0 || ny < 0 || nx >= limit || ny >= limit) continue
+            const key = `${z}/${nx}/${ny}`
+            if (prefetched.has(key)) continue
+            prefetched.add(key)
+            prefetchQueue.push({ z, x: nx, y: ny })
+        }
+    }
+    pumpPrefetch()
+}
+
 const CachedOsmLayer = L.TileLayer.extend({
     createTile: function (
         coords: L.Coords,
@@ -19,22 +59,19 @@ const CachedOsmLayer = L.TileLayer.extend({
         img.alt = ''
 
         const { x, y, z } = coords
+        const key = `${z}/${x}/${y}`
+        prefetched.add(key) // 自身也算已知
 
         invoke<string>('cached_osm_tile', { z, x, y })
             .then((b64) => {
-                if (b64) {
-                    img.src = `data:image/png;base64,${b64}`
-                    // 1×1 transparent fallback for empty cache returns.
-                } else {
-                    img.src =
-                        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII='
-                }
+                img.src = b64 ? `data:image/png;base64,${b64}` : TRANSPARENT_1X1
                 done(null, img)
+                // 主瓦片到位后再排预取，避免抢带宽
+                schedulePrefetch(z, x, y)
             })
             .catch((e) => {
                 console.warn('tile fetch failed', e)
-                img.src =
-                    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII='
+                img.src = TRANSPARENT_1X1
                 done(null, img)
             })
 

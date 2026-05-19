@@ -15,6 +15,23 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    // Tauri 内嵌的 webview 是固定较新版本，可以放心吃高 ES 特性
+    target: "esnext",
+    // 预生成 <link rel="modulepreload"> 让浏览器在主包解析期间并行抓 lazy chunk
+    modulePreload: { polyfill: false },
+    // 手动按依赖分组，让 React / Leaflet / Radix 各占独立 chunk，可独立缓存
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          leaflet: ["leaflet", "react-leaflet", "leaflet-draw", "leaflet.markercluster"],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 800,
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
