@@ -166,22 +166,33 @@ function QuotaCard({ keysByPlatform, onManage }: {
                     const keys = keysByPlatform[p] ?? []
                     const cap = PLATFORM_CAPS[p] ?? 1
                     const unlimited = PLATFORM_UNLIMITED[p]
-                    const totalCap = unlimited ? 0 : cap * Math.max(1, keys.length)
-                    // Without live usage from backend, show "已配 N 把" instead of fake usage %.
-                    const pct = keys.length > 0 ? 0.1 + keys.length * 0.1 : 0
-                    const cls = keys.length === 0 ? 'crit' : keys.length === 1 ? 'warn' : 'ok'
+                    const count = keys.length
+                    const totalCap = cap * Math.max(1, count)
+                    const isUnconfigured = !unlimited && count === 0
+                    const fillCls = unlimited ? 'unlimited' : count === 0 ? 'crit' : count === 1 ? 'warn' : 'ok'
+                    const fillPct = unlimited ? 100 : count === 0 ? 0 : Math.min(100, 25 + count * 25)
                     return (
-                        <div className="quota-row" key={p}>
+                        <div
+                            className={`quota-row${isUnconfigured ? ' unconfigured' : ''}`}
+                            key={p}
+                        >
                             <div className="quota-platform"><PlatformBadge name={p} /></div>
                             <div className="quota-bar">
-                                <i className={cls} style={{ width: `${Math.min(100, pct * 100)}%` }} />
+                                {!isUnconfigured && (
+                                    <i className={fillCls} style={{ width: `${fillPct}%` }} />
+                                )}
                             </div>
                             <div className="quota-num">
-                                {unlimited
-                                    ? '无限'
-                                    : keys.length === 0
-                                        ? '未配 Key'
-                                        : `${keys.length} 把 · ${(totalCap / 1000).toFixed(0)}k/日`}
+                                {unlimited ? (
+                                    <span className="qnum-mute">无限制</span>
+                                ) : count === 0 ? (
+                                    <span className="qnum-warn">未配置</span>
+                                ) : (
+                                    <>
+                                        <span className="qnum-main">{count}</span>
+                                        <span className="qnum-sub">把 · {(totalCap / 1000).toFixed(0)}k/日</span>
+                                    </>
+                                )}
                             </div>
                         </div>
                     )
