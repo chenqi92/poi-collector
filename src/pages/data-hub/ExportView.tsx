@@ -200,27 +200,14 @@ export function ExportView() {
         invoke<[number, number]>('fix_region_codes').catch(() => { /* ignore */ })
     }, [])
 
-    const matchCodes = useMemo(() => {
-        const m = new Set<string>()
-        for (const code of selected) {
-            m.add(code)
-            for (const c of childrenMap[code] ?? []) {
-                m.add(c.code)
-                for (const gc of childrenMap[c.code] ?? []) {
-                    m.add(gc.code)
-                }
-            }
-        }
-        return m
-    }, [selected, childrenMap])
-
-    // Compose backend filters from current UI state.
+    // 后端 region_codes 用前缀 LIKE 处理省/市/县三级，所以前端只要把用户勾选的
+    // 原始 code 透传过去就行，不再需要把子节点都展平。
     const poiFilters = useMemo<PoiSearchFilters>(() => ({
         query: search.trim() || null,
         platforms: platform === 'all' ? [] : [platform],
         bounds: null,
-        region_codes: matchCodes.size > 0 ? Array.from(matchCodes) : [],
-    }), [search, platform, matchCodes])
+        region_codes: selected.size > 0 ? Array.from(selected) : [],
+    }), [search, platform, selected])
 
     const poiPreview = useSearchPois(poiFilters, { limit: 200, offset: 0 })
     const allBuoys = useAllBuoys()

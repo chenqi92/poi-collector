@@ -466,11 +466,22 @@ impl Database {
         }
 
         if !region_codes.is_empty() {
-            let ph = vec!["?"; region_codes.len()].join(",");
-            where_clauses.push(format!("p.region_code IN ({})", ph));
+            // 区划码是 6 位 GB/T 2260：省 xx0000、市 xxyy00、县 xxyykk。
+            // 选省 "320000" 时希望覆盖所有 32xxxx；选市 "320900" 覆盖所有 3209xx。
+            // 把每个 code 转成 LIKE 前缀，多个用 OR。
+            let mut parts: Vec<String> = Vec::with_capacity(region_codes.len());
             for c in region_codes {
-                params.push(Box::new(c.clone()));
+                let prefix = if c.ends_with("0000") && c.len() == 6 {
+                    format!("{}%", &c[..2])
+                } else if c.ends_with("00") && c.len() == 6 {
+                    format!("{}%", &c[..4])
+                } else {
+                    c.clone()
+                };
+                parts.push("p.region_code LIKE ?".to_string());
+                params.push(Box::new(prefix));
             }
+            where_clauses.push(format!("({})", parts.join(" OR ")));
         }
 
         let where_sql = if where_clauses.is_empty() {

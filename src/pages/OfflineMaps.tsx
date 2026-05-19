@@ -81,19 +81,37 @@ function taskToPkg(t: TileTask): Pkg {
 }
 
 // ──────── Thumbnail (SVG) ─────────────────────────────────
+// 缩略图按瓦片包真实经纬度范围投影到一个 100×60 的"全国底图"格子上，让卡片
+// 一眼看出大概位置，而不是画一个跟数据无关的装饰矩形。
+const CHINA_BBOX = { west: 73, east: 135, south: 18, north: 54 }
+
 function PkgThumb({ pkg }: { pkg: Pkg }) {
     const hue = PLATFORM_THUMB_HUE[pkg.platform] ?? 224
-    const seed = useMemo(
-        () => pkg.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0),
-        [pkg.id]
-    )
-    const ox = seed % 30
-    const oy = (seed * 7) % 15
-    const ow = 20 + (seed % 15)
-    const oh = 15 + (seed % 10)
+
+    const rect = useMemo(() => {
+        const { west, east, south, north } = pkg.bounds
+        const bw = CHINA_BBOX.east - CHINA_BBOX.west
+        const bh = CHINA_BBOX.north - CHINA_BBOX.south
+        const toX = (lon: number) => Math.max(0, Math.min(100, ((lon - CHINA_BBOX.west) / bw) * 100))
+        const toY = (lat: number) => Math.max(0, Math.min(60, ((CHINA_BBOX.north - lat) / bh) * 60))
+        const x1 = toX(west)
+        const x2 = toX(east)
+        const y1 = toY(north)
+        const y2 = toY(south)
+        const minSide = 3 // 太小的矩形看不到，加最小尺寸
+        let w = Math.max(minSide, x2 - x1)
+        let h = Math.max(minSide, y2 - y1)
+        let x = x1
+        let y = y1
+        if (x + w > 100) x = 100 - w
+        if (y + h > 60) y = 60 - h
+        return { x, y, w, h }
+    }, [pkg.bounds])
+
     const tilesLabel = pkg.tiles >= 1e6
         ? `${(pkg.tiles / 1e6).toFixed(1)}M`
         : `${(pkg.tiles / 1e3).toFixed(0)}k`
+
     return (
         <div className="pkg-thumb" style={{ background: `oklch(0.22 0.04 ${hue})` }}>
             <svg viewBox="0 0 100 60" preserveAspectRatio="none">
@@ -108,21 +126,29 @@ function PkgThumb({ pkg }: { pkg: Pkg }) {
                     </pattern>
                 </defs>
                 <rect width="100" height="60" fill={`url(#grid-${pkg.id})`} />
+                {/* 大致勾勒长江干流（参考线） */}
                 <path
-                    d={`M 10 ${30 + Math.sin(hue) * 8} Q 30 ${20 + Math.cos(hue) * 5} 50 28 T 90 ${32 + Math.sin(hue * 2) * 6}`}
+                    d="M 30 28 Q 45 27 55 30 T 80 33 T 95 33"
                     fill="none"
-                    stroke={`oklch(0.65 0.12 ${hue})`}
-                    strokeWidth="1.2"
-                    opacity="0.7"
-                />
-                <rect
-                    x={20 + ox}
-                    y={15 + oy}
-                    width={ow}
-                    height={oh}
-                    fill={`oklch(0.7 0.18 ${hue} / 0.25)`}
-                    stroke={`oklch(0.75 0.18 ${hue})`}
+                    stroke={`oklch(0.55 0.10 ${hue})`}
                     strokeWidth="0.6"
+                    opacity="0.55"
+                />
+                {/* 实际 bounds 投影 */}
+                <rect
+                    x={rect.x}
+                    y={rect.y}
+                    width={rect.w}
+                    height={rect.h}
+                    fill={`oklch(0.7 0.18 ${hue} / 0.28)`}
+                    stroke={`oklch(0.78 0.18 ${hue})`}
+                    strokeWidth="0.7"
+                />
+                <circle
+                    cx={rect.x + rect.w / 2}
+                    cy={rect.y + rect.h / 2}
+                    r="0.9"
+                    fill={`oklch(0.85 0.18 ${hue})`}
                 />
             </svg>
             <div className="pkg-thumb-overlay">
