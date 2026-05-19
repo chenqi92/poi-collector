@@ -107,69 +107,88 @@ function MapClickClearer({ onClickEmpty }: { onClickEmpty: () => void }) {
     return null
 }
 
+interface ExportPOI extends POI {
+    phone?: string
+    region_code?: string
+}
+
 export function BrowseView() {
     const [dataType, setDataType] = useState<DataType>('poi')
     const [view, setView] = useState<ViewMode>('split')
     const [query, setQuery] = useState('')
     const [activePf, setActivePf] = useState<Set<PlatformKey>>(new Set(PLATFORMS))
     const [bounds, setBounds] = useState<Bounds | null>(null)
-    const [pois, setPois] = useState<POI[]>([])
-    const [buoys, setBuoys] = useState<BuoyInfo[]>([])
-    const [loading, setLoading] = useState(false)
+    // Full dataset — drives the list pane (paginated locally).
+    const [allPois, setAllPois] = useState<POI[]>([])
+    const [allBuoys, setAllBuoys] = useState<BuoyInfo[]>([])
+    const [allLoading, setAllLoading] = useState(false)
+    // Viewport dataset — drives map markers.
+    const [viewportPois, setViewportPois] = useState<POI[]>([])
+    const [viewportBuoys, setViewportBuoys] = useState<BuoyInfo[]>([])
     const [activeId, setActiveId] = useState<string | number | null>(null)
     const [page, setPage] = useState(1)
     const [initialFit, setInitialFit] = useState<Bounds | null>(null)
     const poiSeqRef = useRef(0)
     const buoySeqRef = useRef(0)
+    const allPoiSeqRef = useRef(0)
+    const allBuoySeqRef = useRef(0)
 
-    // One-shot: probe for the data extent so the map opens centered on the
-    // user's POIs instead of a hard-coded Shanghai default.
+    // Load the full dataset once per dataType.  The list pane shows this,
+    // independent of map bounds — fixes "list view sometimes shows 0".
     useEffect(() => {
-        let cancelled = false
+        if (dataType !== 'poi') return
+        const seq = ++allPoiSeqRef.current
+        setAllLoading(true)
         ;(async () => {
             try {
-                if (dataType === 'poi') {
-                    const probe = await invoke<POI[]>('search_poi_by_bounds', {
-                        south: 15, west: 70, north: 55, east: 140,
-                        query: null, platform: null,
-                    })
-                    if (cancelled || probe.length === 0) return
-                    let s = 90, w = 180, n = -90, e = -180
-                    for (const p of probe) {
-                        if (p.lat < s) s = p.lat
-                        if (p.lat > n) n = p.lat
-                        if (p.lon < w) w = p.lon
-                        if (p.lon > e) e = p.lon
-                    }
-                    setInitialFit({ south: s, west: w, north: n, east: e })
-                } else {
-                    const probe = await invoke<BuoyInfo[]>('search_buoys_by_bounds', {
-                        south: 15, west: 70, north: 55, east: 140,
-                    })
-                    if (cancelled) return
-                    let s = 90, w = 180, n = -90, e = -180, any = false
-                    for (const b of probe) {
-                        if (b.lat_84 == null || b.lon_84 == null) continue
-                        any = true
-                        if (b.lat_84 < s) s = b.lat_84
-                        if (b.lat_84 > n) n = b.lat_84
-                        if (b.lon_84 < w) w = b.lon_84
-                        if (b.lon_84 > e) e = b.lon_84
-                    }
-                    if (any) setInitialFit({ south: s, west: w, north: n, east: e })
-                }
-            } catch { /* ignore */ }
+                const data = await invoke<ExportPOI[]>('get_all_poi_data', { platform: null })
+                if (seq !== allPoiSeqRef.current) return
+                setAllPois(data.map(p => ({
+                    id: p.id, name: p.name, lon: p.lon, lat: p.lat,
+                    address: p.address, category: p.category, platform: p.platform,
+                })))
+            } catch (e) { console.error(e) }
+            finally { if (seq === allPoiSeqRef.current) setAllLoading(false) }
         })()
-        return () => { cancelled = true }
     }, [dataType])
 
-    // Debounced reload on bounds / type / query / platforms
     useEffect(() => {
-        if (!bounds) return
+        if (dataType !== 'buoy') return
+        const seq = ++allBuoySeqRef.current
+        setAllLoading(true)
+        ;(async () => {
+            try {
+                const data = await invoke<BuoyInfo[]>('chart_get_all_buoys')
+                if (seq === allBuoySeqRef.current) setAllBuoys(data)
+            } catch (e) { console.error(e) }
+            finally { if (seq === allBuoySeqRef.current) setAllLoading(false) }
+        })()
+    }, [dataType])
+
+    // Compute initial map fit from the full dataset (no extra query).
+    useEffect(() => {
+        const src = dataType === 'poi'
+            ? allPois.map(p => [p.lat, p.lon] as [number, number])
+            : allBuoys
+                .filter(b => b.lat_84 != null && b.lon_84 != null)
+                .map(b => [b.lat_84!, b.lon_84!] as [number, number])
+        if (src.length === 0) return
+        let s = 90, w = 180, n = -90, e = -180
+        for (const [la, lo] of src) {
+            if (la < s) s = la
+            if (la > n) n = la
+            if (lo < w) w = lo
+            if (lo > e) e = lo
+        }
+        setInitialFit({ south: s, west: w, north: n, east: e })
+    }, [dataType, allPois, allBuoys])
+
+    // Viewport reload — only when a map is actually shown.
+    useEffect(() => {
+        if (!bounds || view === 'list') return
         if (dataType === 'poi') {
             const seq = ++poiSeqRef.current
             const t = setTimeout(async () => {
-                setLoading(true)
                 try {
                     const data = await invoke<POI[]>('search_poi_by_bounds', {
                         south: bounds.south,
@@ -177,20 +196,17 @@ export function BrowseView() {
                         north: bounds.north,
                         east: bounds.east,
                         query: query.trim() || null,
-                        platform: activePf.size === PLATFORMS.length ? null : Array.from(activePf)[0] ?? null,
+                        // Always fetch all platforms, filter client-side.
+                        // Previously passed only the first selected platform when 1<n<all, hiding records.
+                        platform: null,
                     })
-                    if (seq === poiSeqRef.current) {
-                        setPois(data)
-                        setPage(1)
-                    }
+                    if (seq === poiSeqRef.current) setViewportPois(data)
                 } catch (e) { console.error(e) }
-                finally { if (seq === poiSeqRef.current) setLoading(false) }
-            }, 400)
+            }, 350)
             return () => clearTimeout(t)
         } else {
             const seq = ++buoySeqRef.current
             ;(async () => {
-                setLoading(true)
                 try {
                     const data = await invoke<BuoyInfo[]>('search_buoys_by_bounds', {
                         south: bounds.south,
@@ -198,15 +214,11 @@ export function BrowseView() {
                         north: bounds.north,
                         east: bounds.east,
                     })
-                    if (seq === buoySeqRef.current) {
-                        setBuoys(data)
-                        setPage(1)
-                    }
+                    if (seq === buoySeqRef.current) setViewportBuoys(data)
                 } catch (e) { console.error(e) }
-                finally { if (seq === buoySeqRef.current) setLoading(false) }
             })()
         }
-    }, [bounds, query, activePf, dataType])
+    }, [bounds, query, dataType, view])
 
     const togglePf = (p: PlatformKey) => {
         setActivePf(s => {
@@ -216,21 +228,22 @@ export function BrowseView() {
         })
     }
 
+    // List pane filtering — uses the full dataset.
     const filteredPois = useMemo(() => {
         const q = query.trim().toLowerCase()
-        const list = pois.filter(p => activePf.has(p.platform as PlatformKey))
+        const list = allPois.filter(p => activePf.has(p.platform as PlatformKey))
         if (!q) return list
         return list.filter(p =>
             p.name.toLowerCase().includes(q) ||
             (p.address?.toLowerCase().includes(q) ?? false) ||
             (p.category?.toLowerCase().includes(q) ?? false)
         )
-    }, [pois, query, activePf])
+    }, [allPois, query, activePf])
 
     const filteredBuoys = useMemo(() => {
         const q = query.trim().toLowerCase()
-        if (!q) return buoys
-        return buoys.filter(b =>
+        if (!q) return allBuoys
+        return allBuoys.filter(b =>
             (b.name?.toLowerCase().includes(q) ?? false) ||
             (b.waterway?.toLowerCase().includes(q) ?? false) ||
             (b.region?.toLowerCase().includes(q) ?? false) ||
@@ -238,7 +251,32 @@ export function BrowseView() {
             (b.shape?.toLowerCase().includes(q) ?? false) ||
             (b.buoy_type?.toLowerCase().includes(q) ?? false)
         )
-    }, [buoys, query])
+    }, [allBuoys, query])
+
+    // Marker dataset — viewport-filtered + same platform / text filters.
+    const mapPois = useMemo(() => {
+        const q = query.trim().toLowerCase()
+        const list = viewportPois.filter(p => activePf.has(p.platform as PlatformKey))
+        if (!q) return list
+        return list.filter(p =>
+            p.name.toLowerCase().includes(q) ||
+            (p.address?.toLowerCase().includes(q) ?? false) ||
+            (p.category?.toLowerCase().includes(q) ?? false)
+        )
+    }, [viewportPois, query, activePf])
+
+    const mapBuoys = useMemo(() => {
+        const q = query.trim().toLowerCase()
+        if (!q) return viewportBuoys
+        return viewportBuoys.filter(b =>
+            (b.name?.toLowerCase().includes(q) ?? false) ||
+            (b.waterway?.toLowerCase().includes(q) ?? false) ||
+            (b.region?.toLowerCase().includes(q) ?? false)
+        )
+    }, [viewportBuoys, query])
+
+    // Reset page when filters change.
+    useEffect(() => { setPage(1) }, [query, activePf, dataType])
 
     const totalItems = dataType === 'poi' ? filteredPois.length : filteredBuoys.length
     const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
@@ -268,11 +306,11 @@ export function BrowseView() {
     const viewportByPlatform = useMemo(() => {
         const out: Record<string, number> = {}
         for (const pf of PLATFORMS) out[pf] = 0
-        for (const p of filteredPois) {
+        for (const p of mapPois) {
             if (out[p.platform] != null) out[p.platform]!++
         }
         return out
-    }, [filteredPois])
+    }, [mapPois])
 
     const showMap = view !== 'list'
     const showList = view !== 'map'
@@ -325,9 +363,18 @@ export function BrowseView() {
                 )}
 
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {loading && (
-                        <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
-                            <GcIcon name="refresh" size={11} /> 加载中...
+                    {allLoading && (
+                        <span
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                fontSize: 11.5,
+                                color: 'var(--text-3)',
+                            }}
+                        >
+                            <GcIcon name="refresh" size={11} />
+                            加载中
                         </span>
                     )}
                     <div className="seg">
@@ -390,7 +437,7 @@ export function BrowseView() {
                         <PanToWhenActive point={activePoint} />
                         <MapResizeOnView trigger={view} />
                         <FitToBounds bounds={initialFit} />
-                        {dataType === 'poi' && filteredPois.map((p, i) => (
+                        {dataType === 'poi' && mapPois.map((p, i) => (
                             <Marker
                                 key={p.id}
                                 position={[p.lat, p.lon]}
@@ -398,7 +445,7 @@ export function BrowseView() {
                                 eventHandlers={{ click: () => setActiveId(p.id) }}
                             />
                         ))}
-                        {dataType === 'buoy' && filteredBuoys.map((b, i) => {
+                        {dataType === 'buoy' && mapBuoys.map((b, i) => {
                             if (b.lat_84 == null || b.lon_84 == null) return null
                             return (
                                 <Marker
@@ -412,7 +459,7 @@ export function BrowseView() {
                     </MapContainer>
 
                     {/* Viewport platform legend */}
-                    {dataType === 'poi' && filteredPois.length > 0 && (
+                    {dataType === 'poi' && mapPois.length > 0 && (
                         <div
                             style={{
                                 position: 'absolute', bottom: 12, left: 12, zIndex: 800,
@@ -470,14 +517,13 @@ export function BrowseView() {
                             <span className="count">{totalItems.toLocaleString()}</span>
                             <span>条记录</span>
                             <span style={{ flex: 1 }} />
-                            {loading && <span style={{ color: 'var(--text-4)' }}>loading...</span>}
                         </div>
                         <div className="dh-list">
-                            {totalItems === 0 && !loading && (
+                            {totalItems === 0 && !allLoading && (
                                 <div className="empty" style={{ padding: '36px 16px' }}>
                                     <div className="empty-icon"><GcIcon name="search" size={20} /></div>
                                     <h4>没有匹配的{dataType === 'poi' ? ' POI ' : '航标'}</h4>
-                                    <p>移动地图视野，或调整搜索条件。</p>
+                                    <p>{query.trim() ? '调整搜索关键词试试。' : '当前还没有采集到任何数据。'}</p>
                                 </div>
                             )}
 
