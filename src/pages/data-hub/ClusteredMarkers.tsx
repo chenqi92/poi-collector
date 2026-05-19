@@ -12,6 +12,8 @@ export interface ClusterPoint {
     /** Platform tag drives marker color via CSS class .pf-<platform>. */
     platform: string
     label?: string | number
+    /** HTML 字符串；非空时点击 marker 会弹出详情气泡。 */
+    popupHtml?: string
 }
 
 interface ClusteredMarkersProps {
@@ -106,11 +108,18 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
                     existing.setIcon(buildIcon(p.label ?? i + 1, p.platform, isActive))
                     ;(existing.options as { _active?: boolean })._active = isActive
                 }
+                // 弹窗 HTML 可能因为搜索/翻页变了，按需更新
+                if (p.popupHtml && existing.getPopup()?.getContent() !== p.popupHtml) {
+                    existing.bindPopup(p.popupHtml, { maxWidth: 320, autoPan: false })
+                }
             } else {
                 const marker = L.marker([p.lat, p.lon], {
                     icon: buildIcon(p.label ?? i + 1, p.platform, isActive),
                 })
                 ;(marker.options as { _active?: boolean })._active = isActive
+                if (p.popupHtml) {
+                    marker.bindPopup(p.popupHtml, { maxWidth: 320, autoPan: false })
+                }
                 marker.on('click', () => onSelectRef.current(p.key))
                 markersRef.current.set(p.key, marker)
                 toAdd.push(marker)

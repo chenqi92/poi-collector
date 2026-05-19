@@ -75,8 +75,16 @@ function FitToBounds({ bounds }: { bounds: Bounds | null }) {
 
 function PanToWhenActive({ point }: { point: [number, number] | null }) {
     const map = useMap()
+    const lastRef = useRef<[number, number] | null>(null)
     useEffect(() => {
-        if (point) map.panTo(point, { animate: true })
+        if (!point) {
+            lastRef.current = null
+            return
+        }
+        const last = lastRef.current
+        if (last && last[0] === point[0] && last[1] === point[1]) return
+        lastRef.current = point
+        map.panTo(point, { animate: true })
     }, [map, point])
     return null
 }
@@ -87,6 +95,51 @@ function MapClickClearer({ onClickEmpty }: { onClickEmpty: () => void }) {
 }
 
 const MAP_MARKER_CAP = 1500
+
+const PLATFORM_LABEL_CN: Record<string, string> = {
+    tianditu: '天地图',
+    amap: '高德',
+    baidu: '百度',
+    osm: 'OSM',
+    google: '谷歌',
+    tencent: '腾讯',
+    cjhd: '长江航道图',
+}
+
+function esc(s: string | null | undefined): string {
+    if (s == null) return ''
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+}
+
+function buildPoiPopup(p: POI): string {
+    const pfLabel = PLATFORM_LABEL_CN[p.platform] ?? p.platform
+    const rows: string[] = []
+    if (p.address) rows.push(`<div class="pop-row"><span class="pop-k">地址</span><span class="pop-v">${esc(p.address)}</span></div>`)
+    if (p.category) rows.push(`<div class="pop-row"><span class="pop-k">类别</span><span class="pop-v">${esc(p.category)}</span></div>`)
+    if (p.phone) rows.push(`<div class="pop-row"><span class="pop-k">电话</span><span class="pop-v mono">${esc(p.phone)}</span></div>`)
+    rows.push(`<div class="pop-row"><span class="pop-k">坐标</span><span class="pop-v mono">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</span></div>`)
+    rows.push(`<div class="pop-row"><span class="pop-k">来源</span><span class="pop-v">${esc(pfLabel)} · #${p.id}</span></div>`)
+    return `<div class="poi-pop"><div class="pop-title">${esc(p.name) || '(未命名)'}</div>${rows.join('')}</div>`
+}
+
+function buildBuoyPopup(b: BuoyInfo): string {
+    const rows: string[] = []
+    if (b.waterway) rows.push(`<div class="pop-row"><span class="pop-k">航道</span><span class="pop-v">${esc(b.waterway)}</span></div>`)
+    if (b.region) rows.push(`<div class="pop-row"><span class="pop-k">地区</span><span class="pop-v">${esc(b.region)}</span></div>`)
+    if (b.shape) rows.push(`<div class="pop-row"><span class="pop-k">形状</span><span class="pop-v">${esc(b.shape)}</span></div>`)
+    if (b.color) rows.push(`<div class="pop-row"><span class="pop-k">颜色</span><span class="pop-v">${esc(b.color)}</span></div>`)
+    if (b.light_info) rows.push(`<div class="pop-row"><span class="pop-k">灯质</span><span class="pop-v">${esc(b.light_info)}</span></div>`)
+    if (b.buoy_type) rows.push(`<div class="pop-row"><span class="pop-k">类型</span><span class="pop-v">${esc(b.buoy_type)}</span></div>`)
+    if (b.lat_84 != null && b.lon_84 != null) {
+        rows.push(`<div class="pop-row"><span class="pop-k">坐标</span><span class="pop-v mono">${b.lat_84.toFixed(5)}, ${b.lon_84.toFixed(5)}</span></div>`)
+    }
+    rows.push(`<div class="pop-row"><span class="pop-k">编号</span><span class="pop-v mono">${esc(b.id)}</span></div>`)
+    return `<div class="poi-pop"><div class="pop-title">${esc(b.name) || b.id}</div>${rows.join('')}</div>`
+}
 
 interface PoiRowProps {
     poi: POI
@@ -273,13 +326,23 @@ export function BrowseView() {
 
     const poiClusterPoints = useMemo<ClusterPoint[]>(
         () => mapPois.map((p, i) => ({
-            key: p.id, lat: p.lat, lon: p.lon, platform: p.platform, label: i + 1,
+            key: p.id,
+            lat: p.lat,
+            lon: p.lon,
+            platform: p.platform,
+            label: i + 1,
+            popupHtml: buildPoiPopup(p),
         })),
         [mapPois]
     )
     const buoyClusterPoints = useMemo<ClusterPoint[]>(
         () => mapBuoys.map((b, i) => ({
-            key: b.id, lat: b.lat_84!, lon: b.lon_84!, platform: 'osm', label: i + 1,
+            key: b.id,
+            lat: b.lat_84!,
+            lon: b.lon_84!,
+            platform: 'osm',
+            label: i + 1,
+            popupHtml: buildBuoyPopup(b),
         })),
         [mapBuoys]
     )
