@@ -35,8 +35,14 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
     const markersRef = useRef<Map<string | number, L.Marker>>(new Map())
     const onSelectRef = useRef(onSelect)
     onSelectRef.current = onSelect
+    const pendingRef = useRef<{
+        points: ClusterPoint[]
+        activeKey: string | number | null
+    } | null>(null)
+    const movingRef = useRef(false)
 
-    // Create the cluster group once.
+    // Create the cluster group once.  Also wire pan/zoom suspension so heavy
+    // diff work is skipped while the user is actively dragging or zooming.
     useEffect(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const group = (L as any).markerClusterGroup({
@@ -47,31 +53,54 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
             spiderfyOnMaxZoom: true,
             disableClusteringAtZoom: 17,
             maxClusterRadius: 60,
+            animate: false,
+            animateAddingMarkers: false,
+            removeOutsideVisibleBounds: true,
         }) as L.MarkerClusterGroup
         groupRef.current = group
         map.addLayer(group)
+
+        const onMoveStart = () => { movingRef.current = true }
+        const onMoveEnd = () => {
+            movingRef.current = false
+            if (pendingRef.current) {
+                const { points: p, activeKey: a } = pendingRef.current
+                pendingRef.current = null
+                applyDiff(p, a)
+            }
+        }
+        map.on('movestart', onMoveStart)
+        map.on('zoomstart', onMoveStart)
+        map.on('moveend', onMoveEnd)
+        map.on('zoomend', onMoveEnd)
+
         return () => {
+            map.off('movestart', onMoveStart)
+            map.off('zoomstart', onMoveStart)
+            map.off('moveend', onMoveEnd)
+            map.off('zoomend', onMoveEnd)
             map.removeLayer(group)
             groupRef.current = null
             markersRef.current.clear()
+            pendingRef.current = null
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [map])
 
-    // Diff markers when points or activeKey changes.
-    useEffect(() => {
+    // The diff routine — extracted so moveend can replay queued updates.
+    const applyDiff = (pts: ClusterPoint[], active: string | number | null) => {
         const group = groupRef.current
         if (!group) return
 
         const incomingKeys = new Set<string | number>()
         const toAdd: L.Marker[] = []
 
-        for (let i = 0; i < points.length; i++) {
-            const p = points[i]
+        for (let i = 0; i < pts.length; i++) {
+            const p = pts[i]
             incomingKeys.add(p.key)
             const existing = markersRef.current.get(p.key)
-            const isActive = p.key === activeKey
+            const isActive = p.key === active
             if (existing) {
-                // Only swap icon when active state flips — avoids DOM churn.
                 const wasActive = (existing.options as { _active?: boolean })._active === true
                 if (wasActive !== isActive) {
                     existing.setIcon(buildIcon(p.label ?? i + 1, p.platform, isActive))
@@ -88,7 +117,6 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
             }
         }
 
-        // Remove markers that are no longer in the set.
         const toRemove: L.Marker[] = []
         markersRef.current.forEach((m, k) => {
             if (!incomingKeys.has(k)) {
@@ -99,6 +127,16 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
 
         if (toRemove.length > 0) group.removeLayers(toRemove)
         if (toAdd.length > 0) group.addLayers(toAdd)
+    }
+
+    // Apply (or queue) diff when inputs change.
+    useEffect(() => {
+        if (movingRef.current) {
+            pendingRef.current = { points, activeKey }
+            return
+        }
+        applyDiff(points, activeKey)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [points, activeKey])
 
     return null

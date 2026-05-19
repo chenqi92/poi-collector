@@ -25,6 +25,8 @@ export interface FullPOI {
     category: string
     platform: string
     region_code: string
+    /** Lowercased "name|address|category" concatenation for cheap substring search. */
+    _search: string
 }
 
 export interface FullBuoy {
@@ -38,10 +40,19 @@ export interface FullBuoy {
     shape: string | null
     light_info: string | null
     region: string | null
+    _search: string
 }
 
-interface PoiBatchPayload { items: FullPOI[]; done: boolean; total: number }
-interface BuoyBatchPayload { items: FullBuoy[]; done: boolean; total: number }
+function poiSearchKey(p: { name?: string; address?: string; category?: string }): string {
+    return `${p.name ?? ''}|${p.address ?? ''}|${p.category ?? ''}`.toLowerCase()
+}
+
+function buoySearchKey(b: {
+    id?: string; name?: string | null; waterway?: string | null;
+    region?: string | null; shape?: string | null; buoy_type?: string | null
+}): string {
+    return `${b.id ?? ''}|${b.name ?? ''}|${b.waterway ?? ''}|${b.region ?? ''}|${b.shape ?? ''}|${b.buoy_type ?? ''}`.toLowerCase()
+}
 
 interface DataSlice<T> {
     items: T[]
@@ -60,8 +71,13 @@ interface PoiDataContextValue {
 
 const PoiDataContext = createContext<PoiDataContextValue | null>(null)
 
-function useStreamingSlice<TBatch extends { items: TItem[]; done: boolean; total: number }, TItem>(
+/** ~250ms between commits during streaming — coarser than the 80ms used before,
+ *  which means 4-5 React renders for 23k rows instead of 15-20. */
+const FLUSH_INTERVAL_MS = 250
+
+function useStreamingSlice<TRaw, TItem extends { _search: string }>(
     command: string,
+    enrich: (raw: TRaw) => TItem,
 ): DataSlice<TItem> {
     const [items, setItems] = useState<TItem[]>([])
     const [loaded, setLoaded] = useState(0)
@@ -78,39 +94,55 @@ function useStreamingSlice<TBatch extends { items: TItem[]; done: boolean; total
         const buffer: TItem[] = []
         let lastFlush = performance.now()
 
-        const channel = new Channel<TBatch>()
+        const flush = (finalize: boolean) => {
+            const snapshot = buffer.slice()
+            setItems(snapshot)
+            setLoaded(snapshot.length)
+            if (finalize) setLoading(false)
+        }
+
+        const channel = new Channel<{ items: TRaw[]; done: boolean; total: number }>()
         channel.onmessage = (batch) => {
             if (seq !== seqRef.current) return
-            if (batch.items.length > 0) buffer.push(...batch.items)
-            // Coalesce React updates: flush at most every ~80ms, or at end.
+            for (const raw of batch.items) buffer.push(enrich(raw))
             const now = performance.now()
-            if (batch.done || now - lastFlush > 80) {
-                lastFlush = now
-                const snapshot = buffer.slice()
-                setItems(snapshot)
-                setLoaded(snapshot.length)
+            if (batch.done) {
                 if (batch.total > 0) setTotal(batch.total)
-                if (batch.done) setLoading(false)
+                flush(true)
+            } else if (now - lastFlush > FLUSH_INTERVAL_MS) {
+                lastFlush = now
+                if (batch.total > 0) setTotal(batch.total)
+                flush(false)
             }
         }
 
-        invoke(command, { onEvent: channel }).catch((e) => {
+        invoke(command, { onEvent: channel, batchSize: 5000 }).catch((e) => {
             if (seq !== seqRef.current) return
             setError(String(e))
             setLoading(false)
         })
 
         return () => { /* future calls bump seq; old batches ignored above */ }
-    }, [command, tick])
+    }, [command, tick, enrich])
 
     const refresh = useCallback(() => setTick(t => t + 1), [])
 
     return { items, loaded, total, loading, error, refresh }
 }
 
+const enrichPoi = (raw: Omit<FullPOI, '_search'>): FullPOI => ({
+    ...raw,
+    _search: poiSearchKey(raw),
+})
+
+const enrichBuoy = (raw: Omit<FullBuoy, '_search'>): FullBuoy => ({
+    ...raw,
+    _search: buoySearchKey(raw),
+})
+
 export function PoiDataProvider({ children }: { children: ReactNode }) {
-    const poi = useStreamingSlice<PoiBatchPayload, FullPOI>('stream_all_poi')
-    const buoy = useStreamingSlice<BuoyBatchPayload, FullBuoy>('chart_stream_all_buoys')
+    const poi = useStreamingSlice<Omit<FullPOI, '_search'>, FullPOI>('stream_all_poi', enrichPoi)
+    const buoy = useStreamingSlice<Omit<FullBuoy, '_search'>, FullBuoy>('chart_stream_all_buoys', enrichBuoy)
 
     const value = useMemo<PoiDataContextValue>(() => ({ poi, buoy }), [poi, buoy])
 

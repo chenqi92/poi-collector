@@ -670,7 +670,7 @@ pub fn stream_all_poi(
         .map(|s| s.as_str());
     let all = db.get_all_poi(platform_filter).map_err(|e| e.to_string())?;
     let total = all.len();
-    let bs = batch_size.unwrap_or(1500).max(100);
+    let bs = batch_size.unwrap_or(5000).max(500);
 
     if total == 0 {
         on_event

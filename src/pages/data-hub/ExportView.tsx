@@ -233,18 +233,14 @@ export function ExportView() {
         let data = allPois
         if (selected.size > 0) data = data.filter(p => matchCodes.has(p.region_code))
         const q = search.trim().toLowerCase()
-        if (q) data = data.filter(p => p.name.toLowerCase().includes(q) || (p.address ?? '').toLowerCase().includes(q))
+        if (q) data = data.filter(p => p._search.includes(q))
         return data
     }, [allPois, matchCodes, selected, search])
 
     const filteredBuoys = useMemo(() => {
         const q = search.trim().toLowerCase()
         if (!q) return allBuoys
-        return allBuoys.filter(b =>
-            (b.name?.toLowerCase().includes(q) ?? false) ||
-            (b.waterway?.toLowerCase().includes(q) ?? false) ||
-            (b.region?.toLowerCase().includes(q) ?? false)
-        )
+        return allBuoys.filter(b => b._search.includes(q))
     }, [allBuoys, search])
 
     const fieldsCur = dataType === 'poi' ? poiFields : buoyFields

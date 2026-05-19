@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
@@ -89,12 +89,78 @@ function MapClickClearer({ onClickEmpty }: { onClickEmpty: () => void }) {
 
 const MAP_MARKER_CAP = 1500
 
+interface PoiRowProps {
+    poi: POI
+    index: number
+    active: boolean
+    onSelect: (id: number) => void
+}
+
+const PoiListRow = memo(function PoiListRow({ poi: p, index, active, onSelect }: PoiRowProps) {
+    return (
+        <div
+            data-poi-id={p.id}
+            className={`poi-row pf-${p.platform}${active ? ' active' : ''}`}
+            onClick={() => onSelect(p.id)}
+        >
+            <div className="poi-marker">{index}</div>
+            <div className="poi-main">
+                <div className="poi-name">{p.name}</div>
+                {p.address && <div className="poi-addr">{p.address}</div>}
+                <div className="poi-foot">
+                    <PlatformBadge name={p.platform} />
+                    {p.category && <><span>·</span><span>{p.category}</span></>}
+                    <span>·</span>
+                    <span>{p.lat.toFixed(4)}, {p.lon.toFixed(4)}</span>
+                </div>
+            </div>
+        </div>
+    )
+})
+
+interface BuoyRowProps {
+    buoy: BuoyInfo
+    index: number
+    active: boolean
+    onSelect: (id: string) => void
+}
+
+const BuoyListRow = memo(function BuoyListRow({ buoy: b, index, active, onSelect }: BuoyRowProps) {
+    return (
+        <div
+            data-poi-id={b.id}
+            className={`poi-row pf-osm${active ? ' active' : ''}`}
+            onClick={() => onSelect(b.id)}
+        >
+            <div className="poi-marker">{index}</div>
+            <div className="poi-main">
+                <div className="poi-name">{b.name || b.id}</div>
+                {(b.waterway || b.region) && (
+                    <div className="poi-addr">
+                        {[b.waterway, b.region].filter(Boolean).join(' · ')}
+                    </div>
+                )}
+                <div className="poi-foot">
+                    <span className="type-badge t-aton">航标</span>
+                    {b.shape && <><span>·</span><span>{b.shape}</span></>}
+                    {b.lat_84 != null && b.lon_84 != null && (
+                        <><span>·</span><span>{b.lat_84.toFixed(4)}, {b.lon_84.toFixed(4)}</span></>
+                    )}
+                </div>
+            </div>
+        </div>
+    )
+})
+
 export function BrowseView() {
     const { poi, buoy } = usePoiData()
     const [dataType, setDataType] = useState<DataType>('poi')
     const [view, setView] = useState<ViewMode>('split')
     const [query, setQuery] = useState('')
     const [debouncedQuery, setDebouncedQuery] = useState('')
+    // useDeferredValue lets typing stay snappy: query updates UI immediately,
+    // but the 23k filter only re-runs with this deferred value at React's leisure.
+    const deferredQuery = useDeferredValue(debouncedQuery)
     const [activePf, setActivePf] = useState<Set<PlatformKey>>(new Set(PLATFORMS))
     const [bounds, setBounds] = useState<Bounds | null>(null)
     const [activeId, setActiveId] = useState<string | number | null>(null)
@@ -147,29 +213,19 @@ export function BrowseView() {
     }
 
     // List pane filtering — by query + platform, no bounds.
+    // Uses the pre-lowercased `_search` field built once at stream time.
     const filteredPois = useMemo(() => {
-        const q = debouncedQuery
+        const q = deferredQuery
         const list = allPois.filter(p => activePf.has(p.platform as PlatformKey))
         if (!q) return list
-        return list.filter(p =>
-            p.name.toLowerCase().includes(q) ||
-            (p.address?.toLowerCase().includes(q) ?? false) ||
-            (p.category?.toLowerCase().includes(q) ?? false)
-        )
-    }, [allPois, debouncedQuery, activePf])
+        return list.filter(p => p._search.includes(q))
+    }, [allPois, deferredQuery, activePf])
 
     const filteredBuoys = useMemo(() => {
-        const q = debouncedQuery
+        const q = deferredQuery
         if (!q) return allBuoys
-        return allBuoys.filter(b =>
-            (b.name?.toLowerCase().includes(q) ?? false) ||
-            (b.waterway?.toLowerCase().includes(q) ?? false) ||
-            (b.region?.toLowerCase().includes(q) ?? false) ||
-            (b.id?.toLowerCase().includes(q) ?? false) ||
-            (b.shape?.toLowerCase().includes(q) ?? false) ||
-            (b.buoy_type?.toLowerCase().includes(q) ?? false)
-        )
-    }, [allBuoys, debouncedQuery])
+        return allBuoys.filter(b => b._search.includes(q))
+    }, [allBuoys, deferredQuery])
 
     // Map markers — filteredPois intersected with current viewport.
     // Capped so dense viewports stay smooth; cluster layer handles aggregation.
@@ -214,7 +270,11 @@ export function BrowseView() {
     )
 
     // Reset page when filters change.
-    useEffect(() => { setPage(1) }, [debouncedQuery, activePf, dataType])
+    useEffect(() => { setPage(1) }, [deferredQuery, activePf, dataType])
+
+    // Stable click handlers so memo rows don't re-render on every parent update.
+    const selectPoi = useCallback((id: number) => setActiveId(id), [])
+    const selectBuoy = useCallback((id: string) => setActiveId(id), [])
 
     const totalItems = dataType === 'poi' ? filteredPois.length : filteredBuoys.length
     const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
@@ -452,53 +512,23 @@ export function BrowseView() {
                             )}
 
                             {dataType === 'poi' && pagedPois.map((p, i) => (
-                                <div
+                                <PoiListRow
                                     key={p.id}
-                                    data-poi-id={p.id}
-                                    className={`poi-row pf-${p.platform}${p.id === activeId ? ' active' : ''}`}
-                                    onClick={() => setActiveId(p.id)}
-                                >
-                                    <div className="poi-marker">{pageStart + i + 1}</div>
-                                    <div className="poi-main">
-                                        <div className="poi-name">{p.name}</div>
-                                        {p.address && <div className="poi-addr">{p.address}</div>}
-                                        <div className="poi-foot">
-                                            <PlatformBadge name={p.platform} />
-                                            {p.category && <><span>·</span><span>{p.category}</span></>}
-                                            <span>·</span>
-                                            <span>{p.lat.toFixed(4)}, {p.lon.toFixed(4)}</span>
-                                        </div>
-                                    </div>
-                                </div>
+                                    poi={p}
+                                    index={pageStart + i + 1}
+                                    active={p.id === activeId}
+                                    onSelect={selectPoi}
+                                />
                             ))}
 
                             {dataType === 'buoy' && pagedBuoys.map((b, i) => (
-                                <div
+                                <BuoyListRow
                                     key={b.id}
-                                    data-poi-id={b.id}
-                                    className={`poi-row pf-osm${b.id === activeId ? ' active' : ''}`}
-                                    onClick={() => setActiveId(b.id)}
-                                >
-                                    <div className="poi-marker">{pageStart + i + 1}</div>
-                                    <div className="poi-main">
-                                        <div className="poi-name">{b.name || b.id}</div>
-                                        {(b.waterway || b.region) && (
-                                            <div className="poi-addr">
-                                                {[b.waterway, b.region].filter(Boolean).join(' · ')}
-                                            </div>
-                                        )}
-                                        <div className="poi-foot">
-                                            <span className="type-badge t-aton">航标</span>
-                                            {b.shape && <><span>·</span><span>{b.shape}</span></>}
-                                            {b.lat_84 != null && b.lon_84 != null && (
-                                                <>
-                                                    <span>·</span>
-                                                    <span>{b.lat_84.toFixed(4)}, {b.lon_84.toFixed(4)}</span>
-                                                </>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
+                                    buoy={b}
+                                    index={pageStart + i + 1}
+                                    active={b.id === activeId}
+                                    onSelect={selectBuoy}
+                                />
                             ))}
                         </div>
                         {totalItems > 0 && (

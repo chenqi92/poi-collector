@@ -626,7 +626,7 @@ pub fn chart_stream_all_buoys(
     let db = ChartDatabase::new(&get_db_path())?;
     let all = db.get_all_buoys()?;
     let total = all.len();
-    let bs = batch_size.unwrap_or(1500).max(100);
+    let bs = batch_size.unwrap_or(5000).max(500);
 
     if total == 0 {
         on_event
