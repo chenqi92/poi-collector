@@ -1,5 +1,6 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, useMap, useMapEvents } from 'react-leaflet'
+import { CachedOsmTileLayer } from '@/components/CachedOsmTileLayer'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
 import { usePoiData, type FullPOI, type FullBuoy } from '@/lib/poiDataContext'
@@ -425,11 +426,7 @@ export function BrowseView() {
                         attributionControl
                         style={{ position: 'absolute', inset: 0 }}
                     >
-                        <TileLayer
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                            maxZoom={19}
-                            attribution="© OpenStreetMap"
-                        />
+                        <CachedOsmTileLayer />
                         <BoundsTracker onChange={setBounds} />
                         <MapClickClearer onClickEmpty={() => setActiveId(null)} />
                         <PanToWhenActive point={activePoint} />

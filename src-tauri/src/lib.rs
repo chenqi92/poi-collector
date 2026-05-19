@@ -5,6 +5,7 @@ mod config;
 mod coords;
 mod database;
 mod regions;
+mod tile_cache;
 mod tile_downloader;
 
 use chart_collector::commands as chart_commands;
@@ -95,6 +96,9 @@ pub fn run() {
             chart_commands::chart_get_buoy_stats,
             chart_commands::chart_get_all_buoys,
             chart_commands::chart_stream_all_buoys,
+            // OSM 瓦片本地缓存
+            tile_cache::cached_osm_tile,
+            tile_cache::clear_osm_tile_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
