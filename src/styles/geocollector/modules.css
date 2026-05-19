@@ -944,3 +944,20 @@
   font-variant-numeric: tabular-nums;
 }
 .pop-v.mono { font-family: var(--mono); font-size: 11px; }
+
+/* 航道图层级指示器（地图右下角） */
+.chart-zoom-pill {
+  pointer-events: auto;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font: 500 11.5px/1.5 var(--mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+.chart-zoom-pill .sep { color: rgba(255,255,255,0.45); }

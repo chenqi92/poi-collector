@@ -13,10 +13,17 @@ import {
     type BoundsArg as Bounds,
 } from '@/lib/searchHooks'
 import { ClusteredMarkers, type ClusterPoint } from './ClusteredMarkers'
+import {
+    ChartOverlayLayer,
+    FitChartBounds,
+    ChartZoomIndicator,
+    fetchCjhyTasks,
+    type CjhyTask,
+} from './ChartOverlay'
 import 'leaflet/dist/leaflet.css'
 
 type ViewMode = 'list' | 'split' | 'map'
-type DataType = 'poi' | 'buoy'
+type DataType = 'poi' | 'buoy' | 'chart'
 
 const PLATFORMS: PlatformKey[] = ['tianditu', 'amap', 'baidu', 'osm']
 
@@ -218,6 +225,31 @@ export function BrowseView() {
     const [initialFit, setInitialFit] = useState<Bounds | null>(null)
     const [, startTransition] = useTransition()
 
+    // 航道图（cjhy）相关状态
+    const [chartTasks, setChartTasks] = useState<CjhyTask[]>([])
+    const [chartTaskId, setChartTaskId] = useState<string>('')
+    const [chartLoaded, setChartLoaded] = useState(false)
+    useEffect(() => {
+        if (dataType !== 'chart' || chartLoaded) return
+        fetchCjhyTasks().then(list => {
+            setChartTasks(list)
+            setChartLoaded(true)
+            if (list.length > 0 && !chartTaskId) setChartTaskId(list[0].id)
+        }).catch(() => { setChartLoaded(true) })
+    }, [dataType, chartLoaded, chartTaskId])
+    const selectedChartTask = useMemo(
+        () => chartTasks.find(t => t.id === chartTaskId) ?? null,
+        [chartTasks, chartTaskId]
+    )
+    const chartBounds: [number, number, number, number] | undefined = selectedChartTask
+        ? [
+            selectedChartTask.bounds_south,
+            selectedChartTask.bounds_west,
+            selectedChartTask.bounds_north,
+            selectedChartTask.bounds_east,
+        ]
+        : undefined
+
     // Debounce search input — push into a transition so React can interrupt
     // the heavy filter / re-render if the user keeps typing.
     useEffect(() => {
@@ -379,8 +411,9 @@ export function BrowseView() {
         return out
     }, [mapPois])
 
-    const showMap = view !== 'list'
-    const showList = view !== 'map'
+    // 航道图模式只有地图视图（没有"行"语义可列）
+    const showMap = dataType === 'chart' || view !== 'list'
+    const showList = dataType !== 'chart' && view !== 'map'
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -412,6 +445,14 @@ export function BrowseView() {
                         <GcIcon name="navigation" size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} />
                         航标
                     </button>
+                    <button
+                        type="button"
+                        className={dataType === 'chart' ? 'active' : ''}
+                        onClick={() => { setDataType('chart'); setActiveId(null) }}
+                    >
+                        <GcIcon name="map" size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+                        航道图
+                    </button>
                 </div>
 
                 {dataType === 'poi' && (
@@ -426,6 +467,29 @@ export function BrowseView() {
                                 <PlatformBadge name={pf} />
                             </label>
                         ))}
+                    </div>
+                )}
+
+                {dataType === 'chart' && (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 6 }}>
+                        {chartTasks.length === 0 ? (
+                            <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
+                                {chartLoaded ? '尚无下载的航道图任务，可在「新建采集」下载' : '正在加载...'}
+                            </span>
+                        ) : (
+                            <select
+                                className="select"
+                                value={chartTaskId}
+                                onChange={e => setChartTaskId(e.target.value)}
+                                style={{ width: 240, height: 26 }}
+                            >
+                                {chartTasks.map(t => (
+                                    <option key={t.id} value={t.id}>
+                                        {t.name}（{t.completed_tiles.toLocaleString()} 瓦片）
+                                    </option>
+                                ))}
+                            </select>
+                        )}
                     </div>
                 )}
 
@@ -499,12 +563,21 @@ export function BrowseView() {
                         <MapClickClearer onClickEmpty={() => setActiveId(null)} />
                         <PanToWhenActive point={activePoint} />
                         <MapResizeOnView trigger={view} />
-                        <FitToBounds bounds={initialFit} />
-                        <ClusteredMarkers
-                            points={dataType === 'poi' ? poiClusterPoints : buoyClusterPoints}
-                            activeKey={activeId}
-                            onSelect={setActiveId}
-                        />
+                        <FitToBounds bounds={dataType === 'chart' ? null : initialFit} />
+                        {dataType !== 'chart' && (
+                            <ClusteredMarkers
+                                points={dataType === 'poi' ? poiClusterPoints : buoyClusterPoints}
+                                activeKey={activeId}
+                                onSelect={setActiveId}
+                            />
+                        )}
+                        {dataType === 'chart' && selectedChartTask && (
+                            <>
+                                <ChartOverlayLayer basePath={selectedChartTask.output_path} visible={true} />
+                                <FitChartBounds bounds={chartBounds} />
+                                <ChartZoomIndicator />
+                            </>
+                        )}
                     </MapContainer>
 
                     {/* Viewport platform legend */}
