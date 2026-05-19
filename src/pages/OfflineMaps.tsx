@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import { save, open as openDialog } from '@tauri-apps/plugin-dialog'
@@ -80,77 +80,100 @@ function taskToPkg(t: TileTask): Pkg {
     }
 }
 
-// ──────── Thumbnail (SVG) ─────────────────────────────────
-// 缩略图按瓦片包真实经纬度范围投影到一个 100×60 的"全国底图"格子上，让卡片
-// 一眼看出大概位置，而不是画一个跟数据无关的装饰矩形。
-const CHINA_BBOX = { west: 73, east: 135, south: 18, north: 54 }
-
+// ──────── Thumbnail (mini live map) ───────────────────────
+// 用真实 OSM 瓦片背景 + 高亮选区，省去用户脑补"区域在哪儿"。
+// 每张卡懒挂载，只在 IntersectionObserver 触发时才初始化 Leaflet。
 function PkgThumb({ pkg }: { pkg: Pkg }) {
-    const hue = PLATFORM_THUMB_HUE[pkg.platform] ?? 224
+    const hostRef = useRef<HTMLDivElement | null>(null)
+    const mapRef = useRef<L.Map | null>(null)
+    const [visible, setVisible] = useState(false)
 
-    const rect = useMemo(() => {
+    useEffect(() => {
+        if (!hostRef.current) return
+        const io = new IntersectionObserver((entries) => {
+            for (const e of entries) {
+                if (e.isIntersecting) {
+                    setVisible(true)
+                    io.disconnect()
+                    break
+                }
+            }
+        }, { rootMargin: '120px' })
+        io.observe(hostRef.current)
+        return () => io.disconnect()
+    }, [])
+
+    useEffect(() => {
+        if (!visible || !hostRef.current || mapRef.current) return
         const { west, east, south, north } = pkg.bounds
-        const bw = CHINA_BBOX.east - CHINA_BBOX.west
-        const bh = CHINA_BBOX.north - CHINA_BBOX.south
-        const toX = (lon: number) => Math.max(0, Math.min(100, ((lon - CHINA_BBOX.west) / bw) * 100))
-        const toY = (lat: number) => Math.max(0, Math.min(60, ((CHINA_BBOX.north - lat) / bh) * 60))
-        const x1 = toX(west)
-        const x2 = toX(east)
-        const y1 = toY(north)
-        const y2 = toY(south)
-        const minSide = 3 // 太小的矩形看不到，加最小尺寸
-        let w = Math.max(minSide, x2 - x1)
-        let h = Math.max(minSide, y2 - y1)
-        let x = x1
-        let y = y1
-        if (x + w > 100) x = 100 - w
-        if (y + h > 60) y = 60 - h
-        return { x, y, w, h }
-    }, [pkg.bounds])
+        // 防御性：经纬度任一缺失就不画
+        if (!isFinite(west + east + south + north)) return
+
+        const map = L.map(hostRef.current, {
+            attributionControl: false,
+            zoomControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false,
+            boxZoom: false,
+            keyboard: false,
+            touchZoom: false,
+        })
+        mapRef.current = map
+
+        // 走 Rust 端缓存命令，不暴露原始网络层 OSM URL
+        const tileLayer = L.tileLayer('', { maxZoom: 19 })
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(tileLayer as any).createTile = function (
+            coords: L.Coords,
+            done: (err: Error | null, tile: HTMLImageElement) => void,
+        ) {
+            const img = document.createElement('img')
+            img.setAttribute('role', 'presentation')
+            img.alt = ''
+            invoke<string>('cached_osm_tile', { z: coords.z, x: coords.x, y: coords.y })
+                .then((b64) => {
+                    img.src = b64
+                        ? `data:image/png;base64,${b64}`
+                        : 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII='
+                    done(null, img)
+                })
+                .catch(() => done(null, img))
+            return img
+        }
+        tileLayer.addTo(map)
+
+        const llBounds = L.latLngBounds([south, west], [north, east])
+        map.fitBounds(llBounds, { padding: [16, 16], maxZoom: 8, animate: false })
+
+        // 用高亮矩形标出实际选区
+        L.rectangle(llBounds, {
+            color: 'oklch(0.78 0.16 200)',
+            weight: 2,
+            fill: true,
+            fillColor: 'oklch(0.78 0.16 200)',
+            fillOpacity: 0.18,
+            interactive: false,
+        }).addTo(map)
+
+        // 卡片尺寸初始化时可能还未稳定，下一帧 invalidate 一次
+        requestAnimationFrame(() => map.invalidateSize())
+
+        return () => {
+            map.remove()
+            mapRef.current = null
+        }
+    }, [visible, pkg.bounds])
 
     const tilesLabel = pkg.tiles >= 1e6
         ? `${(pkg.tiles / 1e6).toFixed(1)}M`
         : `${(pkg.tiles / 1e3).toFixed(0)}k`
 
+    const hue = PLATFORM_THUMB_HUE[pkg.platform] ?? 224
+
     return (
         <div className="pkg-thumb" style={{ background: `oklch(0.22 0.04 ${hue})` }}>
-            <svg viewBox="0 0 100 60" preserveAspectRatio="none">
-                <defs>
-                    <pattern id={`grid-${pkg.id}`} width="10" height="10" patternUnits="userSpaceOnUse">
-                        <path
-                            d="M 10 0 L 0 0 0 10"
-                            fill="none"
-                            stroke={`oklch(0.4 0.04 ${hue})`}
-                            strokeWidth="0.3"
-                        />
-                    </pattern>
-                </defs>
-                <rect width="100" height="60" fill={`url(#grid-${pkg.id})`} />
-                {/* 大致勾勒长江干流（参考线） */}
-                <path
-                    d="M 30 28 Q 45 27 55 30 T 80 33 T 95 33"
-                    fill="none"
-                    stroke={`oklch(0.55 0.10 ${hue})`}
-                    strokeWidth="0.6"
-                    opacity="0.55"
-                />
-                {/* 实际 bounds 投影 */}
-                <rect
-                    x={rect.x}
-                    y={rect.y}
-                    width={rect.w}
-                    height={rect.h}
-                    fill={`oklch(0.7 0.18 ${hue} / 0.28)`}
-                    stroke={`oklch(0.78 0.18 ${hue})`}
-                    strokeWidth="0.7"
-                />
-                <circle
-                    cx={rect.x + rect.w / 2}
-                    cy={rect.y + rect.h / 2}
-                    r="0.9"
-                    fill={`oklch(0.85 0.18 ${hue})`}
-                />
-            </svg>
+            <div ref={hostRef} className="pkg-thumb-map" />
             <div className="pkg-thumb-overlay">
                 <span className="mono">{tilesLabel}</span>
             </div>

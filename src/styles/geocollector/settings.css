@@ -270,6 +270,13 @@
   width: 100%; height: 100%;
   display: block;
 }
+.pkg-thumb-map {
+  position: absolute;
+  inset: 0;
+  background: oklch(0.18 0.02 220);
+}
+.pkg-thumb-map .leaflet-control-container { display: none; }
+.pkg-thumb-map .leaflet-pane { z-index: auto; }
 .pkg-thumb-overlay {
   position: absolute;
   bottom: 6px; right: 6px;
