@@ -508,32 +508,34 @@ export function BrowseView() {
                             加载中
                         </span>
                     )}
-                    <div className="seg">
-                        <button
-                            type="button"
-                            className={view === 'list' ? 'active' : ''}
-                            onClick={() => setView('list')}
-                            title="列表"
-                        >
-                            <GcIcon name="list" size={12} />
-                        </button>
-                        <button
-                            type="button"
-                            className={view === 'split' ? 'active' : ''}
-                            onClick={() => setView('split')}
-                            title="分屏"
-                        >
-                            <GcIcon name="layout" size={12} />
-                        </button>
-                        <button
-                            type="button"
-                            className={view === 'map' ? 'active' : ''}
-                            onClick={() => setView('map')}
-                            title="地图"
-                        >
-                            <GcIcon name="map" size={12} />
-                        </button>
-                    </div>
+                    {dataType !== 'chart' && (
+                        <div className="seg">
+                            <button
+                                type="button"
+                                className={view === 'list' ? 'active' : ''}
+                                onClick={() => setView('list')}
+                                title="列表"
+                            >
+                                <GcIcon name="list" size={12} />
+                            </button>
+                            <button
+                                type="button"
+                                className={view === 'split' ? 'active' : ''}
+                                onClick={() => setView('split')}
+                                title="分屏"
+                            >
+                                <GcIcon name="layout" size={12} />
+                            </button>
+                            <button
+                                type="button"
+                                className={view === 'map' ? 'active' : ''}
+                                onClick={() => setView('map')}
+                                title="地图"
+                            >
+                                <GcIcon name="map" size={12} />
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -542,9 +544,10 @@ export function BrowseView() {
                 className="dh-layout"
                 style={{
                     gridTemplateColumns:
-                        view === 'list' ? '1fr 0px' :
-                            view === 'map' ? '1fr 0px' :
-                                '1fr 380px',
+                        dataType === 'chart' ? '1fr 0px' :
+                            view === 'list' ? '1fr 0px' :
+                                view === 'map' ? '1fr 0px' :
+                                    '1fr 380px',
                 }}
             >
                 <div
