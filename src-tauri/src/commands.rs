@@ -649,6 +649,57 @@ pub fn get_all_poi_data(platform: Option<String>) -> Result<Vec<ExportPOI>, Stri
     db.get_all_poi(platform_filter).map_err(|e| e.to_string())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct PoiBatch {
+    pub items: Vec<ExportPOI>,
+    pub done: bool,
+    pub total: usize,
+}
+
+/// 流式推送全部 POI 数据。前端可一批一批渲染，避免一次性 JSON 解析 23k 条。
+#[tauri::command]
+pub fn stream_all_poi(
+    platform: Option<String>,
+    batch_size: Option<usize>,
+    on_event: tauri::ipc::Channel<PoiBatch>,
+) -> Result<(), String> {
+    let db = DB.lock().map_err(|e| e.to_string())?;
+    let platform_filter = platform
+        .as_ref()
+        .filter(|p| p.as_str() != "all")
+        .map(|s| s.as_str());
+    let all = db.get_all_poi(platform_filter).map_err(|e| e.to_string())?;
+    let total = all.len();
+    let bs = batch_size.unwrap_or(1500).max(100);
+
+    if total == 0 {
+        on_event
+            .send(PoiBatch {
+                items: Vec::new(),
+                done: true,
+                total: 0,
+            })
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let mut sent = 0usize;
+    let mut iter = all.into_iter();
+    while sent < total {
+        let chunk: Vec<ExportPOI> = (&mut iter).take(bs).collect();
+        let chunk_len = chunk.len();
+        sent += chunk_len;
+        on_event
+            .send(PoiBatch {
+                items: chunk,
+                done: sent >= total,
+                total,
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn export_poi_to_file(
     path: String,

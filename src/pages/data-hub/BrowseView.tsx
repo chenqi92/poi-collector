@@ -1,42 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
+import { usePoiData, type FullPOI, type FullBuoy } from '@/lib/poiDataContext'
 import 'leaflet/dist/leaflet.css'
 
 type ViewMode = 'list' | 'split' | 'map'
 type DataType = 'poi' | 'buoy'
 
-interface POI {
-    id: number
-    name: string
-    lon: number
-    lat: number
-    address?: string
-    category?: string
-    platform: string
-}
+type POI = FullPOI
+type BuoyInfo = FullBuoy
 
 interface Bounds {
     south: number
     west: number
     north: number
     east: number
-}
-
-interface BuoyInfo {
-    id: string
-    name: string | null
-    lon_84: number | null
-    lat_84: number | null
-    buoy_type: string | null
-    color: string | null
-    waterway: string | null
-    shape: string | null
-    light_info: string | null
-    region: string | null
 }
 
 const PLATFORMS: PlatformKey[] = ['tianditu', 'amap', 'baidu', 'osm']
@@ -55,6 +35,7 @@ function makeMarker(idx: number, platform: string, active: boolean) {
 function BoundsTracker({ onChange }: { onChange: (b: Bounds) => void }) {
     const map = useMap()
     useEffect(() => {
+        let timer: number | null = null
         const emit = () => {
             const b = map.getBounds()
             onChange({
@@ -64,9 +45,17 @@ function BoundsTracker({ onChange }: { onChange: (b: Bounds) => void }) {
                 east: b.getEast(),
             })
         }
+        const debouncedEmit = () => {
+            if (timer != null) window.clearTimeout(timer)
+            timer = window.setTimeout(emit, 120)
+        }
+        // First emit synchronous so the initial filter runs immediately.
         emit()
-        map.on('moveend zoomend', emit)
-        return () => { map.off('moveend zoomend', emit) }
+        map.on('moveend zoomend', debouncedEmit)
+        return () => {
+            map.off('moveend zoomend', debouncedEmit)
+            if (timer != null) window.clearTimeout(timer)
+        }
     }, [map, onChange])
     return null
 }
@@ -107,72 +96,40 @@ function MapClickClearer({ onClickEmpty }: { onClickEmpty: () => void }) {
     return null
 }
 
-interface ExportPOI extends POI {
-    phone?: string
-    region_code?: string
-}
+const MAP_MARKER_CAP = 1500
 
 export function BrowseView() {
+    const { poi, buoy } = usePoiData()
     const [dataType, setDataType] = useState<DataType>('poi')
     const [view, setView] = useState<ViewMode>('split')
     const [query, setQuery] = useState('')
+    const [debouncedQuery, setDebouncedQuery] = useState('')
     const [activePf, setActivePf] = useState<Set<PlatformKey>>(new Set(PLATFORMS))
     const [bounds, setBounds] = useState<Bounds | null>(null)
-    // Full dataset — drives the list pane (paginated locally).
-    const [allPois, setAllPois] = useState<POI[]>([])
-    const [allBuoys, setAllBuoys] = useState<BuoyInfo[]>([])
-    const [allLoading, setAllLoading] = useState(false)
-    // Viewport dataset — drives map markers.
-    const [viewportPois, setViewportPois] = useState<POI[]>([])
-    const [viewportBuoys, setViewportBuoys] = useState<BuoyInfo[]>([])
     const [activeId, setActiveId] = useState<string | number | null>(null)
     const [page, setPage] = useState(1)
+    const fitOnceRef = useRef(false)
     const [initialFit, setInitialFit] = useState<Bounds | null>(null)
-    const poiSeqRef = useRef(0)
-    const buoySeqRef = useRef(0)
-    const allPoiSeqRef = useRef(0)
-    const allBuoySeqRef = useRef(0)
 
-    // Load the full dataset once per dataType.  The list pane shows this,
-    // independent of map bounds — fixes "list view sometimes shows 0".
-    useEffect(() => {
-        if (dataType !== 'poi') return
-        const seq = ++allPoiSeqRef.current
-        setAllLoading(true)
-        ;(async () => {
-            try {
-                const data = await invoke<ExportPOI[]>('get_all_poi_data', { platform: null })
-                if (seq !== allPoiSeqRef.current) return
-                setAllPois(data.map(p => ({
-                    id: p.id, name: p.name, lon: p.lon, lat: p.lat,
-                    address: p.address, category: p.category, platform: p.platform,
-                })))
-            } catch (e) { console.error(e) }
-            finally { if (seq === allPoiSeqRef.current) setAllLoading(false) }
-        })()
-    }, [dataType])
+    const allPois = poi.items
+    const allBuoys = buoy.items
+    const allLoading = (dataType === 'poi' ? poi.loading : buoy.loading)
 
+    // Debounce search input so 23k filter doesn't run on every keystroke.
     useEffect(() => {
-        if (dataType !== 'buoy') return
-        const seq = ++allBuoySeqRef.current
-        setAllLoading(true)
-        ;(async () => {
-            try {
-                const data = await invoke<BuoyInfo[]>('chart_get_all_buoys')
-                if (seq === allBuoySeqRef.current) setAllBuoys(data)
-            } catch (e) { console.error(e) }
-            finally { if (seq === allBuoySeqRef.current) setAllLoading(false) }
-        })()
-    }, [dataType])
+        const t = setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 180)
+        return () => clearTimeout(t)
+    }, [query])
 
-    // Compute initial map fit from the full dataset (no extra query).
+    // One-shot map fit once data has loaded (not on every batch update).
     useEffect(() => {
-        const src = dataType === 'poi'
-            ? allPois.map(p => [p.lat, p.lon] as [number, number])
+        if (fitOnceRef.current) return
+        const src: [number, number][] = dataType === 'poi'
+            ? allPois.map(p => [p.lat, p.lon])
             : allBuoys
                 .filter(b => b.lat_84 != null && b.lon_84 != null)
-                .map(b => [b.lat_84!, b.lon_84!] as [number, number])
-        if (src.length === 0) return
+                .map(b => [b.lat_84!, b.lon_84!])
+        if (src.length < 50) return
         let s = 90, w = 180, n = -90, e = -180
         for (const [la, lo] of src) {
             if (la < s) s = la
@@ -180,45 +137,15 @@ export function BrowseView() {
             if (lo < w) w = lo
             if (lo > e) e = lo
         }
+        fitOnceRef.current = true
         setInitialFit({ south: s, west: w, north: n, east: e })
     }, [dataType, allPois, allBuoys])
 
-    // Viewport reload — only when a map is actually shown.
+    // Reset fit lock when dataType switches so the new dataset re-fits once.
     useEffect(() => {
-        if (!bounds || view === 'list') return
-        if (dataType === 'poi') {
-            const seq = ++poiSeqRef.current
-            const t = setTimeout(async () => {
-                try {
-                    const data = await invoke<POI[]>('search_poi_by_bounds', {
-                        south: bounds.south,
-                        west: bounds.west,
-                        north: bounds.north,
-                        east: bounds.east,
-                        query: query.trim() || null,
-                        // Always fetch all platforms, filter client-side.
-                        // Previously passed only the first selected platform when 1<n<all, hiding records.
-                        platform: null,
-                    })
-                    if (seq === poiSeqRef.current) setViewportPois(data)
-                } catch (e) { console.error(e) }
-            }, 350)
-            return () => clearTimeout(t)
-        } else {
-            const seq = ++buoySeqRef.current
-            ;(async () => {
-                try {
-                    const data = await invoke<BuoyInfo[]>('search_buoys_by_bounds', {
-                        south: bounds.south,
-                        west: bounds.west,
-                        north: bounds.north,
-                        east: bounds.east,
-                    })
-                    if (seq === buoySeqRef.current) setViewportBuoys(data)
-                } catch (e) { console.error(e) }
-            })()
-        }
-    }, [bounds, query, dataType, view])
+        fitOnceRef.current = false
+        setInitialFit(null)
+    }, [dataType])
 
     const togglePf = (p: PlatformKey) => {
         setActivePf(s => {
@@ -228,9 +155,9 @@ export function BrowseView() {
         })
     }
 
-    // List pane filtering — uses the full dataset.
+    // List pane filtering — by query + platform, no bounds.
     const filteredPois = useMemo(() => {
-        const q = query.trim().toLowerCase()
+        const q = debouncedQuery
         const list = allPois.filter(p => activePf.has(p.platform as PlatformKey))
         if (!q) return list
         return list.filter(p =>
@@ -238,10 +165,10 @@ export function BrowseView() {
             (p.address?.toLowerCase().includes(q) ?? false) ||
             (p.category?.toLowerCase().includes(q) ?? false)
         )
-    }, [allPois, query, activePf])
+    }, [allPois, debouncedQuery, activePf])
 
     const filteredBuoys = useMemo(() => {
-        const q = query.trim().toLowerCase()
+        const q = debouncedQuery
         if (!q) return allBuoys
         return allBuoys.filter(b =>
             (b.name?.toLowerCase().includes(q) ?? false) ||
@@ -251,32 +178,39 @@ export function BrowseView() {
             (b.shape?.toLowerCase().includes(q) ?? false) ||
             (b.buoy_type?.toLowerCase().includes(q) ?? false)
         )
-    }, [allBuoys, query])
+    }, [allBuoys, debouncedQuery])
 
-    // Marker dataset — viewport-filtered + same platform / text filters.
+    // Map markers — filteredPois intersected with current viewport.
+    // Capped so dense viewports stay smooth; cluster layer handles aggregation.
     const mapPois = useMemo(() => {
-        const q = query.trim().toLowerCase()
-        const list = viewportPois.filter(p => activePf.has(p.platform as PlatformKey))
-        if (!q) return list
-        return list.filter(p =>
-            p.name.toLowerCase().includes(q) ||
-            (p.address?.toLowerCase().includes(q) ?? false) ||
-            (p.category?.toLowerCase().includes(q) ?? false)
-        )
-    }, [viewportPois, query, activePf])
+        if (!bounds || view === 'list') return [] as POI[]
+        const { south, west, north, east } = bounds
+        const out: POI[] = []
+        for (const p of filteredPois) {
+            if (p.lat >= south && p.lat <= north && p.lon >= west && p.lon <= east) {
+                out.push(p)
+                if (out.length >= MAP_MARKER_CAP) break
+            }
+        }
+        return out
+    }, [filteredPois, bounds, view])
 
     const mapBuoys = useMemo(() => {
-        const q = query.trim().toLowerCase()
-        if (!q) return viewportBuoys
-        return viewportBuoys.filter(b =>
-            (b.name?.toLowerCase().includes(q) ?? false) ||
-            (b.waterway?.toLowerCase().includes(q) ?? false) ||
-            (b.region?.toLowerCase().includes(q) ?? false)
-        )
-    }, [viewportBuoys, query])
+        if (!bounds || view === 'list') return [] as BuoyInfo[]
+        const { south, west, north, east } = bounds
+        const out: BuoyInfo[] = []
+        for (const b of filteredBuoys) {
+            if (b.lat_84 == null || b.lon_84 == null) continue
+            if (b.lat_84 >= south && b.lat_84 <= north && b.lon_84 >= west && b.lon_84 <= east) {
+                out.push(b)
+                if (out.length >= MAP_MARKER_CAP) break
+            }
+        }
+        return out
+    }, [filteredBuoys, bounds, view])
 
     // Reset page when filters change.
-    useEffect(() => { setPage(1) }, [query, activePf, dataType])
+    useEffect(() => { setPage(1) }, [debouncedQuery, activePf, dataType])
 
     const totalItems = dataType === 'poi' ? filteredPois.length : filteredBuoys.length
     const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))

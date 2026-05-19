@@ -50,6 +50,7 @@ pub fn run() {
             get_district_codes_for_region,
             // 导出
             get_all_poi_data,
+            stream_all_poi,
             export_poi_to_file,
             fix_region_codes,
             // 数据管理
@@ -93,6 +94,7 @@ pub fn run() {
             chart_commands::chart_get_tile_count,
             chart_commands::chart_get_buoy_stats,
             chart_commands::chart_get_all_buoys,
+            chart_commands::chart_stream_all_buoys,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

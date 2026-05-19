@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import { useToast } from '@/components/ui/toast'
+import { usePoiData } from '@/lib/poiDataContext'
 
 type DataType = 'poi' | 'buoy'
 type Format = 'csv' | 'json' | 'mysql' | 'excel'
@@ -159,10 +160,8 @@ export function ExportView() {
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
     const [regionSearch, setRegionSearch] = useState('')
 
+    const { poi: poiSlice, buoy: buoySlice } = usePoiData()
     const [platform, setPlatform] = useState<string>('all')
-    const [allPois, setAllPois] = useState<ExportPOI[]>([])
-    const [allBuoys, setAllBuoys] = useState<BuoyInfo[]>([])
-    const [loading, setLoading] = useState(false)
     const [search, setSearch] = useState('')
 
     const [poiFields, setPoiFields] = useState<Set<string>>(new Set(DEFAULT_POI_FIELDS))
@@ -202,41 +201,19 @@ export function ExportView() {
         })
     }
 
-    // Load full POI / buoy data lazily when needed
+    // One-time region_code fix on mount — backend ignores if up to date.
     useEffect(() => {
-        if (dataType !== 'poi') return
-        let cancelled = false
-        setLoading(true)
-            ; (async () => {
-                try {
-                    await invoke<[number, number]>('fix_region_codes').catch(() => { })
-                    const data = await invoke<ExportPOI[]>('get_all_poi_data', {
-                        platform: platform === 'all' ? null : platform,
-                    })
-                    if (!cancelled) setAllPois(data)
-                } catch (e) {
-                    if (!cancelled) errorToast('加载 POI 失败', String(e))
-                } finally { if (!cancelled) setLoading(false) }
-            })()
-        return () => { cancelled = true }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [dataType, platform])
+        invoke<[number, number]>('fix_region_codes').catch(() => { /* ignore */ })
+    }, [])
 
-    useEffect(() => {
-        if (dataType !== 'buoy') return
-        let cancelled = false
-        setLoading(true)
-            ; (async () => {
-                try {
-                    const data = await invoke<BuoyInfo[]>('chart_get_all_buoys')
-                    if (!cancelled) setAllBuoys(data)
-                } catch (e) {
-                    if (!cancelled) errorToast('加载航标失败', String(e))
-                } finally { if (!cancelled) setLoading(false) }
-            })()
-        return () => { cancelled = true }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [dataType])
+    const allPois = useMemo(
+        () => platform === 'all'
+            ? poiSlice.items
+            : poiSlice.items.filter(p => p.platform === platform),
+        [poiSlice.items, platform]
+    )
+    const allBuoys = buoySlice.items
+    const loading = dataType === 'poi' ? poiSlice.loading : buoySlice.loading
 
     const matchCodes = useMemo(() => {
         const m = new Set<string>()

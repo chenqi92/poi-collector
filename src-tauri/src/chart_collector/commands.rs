@@ -609,3 +609,49 @@ pub fn chart_get_all_buoys() -> Result<Vec<BuoyInfo>, String> {
     let db = ChartDatabase::new(&get_db_path())?;
     db.get_all_buoys()
 }
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BuoyBatch {
+    pub items: Vec<BuoyInfo>,
+    pub done: bool,
+    pub total: usize,
+}
+
+/// 流式推送全部航标数据。
+#[tauri::command]
+pub fn chart_stream_all_buoys(
+    batch_size: Option<usize>,
+    on_event: tauri::ipc::Channel<BuoyBatch>,
+) -> Result<(), String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+    let all = db.get_all_buoys()?;
+    let total = all.len();
+    let bs = batch_size.unwrap_or(1500).max(100);
+
+    if total == 0 {
+        on_event
+            .send(BuoyBatch {
+                items: Vec::new(),
+                done: true,
+                total: 0,
+            })
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let mut sent = 0usize;
+    let mut iter = all.into_iter();
+    while sent < total {
+        let chunk: Vec<BuoyInfo> = (&mut iter).take(bs).collect();
+        let chunk_len = chunk.len();
+        sent += chunk_len;
+        on_event
+            .send(BuoyBatch {
+                items: chunk,
+                done: sent >= total,
+                total,
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
