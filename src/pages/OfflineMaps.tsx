@@ -201,7 +201,7 @@ function PackagesList({
                     <b className="mono" style={{ color: 'var(--text)' }}>{packages.length}</b> 个瓦片包 ·
                     共 <b className="mono" style={{ color: 'var(--text)' }}>{totalTiles.toLocaleString()}</b> 瓦片
                 </div>
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div className="seg">
                         {['all', 'tianditu', 'amap', 'osm', 'baidu'].map(p => (
                             <button
@@ -218,7 +218,7 @@ function PackagesList({
                         className="select"
                         value={sortBy}
                         onChange={e => setSortBy(e.target.value as 'date' | 'tiles' | 'name')}
-                        style={{ width: 130 }}
+                        style={{ width: 130, height: 26 }}
                     >
                         <option value="date">最近创建</option>
                         <option value="tiles">瓦片数量</option>

@@ -315,11 +315,14 @@ h1.page-title {
 /* segmented */
 .seg {
   display:inline-flex;
+  align-items:center;
   background: var(--panel-3);
   border:1px solid var(--border);
   border-radius:6px;
   padding:2px;
   gap:0;
+  height: 26px;
+  box-sizing: border-box;
 }
 .seg button {
   appearance:none; border:0;
