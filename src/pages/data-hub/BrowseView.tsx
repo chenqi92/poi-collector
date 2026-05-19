@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
-import L from 'leaflet'
+import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
 import { usePoiData, type FullPOI, type FullBuoy } from '@/lib/poiDataContext'
+import { ClusteredMarkers, type ClusterPoint } from './ClusteredMarkers'
 import 'leaflet/dist/leaflet.css'
 
 type ViewMode = 'list' | 'split' | 'map'
@@ -22,15 +22,6 @@ interface Bounds {
 const PLATFORMS: PlatformKey[] = ['tianditu', 'amap', 'baidu', 'osm']
 
 const PAGE_SIZE = 50
-
-function makeMarker(idx: number, platform: string, active: boolean) {
-    return L.divIcon({
-        html: `<div class="gc-marker pf-${platform}${active ? ' active' : ''}">${idx + 1}</div>`,
-        className: '',
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
-    })
-}
 
 function BoundsTracker({ onChange }: { onChange: (b: Bounds) => void }) {
     const map = useMap()
@@ -209,6 +200,19 @@ export function BrowseView() {
         return out
     }, [filteredBuoys, bounds, view])
 
+    const poiClusterPoints = useMemo<ClusterPoint[]>(
+        () => mapPois.map((p, i) => ({
+            key: p.id, lat: p.lat, lon: p.lon, platform: p.platform, label: i + 1,
+        })),
+        [mapPois]
+    )
+    const buoyClusterPoints = useMemo<ClusterPoint[]>(
+        () => mapBuoys.map((b, i) => ({
+            key: b.id, lat: b.lat_84!, lon: b.lon_84!, platform: 'osm', label: i + 1,
+        })),
+        [mapBuoys]
+    )
+
     // Reset page when filters change.
     useEffect(() => { setPage(1) }, [debouncedQuery, activePf, dataType])
 
@@ -371,25 +375,11 @@ export function BrowseView() {
                         <PanToWhenActive point={activePoint} />
                         <MapResizeOnView trigger={view} />
                         <FitToBounds bounds={initialFit} />
-                        {dataType === 'poi' && mapPois.map((p, i) => (
-                            <Marker
-                                key={p.id}
-                                position={[p.lat, p.lon]}
-                                icon={makeMarker(i, p.platform, p.id === activeId)}
-                                eventHandlers={{ click: () => setActiveId(p.id) }}
-                            />
-                        ))}
-                        {dataType === 'buoy' && mapBuoys.map((b, i) => {
-                            if (b.lat_84 == null || b.lon_84 == null) return null
-                            return (
-                                <Marker
-                                    key={b.id}
-                                    position={[b.lat_84, b.lon_84]}
-                                    icon={makeMarker(i, 'osm', b.id === activeId)}
-                                    eventHandlers={{ click: () => setActiveId(b.id) }}
-                                />
-                            )
-                        })}
+                        <ClusteredMarkers
+                            points={dataType === 'poi' ? poiClusterPoints : buoyClusterPoints}
+                            activeKey={activeId}
+                            onSelect={setActiveId}
+                        />
                     </MapContainer>
 
                     {/* Viewport platform legend */}
