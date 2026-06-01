@@ -278,17 +278,98 @@ function KeysPanel() {
 }
 
 // ──────── Regions panel ──────────────────────────────────
+function RegionColumn({
+    title,
+    items,
+    activeCode,
+    onSelect,
+    emptyHint,
+}: {
+    title: string
+    items: Province[]
+    activeCode: string | null
+    onSelect?: (r: Province) => void
+    emptyHint: string
+}) {
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div
+                style={{
+                    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                    padding: '8px 10px', borderBottom: '1px solid var(--hairline)',
+                }}
+            >
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', color: 'var(--text-3)' }}>{title}</span>
+                <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-4)' }}>{items.length}</span>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: 6 }}>
+                {items.length === 0 ? (
+                    <div style={{ padding: '20px 10px', fontSize: 11.5, color: 'var(--text-4)', textAlign: 'center' }}>{emptyHint}</div>
+                ) : (
+                    items.map(r => (
+                        <div
+                            key={r.code}
+                            className={`set-nav-item${activeCode === r.code ? ' active' : ''}`}
+                            style={{ margin: '1px 0', height: 28, cursor: onSelect ? 'pointer' : 'default' }}
+                            onClick={onSelect ? () => onSelect(r) : undefined}
+                        >
+                            <span style={{ fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
+                            <span className="mono" style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-4)', flexShrink: 0 }}>{r.code}</span>
+                            {onSelect && <GcIcon name="chevronRight" size={11} />}
+                        </div>
+                    ))
+                )}
+            </div>
+        </div>
+    )
+}
+
 function RegionsPanel() {
     const [provinces, setProvinces] = useState<Province[]>([])
     const [loading, setLoading] = useState(true)
+    const [counts, setCounts] = useState<{ city: number; district: number }>({ city: 0, district: 0 })
+
+    const [province, setProvince] = useState<Province | null>(null)
+    const [cities, setCities] = useState<Province[]>([])
+    const [city, setCity] = useState<Province | null>(null)
+    const [districts, setDistricts] = useState<Province[]>([])
 
     useEffect(() => {
         let cancelled = false
-        invoke<Province[]>('get_provinces')
-            .then(p => { if (!cancelled) { setProvinces(p); setLoading(false) } })
+        Promise.all([
+            invoke<Province[]>('get_provinces'),
+            invoke<Province[]>('get_regions'),
+        ])
+            .then(([prov, all]) => {
+                if (cancelled) return
+                setProvinces(prov)
+                setCounts({
+                    city: all.filter(r => r.level === 'city').length,
+                    district: all.filter(r => r.level === 'district').length,
+                })
+                setLoading(false)
+            })
             .catch(() => { if (!cancelled) setLoading(false) })
         return () => { cancelled = true }
     }, [])
+
+    const pickProvince = (p: Province) => {
+        setProvince(p)
+        setCity(null)
+        setCities([])
+        setDistricts([])
+        invoke<Province[]>('get_region_children', { parentCode: p.code })
+            .then(setCities)
+            .catch(() => setCities([]))
+    }
+
+    const pickCity = (c: Province) => {
+        setCity(c)
+        setDistricts([])
+        invoke<Province[]>('get_region_children', { parentCode: c.code })
+            .then(setDistricts)
+            .catch(() => setDistricts([]))
+    }
 
     return (
         <div className="set-pad">
@@ -296,44 +377,50 @@ function RegionsPanel() {
                 <div>
                     <h3>地区库</h3>
                     <div className="set-section-sub">
-                        采集和导出时可重用的省市区数据。当前内置 GB/T 2260 全国行政区划。
+                        采集和导出时可重用的省市区数据。内置 GB/T 2260 全国行政区划，可逐级下钻到县级。
+                    </div>
+                </div>
+                <span className="meta mono" style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                    {loading ? '加载中...' : `${provinces.length} 省 · ${counts.city} 市 · ${counts.district} 区县`}
+                </span>
+            </div>
+
+            <div className="panel" style={{ overflow: 'hidden' }}>
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr 1fr',
+                        height: 420,
+                    }}
+                >
+                    <div style={{ borderRight: '1px solid var(--hairline)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                        <RegionColumn
+                            title="省级行政区"
+                            items={provinces}
+                            activeCode={province?.code ?? null}
+                            onSelect={pickProvince}
+                            emptyHint={loading ? '加载中...' : '无数据'}
+                        />
+                    </div>
+                    <div style={{ borderRight: '1px solid var(--hairline)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                        <RegionColumn
+                            title="地级市"
+                            items={cities}
+                            activeCode={city?.code ?? null}
+                            onSelect={pickCity}
+                            emptyHint={province ? '该省无下属城市' : '← 先选择省份'}
+                        />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                        <RegionColumn
+                            title="区 / 县"
+                            items={districts}
+                            activeCode={null}
+                            emptyHint={city ? '该市无下属区县' : '← 先选择城市'}
+                        />
                     </div>
                 </div>
             </div>
-
-            <div className="panel">
-                <div className="panel-head">
-                    <h3>省级行政区</h3>
-                    <span className="meta">{loading ? '加载中...' : `共 ${provinces.length} 个`}</span>
-                </div>
-                <div style={{ padding: '8px 10px', maxHeight: 360, overflow: 'auto' }}>
-                    <div
-                        style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-                            gap: 6,
-                        }}
-                    >
-                        {provinces.map(p => (
-                            <div
-                                key={p.code}
-                                className="set-nav-item"
-                                style={{ margin: 0, height: 28 }}
-                            >
-                                <GcIcon name="globe" size={12} />
-                                <span style={{ fontSize: 12 }}>{p.name}</span>
-                                <span
-                                    style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--text-4)' }}
-                                    className="mono"
-                                >
-                                    {p.code}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-
         </div>
     )
 }
@@ -405,6 +492,24 @@ function PrefsPanel() {
         savePrefs(next)
     }
 
+    // 未显式设置时，默认下载路径回落到安装目录下的 data 子目录
+    useEffect(() => {
+        if (prefs.defaultDownloadPath) return
+        let cancelled = false
+        invoke<string>('get_default_download_dir')
+            .then(dir => {
+                if (cancelled || !dir) return
+                setPrefs(prev => {
+                    if (prev.defaultDownloadPath) return prev
+                    const next = { ...prev, defaultDownloadPath: dir }
+                    savePrefs(next)
+                    return next
+                })
+            })
+            .catch(() => { /* ignore */ })
+        return () => { cancelled = true }
+    }, [prefs.defaultDownloadPath])
+
     const pickDir = async () => {
         try {
             const picked = await openDialog({ multiple: false, directory: true })
@@ -426,7 +531,7 @@ function PrefsPanel() {
                     <div className="set-row">
                         <div className="set-row-main">
                             <div className="set-row-title">默认下载路径</div>
-                            <div className="set-row-sub">瓦片包、POI 导出文件的保存位置（每次任务可覆盖）</div>
+                            <div className="set-row-sub">瓦片包、POI 导出文件的保存位置 · 默认安装目录下的 data（每次任务可覆盖）</div>
                         </div>
                         <div className="set-row-control" style={{ width: 420 }}>
                             <input

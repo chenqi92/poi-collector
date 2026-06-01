@@ -686,6 +686,16 @@ pub fn get_district_codes_for_region(code: String) -> Vec<String> {
     regions::get_all_district_codes(&code)
 }
 
+/// 默认下载目录：安装目录（exe 所在目录）下的 data 子目录
+#[tauri::command]
+pub fn get_default_download_dir() -> String {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    exe_dir.join("data").to_string_lossy().to_string()
+}
+
 // 导出相关命令
 use crate::database::ExportPOI;
 

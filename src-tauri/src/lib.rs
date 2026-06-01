@@ -51,6 +51,7 @@ pub fn run() {
             get_region_children,
             search_regions,
             get_district_codes_for_region,
+            get_default_download_dir,
             // 导出
             get_all_poi_data,
             export_poi_to_file,

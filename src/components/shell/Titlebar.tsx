@@ -40,10 +40,6 @@ function MacTitlebar({ title }: { title: string }) {
 function WinTitlebar({ title }: { title: string }) {
     return (
         <div className="titlebar win" data-tauri-drag-region>
-            <div className="menubar-app-name" data-tauri-drag-region="false">
-                <div className="brand-mark" />
-                GeoCollector
-            </div>
             <div className="titlebar-title">{title}</div>
             <div className="wincontrols" data-tauri-drag-region="false">
                 <button onClick={winApi('min')} title="最小化">
