@@ -66,7 +66,7 @@ export function TileForm() {
     const [apiKeys, setApiKeys] = useState<Record<string, ApiKey[]>>({})
     const [platform, setPlatform] = useState('osm')
     const [mapType, setMapType] = useState('street')
-    const [taskName, setTaskName] = useState('未命名瓦片任务')
+    const [taskName, setTaskName] = useState('')
     const [bounds, setBounds] = useState<Bounds>({ north: 0, south: 0, east: 0, west: 0 })
     const [selectionMode, setSelectionMode] = useState<'draw' | 'region'>('draw')
     const [selectedRegionCode, setSelectedRegionCode] = useState<string | null>(null)
@@ -175,10 +175,8 @@ export function TileForm() {
     }, [bounds, zoomLevels, platform])
 
     const submit = async () => {
-        if (!taskName.trim()) {
-            warning('请填写任务名称', '')
-            return
-        }
+        // 软件内显示名：留空则回落默认；与磁盘文件夹名完全独立
+        const appName = taskName.trim() || '未命名瓦片任务'
         if (!(bounds.north > bounds.south && bounds.east > bounds.west)) {
             warning('未选择下载区域', '请在右侧地图上画矩形或选择行政区域')
             return
@@ -191,18 +189,19 @@ export function TileForm() {
         setSubmitting(true)
         try {
             const ext = OUTPUT_FORMATS.find(f => f.id === outputFormat)?.ext ?? ''
+            // 磁盘保存位置：用户自行命名文件夹/文件，仅决定落地路径，不影响 appName
             const outputPath = outputFormat === 'folder'
-                ? await save({ title: '选择保存位置', defaultPath: taskName })
+                ? await save({ title: '选择保存位置', defaultPath: appName })
                 : await save({
                     title: '选择保存位置',
-                    defaultPath: `${taskName}.${ext}`,
+                    defaultPath: `${appName}.${ext}`,
                     filters: [{ name: '瓦片文件', extensions: [ext] }],
                 })
             if (!outputPath) { setSubmitting(false); return }
 
             const taskId = await invoke<string>('create_tile_task', {
                 config: {
-                    name: taskName,
+                    name: appName,
                     platform,
                     map_type: mapType,
                     bounds,
@@ -219,7 +218,7 @@ export function TileForm() {
                 await invoke('start_tile_download', { taskId })
             } catch (e) { console.warn('自动启动失败', e) }
 
-            success('任务已创建', `${taskName} 已加入下载队列`)
+            success('任务已创建', `${appName} 已加入下载队列`)
             navigate('/new?sub=active')
         } catch (e) {
             errorToast('创建失败', String(e))
@@ -239,10 +238,13 @@ export function TileForm() {
                     <div className="td-block">
                         <div className="td-block-title"><span className="step-no">1</span>基础</div>
                         <div className="field-row">
-                            <label className="field-label">任务名称</label>
+                            <label className="field-label">
+                                任务名称 <span className="hint">软件内显示用，与磁盘文件夹名无关</span>
+                            </label>
                             <input
                                 className="input"
                                 value={taskName}
+                                placeholder="未命名瓦片任务"
                                 onChange={e => setTaskName(e.target.value)}
                             />
                         </div>
