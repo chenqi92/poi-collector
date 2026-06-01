@@ -466,20 +466,21 @@ impl Database {
         }
 
         if !region_codes.is_empty() {
-            // 区划码是 6 位 GB/T 2260：省 xx0000、市 xxyy00、县 xxyykk。
-            // 选省 "320000" 时希望覆盖所有 32xxxx；选市 "320900" 覆盖所有 3209xx。
-            // 把每个 code 转成 LIKE 前缀，多个用 OR。
+            // 区划码本身是层级前缀：省 2 位(32)/市 4 位(3201)/县 6 位(320101)。
+            // 也兼容补零的 6 位 GB 码：省 320000、市 320100。
+            // 统一归一化为「有效前缀」再 LIKE "<前缀>%"，多个用 OR。
+            // 例：选省 "32" → 32% 命中 "3201"(南京) 和 "320923"(阜宁)。
             let mut parts: Vec<String> = Vec::with_capacity(region_codes.len());
             for c in region_codes {
-                let prefix = if c.ends_with("0000") && c.len() == 6 {
-                    format!("{}%", &c[..2])
-                } else if c.ends_with("00") && c.len() == 6 {
-                    format!("{}%", &c[..4])
+                let prefix: &str = if c.len() == 6 && c.ends_with("0000") {
+                    &c[..2]
+                } else if c.len() == 6 && c.ends_with("00") {
+                    &c[..4]
                 } else {
-                    c.clone()
+                    c.as_str()
                 };
                 parts.push("p.region_code LIKE ?".to_string());
-                params.push(Box::new(prefix));
+                params.push(Box::new(format!("{}%", prefix)));
             }
             where_clauses.push(format!("({})", parts.join(" OR ")));
         }

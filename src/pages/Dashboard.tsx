@@ -324,10 +324,14 @@ export default function Dashboard() {
             try {
                 const provinces = await invoke<RegionRow[]>('get_provinces')
                 for (const p of provinces) regionMap[p.code] = p.name
-                // Look up children of provinces that appear in rs
+                // 区划码是层级前缀：省 2 位 / 市 4 位 / 县 6 位。
+                // 市名要查省的子级（parent=前 2 位），县名要查市的子级（parent=前 4 位）。
                 const codesNeeded = new Set(rs.map(([c]) => c).filter(c => !regionMap[c]))
                 const parentCodes = new Set<string>()
-                for (const c of codesNeeded) parentCodes.add(c.slice(0, 2) + '0000')
+                for (const c of codesNeeded) {
+                    if (c.length >= 4) parentCodes.add(c.slice(0, 2)) // 省 → 市
+                    if (c.length >= 6) parentCodes.add(c.slice(0, 4)) // 市 → 县
+                }
                 await Promise.all(
                     Array.from(parentCodes).map(async pc => {
                         try {

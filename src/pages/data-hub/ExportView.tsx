@@ -92,7 +92,9 @@ function RegionTreeNode({
     const isOpen = expanded.has(region.code)
     const isSel = selected.has(region.code)
     const myChildren = childrenMap[region.code]
-    const hasChildren = !!myChildren && myChildren.length > 0
+    // 省、市可下钻（子级懒加载），县为叶子。不能等子级加载完才显示箭头，
+    // 否则永远点不开。
+    const hasChildren = region.level !== 'district'
     return (
         <>
             <label
