@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import { GcIcon, PlatformBadge } from '@/components/shell'
@@ -47,9 +47,11 @@ export function POIForm() {
     const { success, error: errorToast, warning } = useToast()
 
     const [taskName, setTaskName] = useState('未命名 POI 采集任务')
+    // 默认不预选任何平台；加载到 Key 后，仅自动勾选「有 Key / 无需 Key」的首选平台
     const [enabled, setEnabled] = useState<Record<string, boolean>>({
-        tianditu: true, amap: true, baidu: false, osm: false,
+        tianditu: false, amap: false, baidu: false, osm: false,
     })
+    const autoPickedRef = useRef(false)
     const [regions, setRegions] = useState<SelectedRegion[]>(() => {
         try {
             const saved = localStorage.getItem(REGIONS_STORE_KEY)
@@ -79,6 +81,22 @@ export function POIForm() {
                 const init: Record<string, string[]> = {}
                 for (const p of PLATFORMS) init[p.id] = cats.map(c => c.id)
                 setSelectedCats(init)
+
+                // 首次加载：仅自动勾选有 Key（或无需 Key）的首选平台，缺 Key 的不预选
+                if (!autoPickedRef.current) {
+                    autoPickedRef.current = true
+                    const PREFERRED = ['tianditu', 'amap']
+                    setEnabled(e => {
+                        const next = { ...e }
+                        for (const id of PREFERRED) {
+                            const p = PLATFORMS.find(x => x.id === id)
+                            if (!p) continue
+                            const hasKey = !p.needsKey || (keys[id]?.length ?? 0) > 0
+                            if (hasKey) next[id] = true
+                        }
+                        return next
+                    })
+                }
             } catch (e) {
                 console.error(e)
             }
@@ -121,6 +139,11 @@ export function POIForm() {
     const startOne = async (platform: string) => {
         if (regions.length === 0) {
             warning('未选择地区', '请先选择采集地区')
+            return
+        }
+        const pf = PLATFORMS.find(x => x.id === platform)
+        if (pf?.needsKey && (apiKeys[platform]?.length ?? 0) === 0) {
+            warning('未配置 Key', `${pf.label} 缺少 API Key，请到「设置 → API Keys」录入`)
             return
         }
         const cats = selectedCats[platform] ?? []
