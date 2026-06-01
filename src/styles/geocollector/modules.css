@@ -39,7 +39,7 @@
   grid-template-columns: auto 1fr auto;
   align-items:center;
   gap: 12px;
-  padding: 10px 14px;
+  padding: var(--pad-y) var(--pad-x);
   border-bottom: 1px solid var(--hairline);
 }
 .task-row:last-child { border-bottom: 0; }
@@ -464,7 +464,7 @@
 .dh-list { flex:1; overflow:auto; }
 
 .poi-row {
-  padding: 8px 12px;
+  padding: var(--pad-y) var(--pad-x);
   border-bottom: 1px solid var(--hairline);
   cursor: default;
   display: flex; gap: 10px; align-items: flex-start;
@@ -494,7 +494,7 @@
 
 .poi-main { flex: 1; min-width: 0; }
 .poi-name {
-  font-size: 12.5px; font-weight: 500; color: var(--text);
+  font-size: var(--fs-sm); font-weight: 500; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .poi-addr {
@@ -558,9 +558,9 @@
 }
 .region-tree-item {
   display:flex; align-items:center; gap: 6px;
-  height: 26px; padding: 0 8px;
+  height: var(--row-h-sm); padding: 0 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-2);
   cursor: default;
   user-select: none;

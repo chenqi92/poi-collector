@@ -3,18 +3,18 @@
 /* ── Buttons ─────────────────────────────────────────────── */
 .btn {
   display:inline-flex; align-items:center; gap:6px;
-  height:28px; padding:0 11px;
+  height:var(--ctl-h); padding:0 11px;
   border-radius:6px;
   background:var(--panel-3);
   border:1px solid var(--border);
   color:var(--text);
-  font: 500 12.5px/1 var(--sans);
+  font: 500 var(--fs-sm)/1 var(--sans);
   cursor:default;
   white-space:nowrap;
   flex-shrink: 0;
 }
 .btn:hover { background:var(--hover-2); border-color: var(--border-2); }
-.btn.sm { height:24px; padding:0 8px; font-size:11.5px; gap:5px; }
+.btn.sm { height:var(--ctl-h-sm); padding:0 8px; font-size:var(--fs-xs); gap:5px; }
 .btn.lg { height:32px; padding:0 14px; font-size:13px; }
 .btn.primary {
   background: var(--accent);
@@ -143,22 +143,22 @@
 .panel.sub   { background: var(--panel-2); }
 .panel-head {
   display:flex; align-items:center; gap:10px;
-  padding:10px 14px;
+  padding:var(--pad-y) var(--pad-x);
   border-bottom:1px solid var(--hairline);
 }
 .panel-head h3 {
   margin:0;
-  font-size:13px; font-weight:600;
+  font-size:var(--fs); font-weight:600;
   color:var(--text);
   letter-spacing:-0.005em;
 }
-.panel-head .meta { color: var(--text-3); font-size: 11.5px; }
+.panel-head .meta { color: var(--text-3); font-size: var(--fs-sm); }
 .panel-head-actions { margin-left:auto; display:flex; gap:6px; }
-.panel-body { padding:14px; }
+.panel-body { padding:var(--pad-x); }
 
 /* ── Stat card ───────────────────────────────────────────── */
 .stat {
-  padding:12px 14px 14px;
+  padding:var(--pad-y) var(--pad-x) var(--pad-x);
   background: var(--panel);
   border:1px solid var(--border);
   border-radius:8px;
@@ -224,12 +224,12 @@ h1.page-title {
 }
 .page-subtitle {
   color:var(--text-3);
-  font-size:13px;
+  font-size:var(--fs);
   margin-top:4px;
 }
 .page-header {
   display:flex; align-items:flex-end; justify-content:space-between;
-  padding: 16px 22px 12px;
+  padding: calc(var(--pad-y) + 6px) calc(var(--pad-x) + 8px) var(--pad-y);
   border-bottom:1px solid var(--hairline);
   gap:16px;
 }
@@ -453,7 +453,7 @@ h1.page-title {
 }
 .page-scroll { flex: 1; overflow: auto; }
 .page-pad {
-  padding: 18px 22px 24px;
+  padding: calc(var(--pad-y) + 8px) calc(var(--pad-x) + 8px) calc(var(--pad-y) + 14px);
   max-width: 1280px;
 }
 

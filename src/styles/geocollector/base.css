@@ -9,6 +9,7 @@
   --accent-fg: #fff;
 
   --row-h: 30px; --row-h-sm: 24px;
+  --nav-h: 28px; --ctl-h: 28px; --ctl-h-sm: 24px; --topbar-h: 44px;
   --pad-x: 14px; --pad-y: 10px; --gap: 10px;
   --fs: 13px; --fs-sm: 12px; --fs-xs: 11px; --fs-lg: 14px;
   --fs-title: 18px; --fs-display: 24px;
@@ -61,12 +62,14 @@
 
 [data-density="compact"] {
   --row-h:26px; --row-h-sm:22px;
+  --nav-h:26px; --ctl-h:26px; --ctl-h-sm:22px; --topbar-h:40px;
   --pad-x:10px; --pad-y:6px; --gap:8px;
   --fs:12px; --fs-sm:11px; --fs-xs:10.5px; --fs-lg:13px;
   --fs-title:16px; --fs-display:22px;
 }
 [data-density="comfy"] {
   --row-h:36px; --row-h-sm:28px;
+  --nav-h:34px; --ctl-h:32px; --ctl-h-sm:28px; --topbar-h:50px;
   --pad-x:18px; --pad-y:14px; --gap:14px;
   --fs:14px; --fs-sm:13px; --fs-xs:12px; --fs-lg:15px;
   --fs-title:20px; --fs-display:28px;

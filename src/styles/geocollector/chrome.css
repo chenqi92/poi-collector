@@ -246,11 +246,11 @@
 
 .nav-item {
   display:flex; align-items:center; gap:9px;
-  height:28px;
+  height:var(--nav-h);
   margin:1px 8px;
   padding:0 8px;
   border-radius:6px;
-  font-size:13px;
+  font-size:var(--fs);
   font-weight:500;
   color:var(--text-2);
   cursor:default;
@@ -319,7 +319,7 @@
   overflow: hidden;
 }
 .topbar {
-  height: 44px; min-height: 44px; max-height: 44px;
+  height: var(--topbar-h); min-height: var(--topbar-h); max-height: var(--topbar-h);
   flex: none;
   display: flex; align-items: center;
   flex-wrap: nowrap;
@@ -329,7 +329,7 @@
 }
 .crumb {
   display:flex; align-items:center; gap:7px;
-  font-size:13px;
+  font-size:var(--fs);
   color:var(--text-3);
   font-weight:500;
   white-space: nowrap;
