@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { GcIcon } from './Icon'
 
@@ -47,7 +46,6 @@ function findPathAttr(el: Element | null): string | null {
 export function ContextMenuHost() {
     const [point, setPoint] = useState<Point | null>(null)
     const [items, setItems] = useState<MenuItem[]>([])
-    const navigate = useNavigate()
 
     useEffect(() => {
         const handler = async (e: MouseEvent) => {
@@ -120,26 +118,19 @@ export function ContextMenuHost() {
                 })
             }
 
-            // ── 路由导航 ─────────────────────────────────
-            if (built.length > 0) built.push({ type: 'divider' })
-            built.push({
-                label: '返回',
-                icon: 'chevronLeft',
-                onClick: () => navigate(-1),
-            })
-            built.push({
-                label: '前进',
-                icon: 'chevronRight',
-                onClick: () => navigate(1),
-            })
-
+            // 没有可执行项（非输入框、无选区、无路径）时，不弹我们的菜单，
+            // 只阻止浏览器默认菜单——桌面应用里右键空白处不应出现「前进/后退」。
             e.preventDefault()
+            if (built.length === 0) {
+                setPoint(null)
+                return
+            }
             setItems(built)
             setPoint({ x: e.clientX, y: e.clientY })
         }
         document.addEventListener('contextmenu', handler)
         return () => document.removeEventListener('contextmenu', handler)
-    }, [navigate])
+    }, [])
 
     useEffect(() => {
         if (!point) return

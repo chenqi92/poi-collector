@@ -900,8 +900,9 @@ impl Database {
         completed_categories: i64,
         total_collected: i64,
     ) -> Result<()> {
+        // 注意：表中没有 updated_at 列，写入它会导致整条 UPDATE 失败、进度不落库。
         self.conn.execute(
-            "UPDATE poi_collection_tasks SET completed_categories = ?1, total_collected = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3",
+            "UPDATE poi_collection_tasks SET completed_categories = ?1, total_collected = ?2 WHERE id = ?3",
             params![completed_categories, total_collected, task_id],
         )?;
         Ok(())

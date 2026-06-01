@@ -984,6 +984,9 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                             status = "interrupted".to_string();
                         }
                     }
+                } else if status == "completed" || status == "done" {
+                    // 已完成的任务进度补满（历史记录因旧 bug 可能没落库 completed_categories）
+                    completed = t.total_categories as u64;
                 }
 
                 tasks.push(UnifiedTask {
