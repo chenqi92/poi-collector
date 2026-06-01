@@ -70,8 +70,8 @@ export function TileForm() {
     const [bounds, setBounds] = useState<Bounds>({ north: 0, south: 0, east: 0, west: 0 })
     const [selectionMode, setSelectionMode] = useState<'draw' | 'region'>('draw')
     const [selectedRegionCode, setSelectedRegionCode] = useState<string | null>(null)
-    const [zoomMin, setZoomMin] = useState(10)
-    const [zoomMax, setZoomMax] = useState(14)
+    // 缩放级用集合表示，支持任意（含不连续）多选
+    const [zoomSet, setZoomSet] = useState<Set<number>>(() => new Set([10, 11, 12, 13, 14]))
     const [threadCount, setThreadCount] = useState(8)
     const [outputFormat, setOutputFormat] = useState<string>('folder')
     const [apiKeyInput, setApiKeyInput] = useState('')
@@ -105,8 +105,17 @@ export function TileForm() {
         if (!currentPlatform.map_types.includes(mapType)) {
             setMapType(currentPlatform.map_types[0] ?? 'street')
         }
-        setZoomMin(z => Math.max(currentPlatform.min_zoom, Math.min(z, currentPlatform.max_zoom)))
-        setZoomMax(z => Math.max(currentPlatform.min_zoom, Math.min(z, currentPlatform.max_zoom)))
+        // 平台切换后把超出该平台缩放范围的级别裁掉；若全被裁掉则回落到默认范围
+        const lo = currentPlatform.min_zoom
+        const hi = currentPlatform.max_zoom
+        setZoomSet(prev => {
+            const next = new Set([...prev].filter(z => z >= lo && z <= hi))
+            if (next.size === 0) {
+                for (let z = Math.max(lo, 10); z <= Math.min(hi, 14); z++) next.add(z)
+                if (next.size === 0) next.add(lo)
+            }
+            return next
+        })
         const keys = apiKeys[platform] ?? []
         if (currentPlatform.requires_key && keys.length > 0 && !apiKeyInput) {
             setApiKeyInput(keys[0].api_key)
@@ -114,13 +123,44 @@ export function TileForm() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [platform, currentPlatform, apiKeys])
 
-    const zoomLevels = useMemo(() => {
-        const lo = Math.min(zoomMin, zoomMax)
-        const hi = Math.max(zoomMin, zoomMax)
+    const zoomLevels = useMemo(() => Array.from(zoomSet).sort((a, b) => a - b), [zoomSet])
+    const zMin = zoomLevels[0] ?? 0
+    const zMax = zoomLevels[zoomLevels.length - 1] ?? 0
+
+    const availableLevels = useMemo(() => {
+        const lo = currentPlatform?.min_zoom ?? 0
+        const hi = currentPlatform?.max_zoom ?? 18
         const out: number[] = []
         for (let z = lo; z <= hi; z++) out.push(z)
         return out
-    }, [zoomMin, zoomMax])
+    }, [currentPlatform])
+
+    const toggleLevel = (z: number) => setZoomSet(prev => {
+        const n = new Set(prev)
+        if (n.has(z)) n.delete(z); else n.add(z)
+        return n
+    })
+
+    const presetRangeLevels = (range: [number, number]) => {
+        const lo = Math.max(range[0], currentPlatform?.min_zoom ?? 0)
+        const hi = Math.min(range[1], currentPlatform?.max_zoom ?? 18)
+        const out: number[] = []
+        for (let z = lo; z <= hi; z++) out.push(z)
+        return out
+    }
+    const presetActive = (range: [number, number]) => {
+        const lv = presetRangeLevels(range)
+        return lv.length > 0 && lv.every(z => zoomSet.has(z))
+    }
+    const togglePreset = (range: [number, number]) => setZoomSet(prev => {
+        const lv = presetRangeLevels(range)
+        if (lv.length === 0) return prev
+        const allIn = lv.every(z => prev.has(z))
+        const n = new Set(prev)
+        if (allIn) lv.forEach(z => n.delete(z))
+        else lv.forEach(z => n.add(z))
+        return n
+    })
 
     // Estimate
     useEffect(() => {
@@ -322,51 +362,35 @@ export function TileForm() {
                                 }}
                                 className="mono"
                             >
-                                z{zoomMin} – z{zoomMax} ({zoomLevels.length} 级)
+                                {zoomLevels.length > 0 ? `${zoomLevels.length} 级 · z${zMin}–z${zMax}` : '未选择'}
                             </span>
                         </div>
-                        <div className="td-field-grid">
-                            <div className="field-row">
-                                <label className="field-label">最小级</label>
-                                <input
-                                    className="input mono"
-                                    type="number"
-                                    min={currentPlatform?.min_zoom ?? 0}
-                                    max={currentPlatform?.max_zoom ?? 20}
-                                    value={zoomMin}
-                                    onChange={e => setZoomMin(+e.target.value)}
-                                />
-                            </div>
-                            <div className="field-row">
-                                <label className="field-label">最大级</label>
-                                <input
-                                    className="input mono"
-                                    type="number"
-                                    min={currentPlatform?.min_zoom ?? 0}
-                                    max={currentPlatform?.max_zoom ?? 20}
-                                    value={zoomMax}
-                                    onChange={e => setZoomMax(+e.target.value)}
-                                />
-                            </div>
+                        {/* 预设：可多选叠加（点击切换该区间所有级别） */}
+                        <div className="preset-row">
+                            {ZOOM_PRESETS.map(p => (
+                                <button
+                                    key={p.label}
+                                    type="button"
+                                    className={`preset-chip${presetActive(p.range) ? ' active' : ''}`}
+                                    onClick={() => togglePreset(p.range)}
+                                >
+                                    {p.label}
+                                    <span className="pc-range">z{p.range[0]}–z{p.range[1]}</span>
+                                </button>
+                            ))}
                         </div>
-                        <div className="preset-row" style={{ marginTop: 8 }}>
-                            {ZOOM_PRESETS.map(p => {
-                                const isActive = zoomMin === p.range[0] && zoomMax === p.range[1]
-                                return (
-                                    <button
-                                        key={p.label}
-                                        type="button"
-                                        className={`preset-chip${isActive ? ' active' : ''}`}
-                                        onClick={() => {
-                                            setZoomMin(p.range[0])
-                                            setZoomMax(p.range[1])
-                                        }}
-                                    >
-                                        {p.label}
-                                        <span className="pc-range">z{p.range[0]}–z{p.range[1]}</span>
-                                    </button>
-                                )
-                            })}
+                        {/* 单级多选：任意勾选，可不连续 */}
+                        <div className="field-chips" style={{ marginTop: 8 }}>
+                            {availableLevels.map(z => (
+                                <button
+                                    key={z}
+                                    type="button"
+                                    className={`field-chip${zoomSet.has(z) ? ' on' : ''}`}
+                                    onClick={() => toggleLevel(z)}
+                                >
+                                    z{z}
+                                </button>
+                            ))}
                         </div>
                     </div>
 
