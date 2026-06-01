@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import type { ShellTask, TaskStatus } from './shellData'
 import { isActive, isRunning } from './shellData'
+import { toShellTask, type UnifiedTask } from './taskMapping'
 import { externalPushNotification } from './notificationsContext'
 import { osNotify } from './osNotify'
 
@@ -26,6 +28,27 @@ const TYPE_LABEL: Record<ShellTask['type'], string> = {
 export function TasksProvider({ children }: { children: ReactNode }) {
     const [tasks, setTasks] = useState<ShellTask[]>([])
     const prevStatusRef = useRef<Map<string, TaskStatus>>(new Map())
+
+    // 全局轮询任务列表（含运行中任务），不依赖任何具体页面挂载，
+    // 这样「进行中」「任务历史」「工作台」始终拿到一致的实时数据。
+    useEffect(() => {
+        let cancelled = false
+        let timer: ReturnType<typeof setTimeout> | null = null
+
+        const poll = async () => {
+            try {
+                const list = await invoke<UnifiedTask[]>('get_all_task_history')
+                if (!cancelled) setTasks(list.map(toShellTask))
+            } catch { /* ignore */ }
+            if (!cancelled) timer = setTimeout(poll, 2500)
+        }
+        poll()
+
+        return () => {
+            cancelled = true
+            if (timer) clearTimeout(timer)
+        }
+    }, [])
 
     useEffect(() => {
         const prev = prevStatusRef.current

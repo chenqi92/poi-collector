@@ -32,6 +32,7 @@ export interface ShellTask {
     done: number
     total: number
     fail: number
+    collected?: number // POI 任务实际采集条数（done/total 表示类别进度）
     speed: string
     eta: string
     started?: string

@@ -938,6 +938,15 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
 
     // 1. POI 采集任务
     {
+        // 实时采集状态（内存）按平台索引，用于覆盖 DB 中滞后的进度。
+        let live = COLLECTOR_STATUSES
+            .lock()
+            .ok()
+            .map(|m| m.clone())
+            .unwrap_or_default();
+        // 每个平台的实时状态只对应一条正在运行的任务（id 最大者）。
+        let mut live_consumed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
         let db = DB.lock().map_err(|e| e.to_string())?;
         if let Ok(poi_tasks) = db.get_poi_tasks() {
             for t in poi_tasks {
@@ -952,13 +961,38 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                     },
                     t.region_name.as_deref().unwrap_or("未知区域")
                 );
+
+                let mut status = t.status.clone();
+                let mut completed = t.completed_categories as u64;
+                let mut total_collected = t.total_collected;
+
+                // DB 标记为 running/paused 时，用内存中的实时状态覆盖：
+                // - 命中实时运行状态 → 用实时类别索引 + 实时采集条数
+                // - 没有命中（上次会话残留的 running）→ 标记为 interrupted
+                if t.status == "running" || t.status == "paused" {
+                    match live.get(&t.platform) {
+                        Some(s)
+                            if !live_consumed.contains(&t.platform)
+                                && (s.status == "running" || s.status == "paused") =>
+                        {
+                            live_consumed.insert(t.platform.clone());
+                            status = s.status.clone();
+                            completed = s.current_category_index as u64;
+                            total_collected = s.total_collected;
+                        }
+                        _ => {
+                            status = "interrupted".to_string();
+                        }
+                    }
+                }
+
                 tasks.push(UnifiedTask {
                     id: format!("poi_{}", t.id),
                     task_type: "poi".to_string(),
                     name,
-                    status: t.status,
+                    status,
                     total: t.total_categories as u64,
-                    completed: t.completed_categories as u64,
+                    completed,
                     failed: 0,
                     platform: Some(t.platform),
                     output_path: None,
@@ -966,7 +1000,7 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                     completed_at: t.completed_at,
                     extra: Some(
                         serde_json::json!({
-                            "total_collected": t.total_collected,
+                            "total_collected": total_collected,
                             "categories": t.categories,
                             "region_code": t.region_code,
                         })

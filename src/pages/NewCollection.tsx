@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
+import { useToast } from '@/components/ui/toast'
 import { POIForm } from './new-collection/POIForm'
 import { AtonForm } from './new-collection/AtonForm'
 import { TileForm } from './new-collection/TileForm'
@@ -67,9 +69,13 @@ function BigTaskRow({ t, last }: { t: ShellTask; last: boolean }) {
                 </div>
                 <div className="big-task-meta mono">
                     {t.started && <><span>开始 {t.started}</span><span className="sep">·</span></>}
-                    <span>
-                        {(t.done || 0).toLocaleString()} / {(t.total || 0).toLocaleString()}
-                    </span>
+                    {t.type === 'poi' && t.collected != null ? (
+                        <span>已采集 {t.collected.toLocaleString()} 条 · {(t.done || 0)}/{(t.total || 0)} 类</span>
+                    ) : (
+                        <span>
+                            {(t.done || 0).toLocaleString()} / {(t.total || 0).toLocaleString()}
+                        </span>
+                    )}
                     {t.fail > 0 && (
                         <>
                             <span className="sep">·</span>
@@ -166,10 +172,128 @@ function inferType(t: string): TaskType {
     return 'poi'
 }
 
+/** POI 任务从 extra 中读取实际采集条数。 */
+function poiCollected(h: UnifiedTask): number {
+    if (!h.extra) return 0
+    try {
+        const v = JSON.parse(h.extra)?.total_collected
+        return typeof v === 'number' ? v : 0
+    } catch {
+        return 0
+    }
+}
+
+function parseExtra(extra: string | null): Record<string, unknown> {
+    if (!extra) return {}
+    try { return JSON.parse(extra) } catch { return {} }
+}
+
+interface CtxAction { label: string; icon: string; onClick: () => void }
+
+// ──────── Task row context menu ──────────────────────────
+function TaskCtxMenu({ x, y, actions, onClose }: { x: number; y: number; actions: CtxAction[]; onClose: () => void }) {
+    useEffect(() => {
+        const close = (e: Event) => {
+            if (e instanceof KeyboardEvent && e.key !== 'Escape') return
+            onClose()
+        }
+        const t = setTimeout(() => {
+            document.addEventListener('mousedown', onClose)
+            document.addEventListener('keydown', close)
+        }, 0)
+        return () => {
+            clearTimeout(t)
+            document.removeEventListener('mousedown', onClose)
+            document.removeEventListener('keydown', close)
+        }
+    }, [onClose])
+
+    const MENU_W = 200
+    const MENU_H = actions.length * 28 + 8
+    const left = Math.min(x, window.innerWidth - MENU_W - 8)
+    const top = Math.min(y, window.innerHeight - MENU_H - 8)
+
+    return createPortal(
+        <div className="ctx-menu" style={{ left, top }} onContextMenu={e => e.preventDefault()}>
+            {actions.map((a, i) => (
+                <button
+                    key={i}
+                    type="button"
+                    className="ctx-item"
+                    onClick={() => { a.onClick(); onClose() }}
+                >
+                    <span className="ctx-icon"><GcIcon name={a.icon} size={12} /></span>
+                    <span className="ctx-label">{a.label}</span>
+                </button>
+            ))}
+        </div>,
+        document.body,
+    )
+}
+
 function HistoryView({ refreshTick }: { refreshTick: number }) {
+    const navigate = useNavigate()
+    const { success, error: errorToast, warning } = useToast()
     const [filter, setFilter] = useState<'all' | 'poi' | 'aton' | 'tile'>('all')
     const [items, setItems] = useState<UnifiedTask[]>([])
     const [loading, setLoading] = useState(true)
+    const [menu, setMenu] = useState<{ x: number; y: number; actions: CtxAction[] } | null>(null)
+
+    const resumeTask = async (h: UnifiedTask) => {
+        const kind = inferType(h.task_type)
+        const extra = parseExtra(h.extra)
+        try {
+            if (kind === 'aton') {
+                const w = extra.bounds_west as number, s = extra.bounds_south as number
+                const e = extra.bounds_east as number, n = extra.bounds_north as number
+                if (!w && !s && !e && !n) { warning('无法继续', '该任务未记录边界范围'); return }
+                await invoke('chart_start_buoy_collection', {
+                    west: w, south: s, east: e, north: n,
+                    gridStep: (extra.grid_step as number) || 0.1,
+                })
+            } else if (kind === 'poi') {
+                const regionCode = extra.region_code as string
+                if (!h.platform || !regionCode) { warning('无法继续', '该任务缺少平台或区域信息'); return }
+                await invoke('start_collector', { platform: h.platform, categories: null, regions: [regionCode] })
+            } else {
+                warning('暂不支持', '瓦片任务请在「离线地图」中重新下载'); return
+            }
+            success('已启动', `${h.name} 采集已开始`)
+        } catch (err) {
+            errorToast('启动失败', String(err))
+        }
+    }
+
+    const openMenu = (e: ReactMouseEvent, h: UnifiedTask) => {
+        e.preventDefault()
+        e.stopPropagation()
+        const kind = inferType(h.task_type)
+        const s = STATUS_NORMALIZE[h.status.toLowerCase()] ?? 'idle'
+        const actions: CtxAction[] = []
+        if (kind === 'poi' || kind === 'aton') {
+            actions.push({
+                label: s === 'done' ? '重新采集' : '继续采集',
+                icon: 'play',
+                onClick: () => resumeTask(h),
+            })
+        }
+        if (kind === 'poi' || kind === 'aton') {
+            actions.push({ label: '在数据中心查看', icon: 'database', onClick: () => navigate('/data') })
+        }
+        if (h.output_path) {
+            actions.push({
+                label: '打开所在文件夹',
+                icon: 'folder',
+                onClick: () => { if (h.output_path) revealItemInDir(h.output_path).catch(() => { }) },
+            })
+        }
+        actions.push({
+            label: '复制名称',
+            icon: 'copy',
+            onClick: () => navigator.clipboard.writeText(h.name).catch(() => { }),
+        })
+        setMenu({ x: e.clientX, y: e.clientY, actions })
+    }
 
     useEffect(() => {
         let cancelled = false
@@ -235,7 +359,11 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                             const t = inferType(h.task_type)
                             const s = STATUS_NORMALIZE[h.status.toLowerCase()] ?? 'idle'
                             return (
-                                <tr key={h.id} data-context-path={h.output_path || undefined}>
+                                <tr
+                                    key={h.id}
+                                    data-context-path={h.output_path || undefined}
+                                    onContextMenu={e => openMenu(e, h)}
+                                >
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <GcIcon
@@ -249,7 +377,9 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                                     <td><TypeBadge type={t} /></td>
                                     <td><StatusBadge status={s} /></td>
                                     <td className="num mono">
-                                        {h.completed.toLocaleString()} / {h.total.toLocaleString()}
+                                        {t === 'poi'
+                                            ? `${poiCollected(h).toLocaleString()} 条`
+                                            : `${h.completed.toLocaleString()} / ${h.total.toLocaleString()}`}
                                         {h.failed > 0 && (
                                             <span style={{ color: 'var(--st-red)', marginLeft: 4 }}>
                                                 /{h.failed}
@@ -288,6 +418,10 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                     </div>
                 )}
             </div>
+
+            {menu && (
+                <TaskCtxMenu x={menu.x} y={menu.y} actions={menu.actions} onClose={() => setMenu(null)} />
+            )}
         </div>
     )
 }

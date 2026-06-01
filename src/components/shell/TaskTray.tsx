@@ -61,12 +61,10 @@ export function TaskTray({ onClose }: TaskTrayProps) {
                             </div>
                             <div className="tray-row-meta">
                                 <span className="tnum">
-                                    {(t.done || 0).toLocaleString()}/{(t.total || 0).toLocaleString()}
+                                    {t.type === 'poi' && t.collected != null
+                                        ? `${t.collected.toLocaleString()} 条 · ${t.done || 0}/${t.total || 0} 类`
+                                        : `${(t.done || 0).toLocaleString()}/${(t.total || 0).toLocaleString()}`}
                                 </span>
-                                <span className="sep">·</span>
-                                <span>{t.speed}</span>
-                                <span className="sep">·</span>
-                                <span>剩余 {t.eta}</span>
                             </div>
                         </div>
                         <div className="tray-row-actions">

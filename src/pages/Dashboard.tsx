@@ -3,12 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
 import { GcIcon, StatusBadge, TypeBadge, PlatformBadge } from '@/components/shell'
 import { useTasksContext } from '@/lib/tasksContext'
-import type {
-    PlatformKey,
-    ShellTask,
-    TaskStatus,
-    TaskType,
-} from '@/lib/shellData'
+import type { PlatformKey, ShellTask } from '@/lib/shellData'
 
 interface BackendStats {
     total: number
@@ -21,21 +16,6 @@ interface RegionRow {
     name: string
     level: string
     parent_code: string | null
-}
-
-interface UnifiedTask {
-    id: string
-    task_type: string
-    name: string
-    status: string
-    total: number
-    completed: number
-    failed: number
-    platform: string | null
-    output_path: string | null
-    created_at: string | null
-    completed_at: string | null
-    extra: string | null
 }
 
 interface ApiKey {
@@ -55,57 +35,6 @@ const PLATFORM_CAPS: Record<string, number> = {
 const PLATFORM_UNLIMITED: Record<string, boolean> = {
     osm: true,
     cjhd: true,
-}
-
-const STATUS_NORMALIZE: Record<string, TaskStatus> = {
-    running: 'running',
-    downloading: 'downloading',
-    paused: 'paused',
-    completed: 'done',
-    done: 'done',
-    failed: 'failed',
-    error: 'error',
-    canceled: 'canceled',
-    cancelled: 'canceled',
-    interrupted: 'interrupted',
-    queued: 'queued',
-    pending: 'queued',
-    idle: 'idle',
-    retrying: 'retrying',
-}
-
-function normalizeStatus(s: string): TaskStatus {
-    return STATUS_NORMALIZE[s.toLowerCase()] ?? 'idle'
-}
-
-function inferType(taskType: string): TaskType {
-    const t = taskType.toLowerCase()
-    if (t.includes('tile')) return 'tile'
-    if (t.includes('buoy') || t.includes('aton')) return 'aton'
-    return 'poi'
-}
-
-function inferPlatforms(platform: string | null): PlatformKey[] {
-    if (!platform) return []
-    return (platform.split(/[,，\s]+/).filter(Boolean) as PlatformKey[])
-}
-
-function toShellTask(u: UnifiedTask): ShellTask {
-    const progress = u.total > 0 ? Math.min(1, u.completed / u.total) : 0
-    return {
-        id: u.id,
-        name: u.name,
-        type: inferType(u.task_type),
-        status: normalizeStatus(u.status),
-        platforms: inferPlatforms(u.platform),
-        progress,
-        done: u.completed,
-        total: u.total,
-        fail: u.failed,
-        speed: '—',
-        eta: '—',
-        started: u.created_at ?? undefined,
-    }
 }
 
 interface StatItem {
@@ -267,7 +196,9 @@ function ActiveTasksCard({
                             </div>
                             <div className="task-row-meta" style={{ marginTop: 0, justifyContent: 'flex-end' }}>
                                 <span className="tnum">
-                                    {(t.done || 0).toLocaleString()} / {(t.total || 0).toLocaleString()}
+                                    {t.type === 'poi' && t.collected != null
+                                        ? `${t.collected.toLocaleString()} 条 · ${(t.done || 0)}/${(t.total || 0)} 类`
+                                        : `${(t.done || 0).toLocaleString()} / ${(t.total || 0).toLocaleString()}`}
                                 </span>
                                 {t.fail > 0 && (
                                     <>
@@ -368,10 +299,9 @@ function QuickActions({ onGo }: { onGo: (p: string) => void }) {
 
 export default function Dashboard() {
     const navigate = useNavigate()
-    const { setTasks } = useTasksContext()
+    const { tasks: tasksList } = useTasksContext()
     const [stats, setStats] = useState<BackendStats | null>(null)
     const [regionTops, setRegionTops] = useState<{ name: string; count: number }[]>([])
-    const [tasksList, setTasksList] = useState<ShellTask[]>([])
     const [keys, setKeys] = useState<Record<string, ApiKey[]>>({})
     const [loading, setLoading] = useState(true)
     const [refreshTick, setRefreshTick] = useState(0)
@@ -383,10 +313,9 @@ export default function Dashboard() {
                 try { return await fn() } catch { return fallback }
             }
 
-            const [s, rs, ts, ks] = await Promise.all([
+            const [s, rs, ks] = await Promise.all([
                 safe(() => invoke<BackendStats>('get_stats'), { total: 0, by_platform: {}, by_category: {} }),
                 safe(() => invoke<[string, number][]>('get_poi_stats_by_region'), []),
-                safe(() => invoke<UnifiedTask[]>('get_all_task_history'), []),
                 safe(() => invoke<Record<string, ApiKey[]>>('get_api_keys'), {}),
             ])
 
@@ -414,19 +343,15 @@ export default function Dashboard() {
                 .sort((a, b) => b.count - a.count)
                 .slice(0, 7)
 
-            const tasksMapped = ts.map(toShellTask)
-
             if (cancelled) return
             setStats(s)
             setRegionTops(tops)
-            setTasksList(tasksMapped)
             setKeys(ks)
-            setTasks(tasksMapped)
             setLoading(false)
         }
         load()
         return () => { cancelled = true }
-    }, [refreshTick, setTasks])
+    }, [refreshTick])
 
     const topCategories = useMemo(() => {
         if (!stats) return [] as [string, number][]
