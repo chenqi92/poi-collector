@@ -3,7 +3,13 @@
 
 use super::types::*;
 use rusqlite::{params, Connection};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+
+/// 进程内是否已执行过一次「残留运行中任务」清理。
+/// ChartDatabase::new() 在采集进度回写、任务历史轮询等场景会被频繁调用，
+/// 清理必须只在进程首次打开数据库时执行一次，否则会把正在运行的任务误标为 interrupted。
+static STALE_CLEANUP_DONE: AtomicBool = AtomicBool::new(false);
 
 /// 航道图数据库
 pub struct ChartDatabase {
@@ -18,7 +24,10 @@ impl ChartDatabase {
             conn: Mutex::new(conn),
         };
         db.init_tables()?;
-        db.cleanup_stale_tasks();
+        // 仅进程内首次执行：清理上次会话崩溃残留的 running 任务
+        if !STALE_CLEANUP_DONE.swap(true, Ordering::SeqCst) {
+            db.cleanup_stale_tasks();
+        }
         Ok(db)
     }
 
