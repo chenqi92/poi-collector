@@ -571,6 +571,7 @@ export function BrowseView() {
                         <FitToBounds bounds={dataType === 'chart' ? null : initialFit} />
                         {dataType !== 'chart' && (
                             <ClusteredMarkers
+                                key={dataType}
                                 points={dataType === 'poi' ? poiClusterPoints : buoyClusterPoints}
                                 activeKey={activeId}
                                 onSelect={setActiveId}

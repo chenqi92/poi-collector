@@ -114,6 +114,16 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
                 if (p.popupHtml && existing.getPopup()?.getContent() !== p.popupHtml) {
                     existing.bindPopup(p.popupHtml, { maxWidth: 320, autoPan: false })
                 }
+                // 名称标签按需更新（同一 key 被复用且名称变化时，例如 POI/航标 id 撞号）
+                if (p.name) {
+                    if (existing.getTooltip()?.getContent() !== p.name) {
+                        existing.bindTooltip(p.name, {
+                            permanent: true, direction: 'top', offset: [0, -12], className: 'gc-marker-label',
+                        })
+                    }
+                } else if (existing.getTooltip()) {
+                    existing.unbindTooltip()
+                }
             } else {
                 const marker = L.marker([p.lat, p.lon], {
                     icon: buildIcon(p.label ?? i + 1, p.platform, isActive),
