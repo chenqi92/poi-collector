@@ -363,6 +363,7 @@ export function BrowseView() {
             lon: p.lon,
             platform: p.platform,
             label: i + 1,
+            name: p.name || '(未命名)',
             popupHtml: buildPoiPopup(p),
         })),
         [mapPois]
@@ -374,6 +375,7 @@ export function BrowseView() {
             lon: b.lon_84!,
             platform: 'osm',
             label: i + 1,
+            name: b.name || String(b.id),
             popupHtml: buildBuoyPopup(b),
         })),
         [mapBuoys]

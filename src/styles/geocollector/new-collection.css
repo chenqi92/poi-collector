@@ -260,6 +260,11 @@
   flex: 1; overflow: auto;
   background: var(--panel);
 }
+/* 让表格按内容宽度撑开（至少铺满容器），溢出时出现横向滚动条 */
+.dh-export-table-wrap .table {
+  width: max-content;
+  min-width: 100%;
+}
 .dh-export-foot {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;

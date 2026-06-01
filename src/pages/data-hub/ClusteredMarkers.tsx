@@ -12,6 +12,8 @@ export interface ClusterPoint {
     /** Platform tag drives marker color via CSS class .pf-<platform>. */
     platform: string
     label?: string | number
+    /** 点名称；未聚合（单独显示）时会作为常驻标签贴在 marker 旁。 */
+    name?: string
     /** HTML 字符串；非空时点击 marker 会弹出详情气泡。 */
     popupHtml?: string
 }
@@ -119,6 +121,16 @@ export function ClusteredMarkers({ points, activeKey, onSelect }: ClusteredMarke
                 ;(marker.options as { _active?: boolean })._active = isActive
                 if (p.popupHtml) {
                     marker.bindPopup(p.popupHtml, { maxWidth: 320, autoPan: false })
+                }
+                // 常驻标签：markercluster 在该点被聚合时会把 marker 移出地图，
+                // 标签随之隐藏；只有点单独显示（成 1）时名称才会出现。
+                if (p.name) {
+                    marker.bindTooltip(p.name, {
+                        permanent: true,
+                        direction: 'top',
+                        offset: [0, -12],
+                        className: 'gc-marker-label',
+                    })
                 }
                 marker.on('click', () => onSelectRef.current(p.key))
                 markersRef.current.set(p.key, marker)
