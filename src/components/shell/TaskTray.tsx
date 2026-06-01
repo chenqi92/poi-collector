@@ -1,17 +1,56 @@
 import { useEffect, useRef } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { GcIcon } from './Icon'
 import { StatusBadge } from './Badges'
+import { useToast } from '@/components/ui/toast'
 import { useTasksContext } from '@/lib/tasksContext'
-import { isActive } from '@/lib/shellData'
+import { isActive, type ShellTask } from '@/lib/shellData'
 
 interface TaskTrayProps {
     onClose: () => void
 }
 
+/** 去掉 poi_/buoy_/tile_ 前缀，得到底层任务 id。 */
+function rawId(id: string): string {
+    const i = id.indexOf('_')
+    return i >= 0 ? id.slice(i + 1) : id
+}
+
 export function TaskTray({ onClose }: TaskTrayProps) {
     const ref = useRef<HTMLDivElement | null>(null)
     const { tasks } = useTasksContext()
+    const { success, error: errorToast } = useToast()
     const active = tasks.filter(isActive)
+
+    // 暂停（仅瓦片支持真正的暂停/继续；POI/航标只能停止）
+    const pauseTask = async (t: ShellTask) => {
+        try {
+            if (t.type === 'tile') await invoke('pause_tile_download', { taskId: rawId(t.id) })
+            else if (t.type === 'poi') await invoke('stop_collector', { platform: t.platforms[0] })
+            else await invoke('chart_stop_collection')
+            success('已暂停', t.name)
+        } catch (e) { errorToast('操作失败', String(e)) }
+    }
+
+    const resumeTask = async (t: ShellTask) => {
+        try {
+            if (t.type === 'tile') { await invoke('start_tile_download', { taskId: rawId(t.id) }); success('已继续', t.name) }
+            else errorToast('无法继续', 'POI / 航标任务请到「任务历史」右键继续采集')
+        } catch (e) { errorToast('操作失败', String(e)) }
+    }
+
+    const stopTask = async (t: ShellTask) => {
+        try {
+            if (t.type === 'tile') await invoke('cancel_tile_download', { taskId: rawId(t.id) })
+            else if (t.type === 'poi') await invoke('stop_collector', { platform: t.platforms[0] })
+            else await invoke('chart_stop_collection')
+            success('已停止', t.name)
+        } catch (e) { errorToast('操作失败', String(e)) }
+    }
+
+    const stopAll = async () => {
+        for (const t of active) await stopTask(t)
+    }
 
     useEffect(() => {
         const onDoc = (e: MouseEvent) => {
@@ -30,8 +69,13 @@ export function TaskTray({ onClose }: TaskTrayProps) {
             <div className="tray-pop-head">
                 <h4>活跃任务 ({active.length})</h4>
                 <div style={{ display: 'flex', gap: 4 }}>
-                    <button className="btn ghost sm" type="button">
-                        <GcIcon name="pause" size={12} />全部暂停
+                    <button
+                        className="btn ghost sm"
+                        type="button"
+                        onClick={stopAll}
+                        disabled={active.length === 0}
+                    >
+                        <GcIcon name="stop" size={12} />全部停止
                     </button>
                 </div>
             </div>
@@ -69,15 +113,15 @@ export function TaskTray({ onClose }: TaskTrayProps) {
                         </div>
                         <div className="tray-row-actions">
                             {t.status === 'paused' ? (
-                                <button className="iconbtn" title="继续" type="button">
+                                <button className="iconbtn" title="继续" type="button" onClick={() => resumeTask(t)}>
                                     <GcIcon name="play" size={13} />
                                 </button>
-                            ) : (
-                                <button className="iconbtn" title="暂停" type="button">
+                            ) : t.type === 'tile' ? (
+                                <button className="iconbtn" title="暂停" type="button" onClick={() => pauseTask(t)}>
                                     <GcIcon name="pause" size={13} />
                                 </button>
-                            )}
-                            <button className="iconbtn" title="停止" type="button">
+                            ) : null}
+                            <button className="iconbtn" title="停止" type="button" onClick={() => stopTask(t)}>
                                 <GcIcon name="stop" size={13} />
                             </button>
                         </div>

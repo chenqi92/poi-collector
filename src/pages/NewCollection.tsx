@@ -52,7 +52,18 @@ function TypeChooser({ active, onClick, icon, title, sub, platforms, platformsLa
 }
 
 // ──────── Active tasks view ──────────────────────────────
-function BigTaskRow({ t, last }: { t: ShellTask; last: boolean }) {
+function rawTaskId(id: string): string {
+    const i = id.indexOf('_')
+    return i >= 0 ? id.slice(i + 1) : id
+}
+
+function BigTaskRow({ t, last, onPause, onResume, onStop }: {
+    t: ShellTask
+    last: boolean
+    onPause: (t: ShellTask) => void
+    onResume: (t: ShellTask) => void
+    onStop: (t: ShellTask) => void
+}) {
     return (
         <div className="big-task-row" style={{ borderBottom: last ? 'none' : '1px solid var(--hairline)' }}>
             <div className={`task-row-icon t-${t.type}`} style={{ width: 36, height: 36 }}>
@@ -91,11 +102,31 @@ function BigTaskRow({ t, last }: { t: ShellTask; last: boolean }) {
                     </div>
                 </div>
             </div>
+            <div style={{ display: 'flex', gap: 2, alignSelf: 'center' }}>
+                {t.status === 'paused' ? (
+                    <button className="iconbtn" type="button" title="继续" onClick={() => onResume(t)}>
+                        <GcIcon name="play" size={14} />
+                    </button>
+                ) : t.type === 'tile' ? (
+                    <button className="iconbtn" type="button" title="暂停" onClick={() => onPause(t)}>
+                        <GcIcon name="pause" size={14} />
+                    </button>
+                ) : null}
+                <button className="iconbtn" type="button" title="停止" onClick={() => onStop(t)}>
+                    <GcIcon name="stop" size={14} />
+                </button>
+            </div>
         </div>
     )
 }
 
-function TaskGroup({ label, tasks }: { label: string; tasks: ShellTask[] }) {
+interface TaskActions {
+    onPause: (t: ShellTask) => void
+    onResume: (t: ShellTask) => void
+    onStop: (t: ShellTask) => void
+}
+
+function TaskGroup({ label, tasks, actions }: { label: string; tasks: ShellTask[]; actions: TaskActions }) {
     if (tasks.length === 0) return null
     return (
         <div style={{ marginBottom: 18 }}>
@@ -104,7 +135,14 @@ function TaskGroup({ label, tasks }: { label: string; tasks: ShellTask[] }) {
             </div>
             <div className="panel">
                 {tasks.map((t, i) => (
-                    <BigTaskRow key={t.id} t={t} last={i === tasks.length - 1} />
+                    <BigTaskRow
+                        key={t.id}
+                        t={t}
+                        last={i === tasks.length - 1}
+                        onPause={actions.onPause}
+                        onResume={actions.onResume}
+                        onStop={actions.onStop}
+                    />
                 ))}
             </div>
         </div>
@@ -113,10 +151,35 @@ function TaskGroup({ label, tasks }: { label: string; tasks: ShellTask[] }) {
 
 function ActiveTasksView() {
     const { tasks } = useTasksContext()
+    const { success, error: errorToast } = useToast()
     const running = tasks.filter(t => t.status === 'running' || t.status === 'downloading' || t.status === 'retrying')
     const paused = tasks.filter(t => t.status === 'paused')
     const queued = tasks.filter(t => t.status === 'queued')
     const activeTotal = running.length + paused.length + queued.length
+
+    const onPause = async (t: ShellTask) => {
+        try {
+            if (t.type === 'tile') await invoke('pause_tile_download', { taskId: rawTaskId(t.id) })
+            else if (t.type === 'poi') await invoke('stop_collector', { platform: t.platforms[0] })
+            else await invoke('chart_stop_collection')
+            success('已暂停', t.name)
+        } catch (e) { errorToast('操作失败', String(e)) }
+    }
+    const onResume = async (t: ShellTask) => {
+        try {
+            if (t.type === 'tile') { await invoke('start_tile_download', { taskId: rawTaskId(t.id) }); success('已继续', t.name) }
+            else errorToast('无法继续', 'POI / 航标任务请到「任务历史」右键继续采集')
+        } catch (e) { errorToast('操作失败', String(e)) }
+    }
+    const onStop = async (t: ShellTask) => {
+        try {
+            if (t.type === 'tile') await invoke('cancel_tile_download', { taskId: rawTaskId(t.id) })
+            else if (t.type === 'poi') await invoke('stop_collector', { platform: t.platforms[0] })
+            else await invoke('chart_stop_collection')
+            success('已停止', t.name)
+        } catch (e) { errorToast('操作失败', String(e)) }
+    }
+    const actions: TaskActions = { onPause, onResume, onStop }
 
     return (
         <div className="page-scroll">
@@ -126,9 +189,9 @@ function ActiveTasksView() {
                         共 <b className="mono" style={{ color: 'var(--text)' }}>{activeTotal}</b> 个活跃任务
                     </div>
                 </div>
-                <TaskGroup label="运行中" tasks={running} />
-                <TaskGroup label="已暂停" tasks={paused} />
-                <TaskGroup label="等待中" tasks={queued} />
+                <TaskGroup label="运行中" tasks={running} actions={actions} />
+                <TaskGroup label="已暂停" tasks={paused} actions={actions} />
+                <TaskGroup label="等待中" tasks={queued} actions={actions} />
                 {activeTotal === 0 && (
                     <div className="empty" style={{ padding: '60px 20px' }}>
                         <div className="empty-icon"><GcIcon name="inbox" size={22} /></div>
