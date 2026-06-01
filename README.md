@@ -4,23 +4,23 @@
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%20|%20macOS-blue)
 ![Tech](https://img.shields.io/badge/Built%20with-Tauri%202.x%20+%20React-orange)
-![Version](https://img.shields.io/badge/Version-0.2.2-green)
+![Version](https://img.shields.io/badge/Version-0.3.1-green)
 
 ## 界面预览
 
-![首页仪表盘](docs/img/homepage.png)
+![工作台仪表盘](docs/img/homepage.png)
 
-| 兴趣点和航标数据采集                                               | 数据查询和航道图预览                                              |
-|----------------------------------------------------------|---------------------------------------------------------|
-| <img src="docs/img/collect.png" alt="数据采集" width="100%"> | <img src="docs/img/search.png" alt="数据查询" width="100%"> |
+| 数据采集（POI / 航标）                                          | 瓦片地图下载                                              |
+|----------------------------------------------------------|------------------------------------------------------|
+| <img src="docs/img/collect.png" alt="数据采集" width="100%"> | <img src="docs/img/map.png" alt="瓦片下载" width="100%"> |
 
-| 瓦片下载                                                 | 任务管理 |
-|------------------------------------------------------|---|
-| <img src="docs/img/map.png" alt="地图视图" width="100%"> | <img src="docs/img/task.png" alt="任务管理" width="100%"> |
+| 数据浏览查询                                                 | 航道图叠加预览                                            |
+|---------------------------------------------------------|-----------------------------------------------------|
+| <img src="docs/img/search.png" alt="数据查询" width="100%"> | <img src="docs/img/chart.png" alt="航道图" width="100%"> |
 
-| 数据导出 | API Key 设置 |
-|---|---|
-| <img src="docs/img/export.png" alt="数据导出" width="100%"> | <img src="docs/img/key.png" alt="API Key 设置" width="100%"> |
+| 航标详情查看                                               | 任务管理                                                |
+|--------------------------------------------------------|-----------------------------------------------------|
+| <img src="docs/img/buoy.png" alt="航标详情" width="100%"> | <img src="docs/img/task.png" alt="任务管理" width="100%"> |
 
 ## 功能特性
 

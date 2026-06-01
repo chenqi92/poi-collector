@@ -1,5 +1,5 @@
 {
-  "version": "0.3.0",
+  "version": "0.3.1",
   "name": "POI Collector",
   "description": "Multi-platform POI data collector for TianDiTu, Amap, Baidu Maps"
 }
