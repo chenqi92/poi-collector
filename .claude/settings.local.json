@@ -10,7 +10,25 @@
       "Bash(npx eslint *)",
       "Bash(curl *)",
       "Bash(cargo build *)",
-      "Bash(pnpm tsc *)"
+      "Bash(pnpm tsc *)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(mkdir -p \"E:/workspace-freq/poi-collector-app/src/styles/geocollector\")",
+      "Bash(cp \"E:/workspace-freq/poi-collector-app/design/styles.css\" \"E:/workspace-freq/poi-collector-app/src/styles/geocollector/base.css\")",
+      "Bash(cp \"E:/workspace-freq/poi-collector-app/design/styles-chrome.css\" \"E:/workspace-freq/poi-collector-app/src/styles/geocollector/chrome.css\")",
+      "Bash(cp \"E:/workspace-freq/poi-collector-app/design/styles-ui.css\" \"E:/workspace-freq/poi-collector-app/src/styles/geocollector/ui.css\")",
+      "Bash(cp \"E:/workspace-freq/poi-collector-app/design/styles-modules.css\" \"E:/workspace-freq/poi-collector-app/src/styles/geocollector/modules.css\")",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(npx vite *)",
+      "Bash(awk NR>=360 && NR<=400 *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(Get-ChildItem -Path \"E:\\\\workspace-freq\\\\poi-collector-app\" -Force)",
+      "Bash(Select-Object Name, Mode)",
+      "Bash(Get-ChildItem -Path \"E:\\\\workspace-freq\\\\poi-collector-app\" -Filter \"*.json\" -Depth 2)",
+      "Bash(Select-Object FullName)",
+      "Bash(npm ls *)",
+      "Bash(git push *)"
     ]
   }
 }
