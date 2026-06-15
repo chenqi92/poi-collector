@@ -24,12 +24,10 @@ impl TilePlatform for OsmPlatform {
         let s = self.get_subdomain(x, y);
 
         match map_type {
-            MapType::Street => {
-                Some(format!(
-                    "https://{}.tile.openstreetmap.org/{}/{}/{}.png",
-                    s, z, x, y
-                ))
-            }
+            MapType::Street => Some(format!(
+                "https://{}.tile.openstreetmap.org/{}/{}/{}.png",
+                s, z, x, y
+            )),
             _ => None,
         }
     }

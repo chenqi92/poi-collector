@@ -42,9 +42,9 @@ impl TilePlatform for BingPlatform {
         let quadkey = self.tile_to_quadkey(z, x, y);
 
         let (url_type, suffix) = match map_type {
-            MapType::Street => ("r", "png"),      // 街道图
-            MapType::Satellite => ("a", "jpeg"),   // 卫星图
-            MapType::Hybrid => ("h", "jpeg"),      // 混合图
+            MapType::Street => ("r", "png"),     // 街道图
+            MapType::Satellite => ("a", "jpeg"), // 卫星图
+            MapType::Hybrid => ("h", "jpeg"),    // 混合图
             _ => return None,
         };
 

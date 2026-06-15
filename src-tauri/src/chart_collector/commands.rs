@@ -337,7 +337,9 @@ pub async fn chart_start_feature_collection(
                             if task_id > 0 {
                                 let _ = db.complete_chart_task(task_id, "failed", 0, 0);
                             }
-                            let _ = log_tx.send(format!("[ERROR] 保存航道要素失败: {}", e)).await;
+                            let _ = log_tx
+                                .send(format!("[ERROR] 保存航道要素失败: {}", e))
+                                .await;
                         }
                     },
                     Err(e) => {
@@ -353,7 +355,9 @@ pub async fn chart_start_feature_collection(
                         let _ = db.complete_chart_task(task_id, "failed", 0, 0);
                     }
                 }
-                let _ = log_tx.send(format!("[ERROR] 航道要素采集失败: {}", e)).await;
+                let _ = log_tx
+                    .send(format!("[ERROR] 航道要素采集失败: {}", e))
+                    .await;
             }
         }
     });

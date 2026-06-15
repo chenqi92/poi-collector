@@ -664,7 +664,9 @@ impl FeatureCollector {
 
         for (idx, grid) in grids.iter().enumerate() {
             if stop_flag.load(Ordering::Relaxed) {
-                let _ = log_tx.send("[STOP] 航道要素采集已被用户停止".to_string()).await;
+                let _ = log_tx
+                    .send("[STOP] 航道要素采集已被用户停止".to_string())
+                    .await;
                 return Ok(features.into_values().collect());
             }
 

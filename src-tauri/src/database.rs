@@ -509,7 +509,15 @@ impl Database {
         limit: i64,
         offset: i64,
     ) -> Result<(Vec<POI>, i64)> {
-        Self::search_pois_filtered_conn(&self.conn, query, platforms, bounds, region_codes, limit, offset)
+        Self::search_pois_filtered_conn(
+            &self.conn,
+            query,
+            platforms,
+            bounds,
+            region_codes,
+            limit,
+            offset,
+        )
     }
 
     /// 同上但接受任意 &Connection，用于读连接池。
@@ -610,10 +618,7 @@ impl Database {
     }
 
     #[allow(dead_code)]
-    pub fn get_poi_extent(
-        &self,
-        platforms: &[String],
-    ) -> Result<Option<(f64, f64, f64, f64)>> {
+    pub fn get_poi_extent(&self, platforms: &[String]) -> Result<Option<(f64, f64, f64, f64)>> {
         Self::get_poi_extent_conn(&self.conn, platforms)
     }
 
@@ -685,7 +690,8 @@ impl Database {
         sql.push_str(&format!(" LIMIT ?{}", params_vec.len() + 1));
         params_vec.push(Box::new(limit));
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             Ok(POI {

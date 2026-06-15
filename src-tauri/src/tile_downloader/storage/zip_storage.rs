@@ -21,18 +21,21 @@ impl ZipStorage {
 }
 
 impl TileStorage for ZipStorage {
-    fn init(&mut self, output_path: &Path, _bounds: &Bounds, _zoom_levels: &[u32]) -> Result<(), String> {
+    fn init(
+        &mut self,
+        output_path: &Path,
+        _bounds: &Bounds,
+        _zoom_levels: &[u32],
+    ) -> Result<(), String> {
         // 确保父目录存在
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
         }
 
         self.zip_path = output_path.to_path_buf();
 
         // 创建 ZIP 文件
-        let file = File::create(&self.zip_path)
-            .map_err(|e| format!("创建 ZIP 文件失败: {}", e))?;
+        let file = File::create(&self.zip_path).map_err(|e| format!("创建 ZIP 文件失败: {}", e))?;
 
         self.writer = Some(ZipWriter::new(file));
         Ok(())

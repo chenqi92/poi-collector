@@ -28,11 +28,15 @@ impl MbtilesStorage {
 }
 
 impl TileStorage for MbtilesStorage {
-    fn init(&mut self, output_path: &Path, bounds: &Bounds, zoom_levels: &[u32]) -> Result<(), String> {
+    fn init(
+        &mut self,
+        output_path: &Path,
+        bounds: &Bounds,
+        zoom_levels: &[u32],
+    ) -> Result<(), String> {
         // 确保父目录存在
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
         }
 
         self.db_path = output_path.to_path_buf();
@@ -67,7 +71,10 @@ impl TileStorage for MbtilesStorage {
         // 插入元数据
         let min_zoom = zoom_levels.iter().min().copied().unwrap_or(0);
         let max_zoom = zoom_levels.iter().max().copied().unwrap_or(18);
-        let bounds_str = format!("{},{},{},{}", bounds.west, bounds.south, bounds.east, bounds.north);
+        let bounds_str = format!(
+            "{},{},{},{}",
+            bounds.west, bounds.south, bounds.east, bounds.north
+        );
         let center_lon = (bounds.west + bounds.east) / 2.0;
         let center_lat = (bounds.south + bounds.north) / 2.0;
         let center = format!("{},{},{}", center_lon, center_lat, min_zoom);
@@ -91,22 +98,26 @@ impl TileStorage for MbtilesStorage {
         conn.execute(
             "INSERT OR REPLACE INTO metadata (name, value) VALUES ('bounds', ?1)",
             params![bounds_str],
-        ).ok();
+        )
+        .ok();
 
         conn.execute(
             "INSERT OR REPLACE INTO metadata (name, value) VALUES ('center', ?1)",
             params![center],
-        ).ok();
+        )
+        .ok();
 
         conn.execute(
             "INSERT OR REPLACE INTO metadata (name, value) VALUES ('minzoom', ?1)",
             params![min_zoom.to_string()],
-        ).ok();
+        )
+        .ok();
 
         conn.execute(
             "INSERT OR REPLACE INTO metadata (name, value) VALUES ('maxzoom', ?1)",
             params![max_zoom.to_string()],
-        ).ok();
+        )
+        .ok();
 
         *self.conn.lock() = Some(conn);
         Ok(())

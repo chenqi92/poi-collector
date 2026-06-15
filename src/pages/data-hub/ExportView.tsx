@@ -10,8 +10,8 @@ import {
     type POI,
 } from '@/lib/searchHooks'
 
-type DataType = 'poi' | 'buoy'
-type Format = 'csv' | 'json' | 'mysql' | 'excel'
+type DataType = 'poi' | 'buoy' | 'boundary'
+type Format = 'csv' | 'json' | 'mysql' | 'excel' | 'geojson'
 
 interface Region {
     code: string
@@ -21,6 +21,24 @@ interface Region {
 }
 
 type ExportPOI = POI
+
+interface RegionBounds {
+    north: number
+    south: number
+    east: number
+    west: number
+}
+
+interface BoundarySummary {
+    code: string
+    name: string
+    level: string
+    bounds: RegionBounds
+    feature_count: number
+    polygon_count: number
+    ring_count: number
+    point_count: number
+}
 
 interface BuoyInfo {
     id: string
@@ -67,8 +85,20 @@ const FORMATS: { id: Format; label: string; ext: string }[] = [
     { id: 'excel', label: 'Excel', ext: 'xlsx' },
 ]
 
+const BOUNDARY_FORMATS: { id: Format; label: string; ext: string }[] = [
+    { id: 'geojson', label: 'GeoJSON', ext: 'geojson' },
+    { id: 'json', label: 'JSON', ext: 'json' },
+    { id: 'csv', label: 'CSV 坐标表', ext: 'csv' },
+]
+
 const DEFAULT_POI_FIELDS = new Set(['id', 'name', 'address', 'category', 'lat', 'lon', 'platform'])
 const DEFAULT_BUOY_FIELDS = new Set(['id', 'name', 'waterway', 'region', 'lat_84', 'lon_84', 'shape', 'light_info', 'color'])
+
+const LEVEL_LABEL: Record<string, string> = {
+    province: '省级',
+    city: '市级',
+    district: '区县',
+}
 
 interface RegionTreeNodeProps {
     region: Region
@@ -153,9 +183,12 @@ export function ExportView() {
     const [dataType, setDataType] = useState<DataType>('poi')
     const [provinces, setProvinces] = useState<Region[]>([])
     const [childrenMap, setChildrenMap] = useState<Record<string, Region[]>>({})
+    const [regionMap, setRegionMap] = useState<Record<string, Region>>({})
     const [selected, setSelected] = useState<Set<string>>(new Set())
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
     const [regionSearch, setRegionSearch] = useState('')
+    const [regionSearchResults, setRegionSearchResults] = useState<Region[]>([])
+    const [regionSearching, setRegionSearching] = useState(false)
 
     const [platform, setPlatform] = useState<string>('all')
     const [search, setSearch] = useState('')
@@ -164,18 +197,38 @@ export function ExportView() {
     const [buoyFields, setBuoyFields] = useState<Set<string>>(new Set(DEFAULT_BUOY_FIELDS))
     const [format, setFormat] = useState<Format>('csv')
     const [exporting, setExporting] = useState(false)
+    const [includeBoundaryChildren, setIncludeBoundaryChildren] = useState(false)
+    const [boundaryPreview, setBoundaryPreview] = useState<BoundarySummary[]>([])
+    const [boundaryLoading, setBoundaryLoading] = useState(false)
+    const [boundaryPreviewKey, setBoundaryPreviewKey] = useState('')
 
     useEffect(() => {
         invoke<Region[]>('get_provinces')
-            .then(setProvinces)
+            .then(list => {
+                setProvinces(list)
+                setRegionMap(prev => {
+                    const next = { ...prev }
+                    for (const r of list) next[r.code] = r
+                    return next
+                })
+            })
             .catch(e => errorToast('加载省份失败', String(e)))
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    const rememberRegions = (list: Region[]) => {
+        setRegionMap(prev => {
+            const next = { ...prev }
+            for (const r of list) next[r.code] = r
+            return next
+        })
+    }
 
     const loadChildren = async (code: string) => {
         if (childrenMap[code]) return
         try {
             const list = await invoke<Region[]>('get_region_children', { parentCode: code })
+            rememberRegions(list)
             setChildrenMap(prev => ({ ...prev, [code]: list }))
         } catch (e) { console.error(e) }
     }
@@ -197,6 +250,36 @@ export function ExportView() {
         })
     }
 
+    useEffect(() => {
+        const q = regionSearch.trim()
+        if (!q) {
+            setRegionSearchResults([])
+            setRegionSearching(false)
+            return
+        }
+        let cancelled = false
+        setRegionSearching(true)
+        const t = setTimeout(() => {
+            invoke<Region[]>('search_regions', { query: q })
+                .then(list => {
+                    if (cancelled) return
+                    setRegionSearchResults(list)
+                    rememberRegions(list)
+                })
+                .catch(() => {
+                    if (!cancelled) setRegionSearchResults([])
+                })
+                .finally(() => {
+                    if (!cancelled) setRegionSearching(false)
+                })
+        }, 180)
+        return () => {
+            cancelled = true
+            clearTimeout(t)
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [regionSearch])
+
     // One-time region_code fix on mount — backend ignores if up to date.
     useEffect(() => {
         invoke<[number, number]>('fix_region_codes').catch(() => { /* ignore */ })
@@ -214,6 +297,17 @@ export function ExportView() {
     const poiPreview = useSearchPois(poiFilters, { limit: 200, offset: 0 })
     const allBuoys = useAllBuoys()
 
+    const selectedRegions = useMemo(() => (
+        Array.from(selected)
+            .map(code => regionMap[code])
+            .filter((r): r is Region => !!r)
+            .map(r => ({ code: r.code, name: r.name, level: r.level }))
+    ), [selected, regionMap])
+
+    const boundarySelectionKey = useMemo(() => (
+        `${includeBoundaryChildren ? 'children' : 'outline'}:${selectedRegions.map(r => r.code).sort().join(',')}`
+    ), [includeBoundaryChildren, selectedRegions])
+
     const filteredBuoys = useMemo<BuoyInfo[]>(() => {
         const q = search.trim().toLowerCase()
         if (!q) return allBuoys.items
@@ -223,7 +317,24 @@ export function ExportView() {
         })
     }, [search, allBuoys.items])
 
-    const loading = dataType === 'poi' ? poiPreview.loading : allBuoys.loading
+    useEffect(() => {
+        if (dataType === 'boundary' && !BOUNDARY_FORMATS.some(f => f.id === format)) {
+            setFormat('geojson')
+        } else if (dataType !== 'boundary' && format === 'geojson') {
+            setFormat('csv')
+        }
+    }, [dataType, format])
+
+    useEffect(() => {
+        setBoundaryPreview([])
+        setBoundaryPreviewKey('')
+    }, [boundarySelectionKey])
+
+    const loading = dataType === 'poi'
+        ? poiPreview.loading
+        : dataType === 'buoy'
+            ? allBuoys.loading
+            : boundaryLoading
 
     const fieldsCur = dataType === 'poi' ? poiFields : buoyFields
     const toggleField = (id: string) => {
@@ -235,7 +346,13 @@ export function ExportView() {
         })
     }
     const FIELDS_CUR = dataType === 'poi' ? POI_FIELDS : BUOY_FIELDS
-    const totalCount = dataType === 'poi' ? poiPreview.total : filteredBuoys.length
+    const boundaryPointCount = boundaryPreview.reduce((n, r) => n + r.point_count, 0)
+    const boundaryPreviewReady = boundaryPreview.length > 0 && boundaryPreviewKey === boundarySelectionKey
+    const totalCount = dataType === 'poi'
+        ? poiPreview.total
+        : dataType === 'buoy'
+            ? filteredBuoys.length
+            : boundaryPointCount
     const previewRows = dataType === 'poi' ? poiPreview.items : filteredBuoys.slice(0, 200)
 
     const visibleProvinces = useMemo(() => {
@@ -246,7 +363,58 @@ export function ExportView() {
         )
     }, [provinces, regionSearch])
 
+    const loadBoundaryPreview = async () => {
+        if (selectedRegions.length === 0) {
+            errorToast('未选择行政区', '请先在左侧选择省 / 市 / 区')
+            return
+        }
+        setBoundaryLoading(true)
+        try {
+            const rows = await invoke<BoundarySummary[]>('collect_region_boundaries', {
+                regions: selectedRegions,
+                includeChildren: includeBoundaryChildren,
+            })
+            setBoundaryPreview(rows)
+            setBoundaryPreviewKey(boundarySelectionKey)
+            success('边界已获取', `已加载 ${rows.length} 个行政区边界`)
+        } catch (e) {
+            setBoundaryPreview([])
+            setBoundaryPreviewKey('')
+            errorToast('获取边界失败', String(e))
+        } finally {
+            setBoundaryLoading(false)
+        }
+    }
+
     const doExport = async () => {
+        if (dataType === 'boundary') {
+            if (selectedRegions.length === 0) {
+                errorToast('未选择行政区', '请先在左侧选择省 / 市 / 区')
+                return
+            }
+            const fmt = BOUNDARY_FORMATS.find(f => f.id === format) ?? BOUNDARY_FORMATS[0]
+            try {
+                const path = await save({
+                    defaultPath: `boundary_${new Date().toISOString().split('T')[0]}.${fmt.ext}`,
+                    filters: [{ name: fmt.label, extensions: [fmt.ext] }],
+                })
+                if (!path) return
+                setExporting(true)
+                const n = await invoke<number>('export_region_boundaries_to_file', {
+                    path,
+                    format: fmt.id,
+                    regions: selectedRegions,
+                    includeChildren: includeBoundaryChildren,
+                })
+                success('导出成功', `已导出 ${n.toLocaleString()} 个行政区边界`)
+            } catch (e) {
+                errorToast('导出失败', String(e))
+            } finally {
+                setExporting(false)
+            }
+            return
+        }
+
         if (totalCount === 0) {
             errorToast('无数据', '没有可导出的数据')
             return
@@ -310,23 +478,33 @@ export function ExportView() {
                         <GcIcon name="navigation" size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} />
                         航标
                     </button>
+                    <button
+                        type="button"
+                        className={dataType === 'boundary' ? 'active' : ''}
+                        onClick={() => { setDataType('boundary'); setFormat('geojson') }}
+                    >
+                        <GcIcon name="polygon" size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+                        行政区边界
+                    </button>
                 </div>
                 <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-3)' }}>
                     {loading
                         ? '正在加载...'
                         : dataType === 'poi'
                             ? <>匹配 <b className="mono" style={{ color: 'var(--text)' }}>{poiPreview.total.toLocaleString()}</b> 条</>
-                            : <>航标共 <b className="mono" style={{ color: 'var(--text)' }}>{allBuoys.items.length.toLocaleString()}</b> 条</>
+                            : dataType === 'buoy'
+                                ? <>航标共 <b className="mono" style={{ color: 'var(--text)' }}>{allBuoys.items.length.toLocaleString()}</b> 条</>
+                                : <>已选 <b className="mono" style={{ color: 'var(--text)' }}>{selectedRegions.length.toLocaleString()}</b> 个行政区</>
                     }
                 </span>
             </div>
 
             <div className="dh-export-layout">
                 {/* Region tree side */}
-                {dataType === 'poi' ? (
+                {dataType !== 'buoy' ? (
                     <div className="dh-export-side">
                         <div className="panel-head">
-                            <h3>地区</h3>
+                            <h3>{dataType === 'boundary' ? '行政区' : '地区'}</h3>
                             <span className="meta">
                                 {selected.size > 0 ? `已选 ${selected.size}` : `共 ${provinces.length} 省`}
                             </span>
@@ -345,7 +523,7 @@ export function ExportView() {
                         <div style={{ padding: '8px 10px' }}>
                             <input
                                 className="input"
-                                placeholder="搜索地区..."
+                                placeholder="搜索省 / 市 / 区..."
                                 value={regionSearch}
                                 onChange={e => setRegionSearch(e.target.value)}
                             />
@@ -362,18 +540,56 @@ export function ExportView() {
                                 overflow: 'auto',
                             }}
                         >
-                            {visibleProvinces.map(p => (
-                                <RegionTreeNode
-                                    key={p.code}
-                                    region={p}
-                                    selected={selected}
-                                    expanded={expanded}
-                                    childrenMap={childrenMap}
-                                    onToggleExpand={onToggleExpand}
-                                    onToggleSelect={onToggleSelect}
-                                    depth={0}
-                                />
-                            ))}
+                            {regionSearch.trim() ? (
+                                regionSearching ? (
+                                    <div className="region-empty">搜索中...</div>
+                                ) : regionSearchResults.length === 0 ? (
+                                    <div className="region-empty">未找到匹配的地区</div>
+                                ) : (
+                                    regionSearchResults.map(r => {
+                                        const isSel = selected.has(r.code)
+                                        return (
+                                            <label
+                                                key={r.code}
+                                                className={`region-tree-item${isSel ? ' active' : ''}`}
+                                                onClick={() => onToggleSelect(r.code)}
+                                            >
+                                                <span
+                                                    style={{
+                                                        width: 14, height: 14, borderRadius: 3,
+                                                        border: '1px solid var(--border-2)',
+                                                        background: isSel ? 'var(--accent)' : 'var(--panel)',
+                                                        display: 'grid', placeItems: 'center', color: '#fff',
+                                                        flexShrink: 0,
+                                                    }}
+                                                >
+                                                    {isSel && <GcIcon name="check" size={9} strokeWidth={2.5} />}
+                                                </span>
+                                                <span style={{ flex: 1, minWidth: 0 }}>{r.name}</span>
+                                                <span style={{ color: 'var(--text-4)', fontSize: 10.5 }}>
+                                                    {LEVEL_LABEL[r.level] ?? r.level}
+                                                </span>
+                                                <span className="mono" style={{ color: 'var(--text-4)', fontSize: 10.5 }}>
+                                                    {r.code}
+                                                </span>
+                                            </label>
+                                        )
+                                    })
+                                )
+                            ) : (
+                                visibleProvinces.map(p => (
+                                    <RegionTreeNode
+                                        key={p.code}
+                                        region={p}
+                                        selected={selected}
+                                        expanded={expanded}
+                                        childrenMap={childrenMap}
+                                        onToggleExpand={onToggleExpand}
+                                        onToggleSelect={onToggleSelect}
+                                        depth={0}
+                                    />
+                                ))
+                            )}
                         </div>
                     </div>
                 ) : (
@@ -406,18 +622,58 @@ export function ExportView() {
                                 <option value="osm">OSM</option>
                             </select>
                         )}
-                        <input
-                            className="input"
-                            placeholder={dataType === 'poi' ? '搜索名称 / 地址...' : '搜索名称 / 航道 / 地区...'}
-                            style={{ flex: 1, maxWidth: 320 }}
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                        />
+                        {dataType !== 'boundary' ? (
+                            <input
+                                className="input"
+                                placeholder={dataType === 'poi' ? '搜索名称 / 地址...' : '搜索名称 / 航道 / 地区...'}
+                                style={{ flex: 1, maxWidth: 320 }}
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                            />
+                        ) : (
+                            <>
+                                <div className="seg">
+                                    <button
+                                        type="button"
+                                        className={!includeBoundaryChildren ? 'active' : ''}
+                                        onClick={() => setIncludeBoundaryChildren(false)}
+                                    >
+                                        本级轮廓
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={includeBoundaryChildren ? 'active' : ''}
+                                        onClick={() => setIncludeBoundaryChildren(true)}
+                                    >
+                                        含下级边界
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="btn"
+                                    onClick={loadBoundaryPreview}
+                                    disabled={boundaryLoading || selectedRegions.length === 0}
+                                >
+                                    <GcIcon name="refresh" size={12} />
+                                    {boundaryLoading ? '获取中...' : '获取边界预览'}
+                                </button>
+                            </>
+                        )}
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
                             <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
-                                匹配 <b className="mono" style={{ color: 'var(--text)' }}>{totalCount.toLocaleString()}</b> 条
-                                {previewRows.length < totalCount && (
-                                    <span style={{ color: 'var(--text-4)' }}> · 仅预览前 200 条</span>
+                                {dataType === 'boundary' ? (
+                                    <>
+                                        {boundaryPreviewReady
+                                            ? <>边界点 <b className="mono" style={{ color: 'var(--text)' }}>{boundaryPointCount.toLocaleString()}</b> 个</>
+                                            : <>已选 <b className="mono" style={{ color: 'var(--text)' }}>{selectedRegions.length.toLocaleString()}</b> 个行政区</>}
+                                    </>
+                                ) : (
+                                    <>
+                                        匹配 <b className="mono" style={{ color: 'var(--text)' }}>{totalCount.toLocaleString()}</b> 条
+                                        {previewRows.length < totalCount && (
+                                            <span style={{ color: 'var(--text-4)' }}> · 仅预览前 200 条</span>
+                                        )}
+                                    </>
                                 )}
                             </span>
                         </div>
@@ -463,6 +719,53 @@ export function ExportView() {
                                             {poiFields.has('region_code') && <td className="mono">{p.region_code}</td>}
                                         </tr>
                                     ))}
+                                </tbody>
+                            </table>
+                        ) : dataType === 'boundary' ? (
+                            <table className="table">
+                                <thead>
+                                    <tr>
+                                        <th>行政区</th>
+                                        <th style={{ width: 70 }}>层级</th>
+                                        <th style={{ width: 90 }}>区码</th>
+                                        <th style={{ width: 90, textAlign: 'right' }}>要素</th>
+                                        <th style={{ width: 90, textAlign: 'right' }}>多边形</th>
+                                        <th style={{ width: 90, textAlign: 'right' }}>环</th>
+                                        <th style={{ width: 110, textAlign: 'right' }}>坐标点</th>
+                                        <th style={{ width: 240 }}>外接范围</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {selectedRegions.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>
+                                                请先在左侧选择省 / 市 / 区
+                                            </td>
+                                        </tr>
+                                    ) : !boundaryPreviewReady ? (
+                                        <tr>
+                                            <td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>
+                                                已选择 {selectedRegions.length} 个行政区，可直接导出，或先获取边界预览
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        boundaryPreview.map(row => (
+                                            <tr key={row.code}>
+                                                <td style={{ color: 'var(--text)' }}>{row.name}</td>
+                                                <td>{LEVEL_LABEL[row.level] ?? row.level}</td>
+                                                <td className="mono">{row.code}</td>
+                                                <td className="num mono">{row.feature_count.toLocaleString()}</td>
+                                                <td className="num mono">{row.polygon_count.toLocaleString()}</td>
+                                                <td className="num mono">{row.ring_count.toLocaleString()}</td>
+                                                <td className="num mono">{row.point_count.toLocaleString()}</td>
+                                                <td className="mono" style={{ fontSize: 10.5, color: 'var(--text-3)' }}>
+                                                    W {row.bounds.west.toFixed(4)} · S {row.bounds.south.toFixed(4)}
+                                                    {' / '}
+                                                    E {row.bounds.east.toFixed(4)} · N {row.bounds.north.toFixed(4)}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
                                 </tbody>
                             </table>
                         ) : (
@@ -520,41 +823,44 @@ export function ExportView() {
                     </div>
 
                     {/* Field chips */}
-                    <div
-                        style={{
-                            borderTop: '1px solid var(--hairline)',
-                            background: 'var(--panel-2)',
-                            padding: '12px 16px',
-                        }}
-                    >
-                        <div className="section-head" style={{ marginBottom: 8 }}>
-                            <h2>导出字段</h2>
-                            <span className="section-link">
-                                <b className="mono" style={{ color: 'var(--text)' }}>{fieldsCur.size}</b>
-                                {' '}/ {FIELDS_CUR.length} 个字段
-                            </span>
+                    {dataType !== 'boundary' && (
+                        <div
+                            style={{
+                                borderTop: '1px solid var(--hairline)',
+                                background: 'var(--panel-2)',
+                                padding: '12px 16px',
+                            }}
+                        >
+                            <div className="section-head" style={{ marginBottom: 8 }}>
+                                <h2>导出字段</h2>
+                                <span className="section-link">
+                                    <b className="mono" style={{ color: 'var(--text)' }}>{fieldsCur.size}</b>
+                                    {' '}/ {FIELDS_CUR.length} 个字段
+                                </span>
+                            </div>
+                            <div className="field-chips">
+                                {FIELDS_CUR.map(f => (
+                                    <button
+                                        key={f.id}
+                                        type="button"
+                                        className={`field-chip${fieldsCur.has(f.id) ? ' on' : ''}`}
+                                        onClick={() => toggleField(f.id)}
+                                    >
+                                        {fieldsCur.has(f.id) && <GcIcon name="check" size={10} strokeWidth={2.5} />}
+                                        {f.label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
-                        <div className="field-chips">
-                            {FIELDS_CUR.map(f => (
-                                <button
-                                    key={f.id}
-                                    type="button"
-                                    className={`field-chip${fieldsCur.has(f.id) ? ' on' : ''}`}
-                                    onClick={() => toggleField(f.id)}
-                                >
-                                    {fieldsCur.has(f.id) && <GcIcon name="check" size={10} strokeWidth={2.5} />}
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                    )}
 
                     {/* Footer: format + export */}
                     <div className="dh-export-foot">
                         <span>格式:</span>
                         <div className="seg">
-                            {FORMATS
-                                .filter(f => dataType === 'poi' || f.id !== 'mysql')
+                            {(dataType === 'boundary'
+                                ? BOUNDARY_FORMATS
+                                : FORMATS.filter(f => dataType === 'poi' || f.id !== 'mysql'))
                                 .map(f => (
                                     <button
                                         key={f.id}
@@ -567,14 +873,18 @@ export function ExportView() {
                                 ))}
                         </div>
                         <span style={{ marginLeft: 14 }} className="mono">
-                            ≈ {((totalCount * fieldsCur.size * 0.05) || 0).toFixed(1)} KB · {fieldsCur.size} 列 × {totalCount} 行
+                            {dataType === 'boundary'
+                                ? boundaryPreviewReady
+                                    ? `${boundaryPreview.length} 个行政区 · ${boundaryPointCount.toLocaleString()} 个坐标点`
+                                    : `${selectedRegions.length} 个行政区 · 导出时获取完整边界`
+                                : `≈ ${((totalCount * fieldsCur.size * 0.05) || 0).toFixed(1)} KB · ${fieldsCur.size} 列 × ${totalCount} 行`}
                         </span>
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
                             <button
                                 type="button"
                                 className="btn primary"
                                 onClick={doExport}
-                                disabled={exporting || totalCount === 0}
+                                disabled={exporting || (dataType === 'boundary' ? selectedRegions.length === 0 : totalCount === 0)}
                             >
                                 <GcIcon name="download" size={13} />
                                 {exporting ? '导出中...' : '导出到磁盘...'}

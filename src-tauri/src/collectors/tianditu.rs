@@ -39,7 +39,12 @@ impl TianDiTuCollector {
         }
     }
 
-    fn parse_poi_from_json(&self, raw: &Value, category: &str, category_id: &str) -> Option<POIData> {
+    fn parse_poi_from_json(
+        &self,
+        raw: &Value,
+        category: &str,
+        category_id: &str,
+    ) -> Option<POIData> {
         let lonlat = raw.get("lonlat")?.as_str()?;
         let parts: Vec<&str> = lonlat.split(',').collect();
         if parts.len() != 2 {
@@ -52,8 +57,11 @@ impl TianDiTuCollector {
         // 检查是否在区域范围内
         if let Some(ref region) = self.region {
             let bounds = &region.bounds;
-            if lon < bounds.min_lon || lon > bounds.max_lon ||
-               lat < bounds.min_lat || lat > bounds.max_lat {
+            if lon < bounds.min_lon
+                || lon > bounds.max_lon
+                || lat < bounds.min_lat
+                || lat > bounds.max_lat
+            {
                 return None;
             }
         }
@@ -71,8 +79,16 @@ impl TianDiTuCollector {
             original_lat: lat,
             category: category.to_string(),
             category_id: category_id.to_string(),
-            address: raw.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            phone: raw.get("phone").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            address: raw
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            phone: raw
+                .get("phone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             platform: "tianditu".to_string(),
             raw_data: raw.to_string(),
         })
@@ -92,7 +108,13 @@ impl Collector for TianDiTuCollector {
         self.region = Some(region);
     }
 
-    fn search_poi(&self, keyword: &str, page: usize, category_name: &str, category_id: &str) -> Result<(Vec<POIData>, bool), String> {
+    fn search_poi(
+        &self,
+        keyword: &str,
+        page: usize,
+        category_name: &str,
+        category_id: &str,
+    ) -> Result<(Vec<POIData>, bool), String> {
         let region = self.region.as_ref().ok_or("未设置区域配置")?;
         let bounds = &region.bounds;
 
@@ -111,10 +133,11 @@ impl Collector for TianDiTuCollector {
             count: Self::PAGE_SIZE,
         };
 
-        let post_str = serde_json::to_string(&search_params)
-            .map_err(|e| format!("序列化参数失败: {}", e))?;
+        let post_str =
+            serde_json::to_string(&search_params).map_err(|e| format!("序列化参数失败: {}", e))?;
 
-        let response = self.client
+        let response = self
+            .client
             .get(Self::API_URL)
             .query(&[
                 ("postStr", post_str.as_str()),
@@ -128,12 +151,16 @@ impl Collector for TianDiTuCollector {
             return Err("请求过于频繁 (429)".to_string());
         }
 
-        let data: Value = response.json()
+        let data: Value = response
+            .json()
             .map_err(|e| format!("解析响应失败: {}", e))?;
 
         // 检查响应状态
-        let status = data.get("status").and_then(|s| s.get("infocode"))
-            .and_then(|c| c.as_i64()).unwrap_or(0);
+        let status = data
+            .get("status")
+            .and_then(|s| s.get("infocode"))
+            .and_then(|c| c.as_i64())
+            .unwrap_or(0);
 
         if status != 1000 {
             if self.is_quota_error(&data) {
@@ -142,9 +169,14 @@ impl Collector for TianDiTuCollector {
             return Ok((vec![], false));
         }
 
-        let pois = data.get("pois").and_then(|p| p.as_array()).cloned().unwrap_or_default();
+        let pois = data
+            .get("pois")
+            .and_then(|p| p.as_array())
+            .cloned()
+            .unwrap_or_default();
 
-        let parsed: Vec<POIData> = pois.iter()
+        let parsed: Vec<POIData> = pois
+            .iter()
             .filter_map(|raw| self.parse_poi_from_json(raw, category_name, category_id))
             .collect();
 
@@ -153,11 +185,12 @@ impl Collector for TianDiTuCollector {
     }
 
     fn is_quota_error(&self, response: &Value) -> bool {
-        let infocode = response.get("status")
+        let infocode = response
+            .get("status")
             .and_then(|s| s.get("infocode"))
             .and_then(|c| c.as_i64())
             .unwrap_or(0);
-        
+
         matches!(infocode, 10001 | 10002 | 10003)
     }
 }

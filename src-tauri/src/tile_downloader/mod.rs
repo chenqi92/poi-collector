@@ -3,7 +3,7 @@ pub mod commands;
 pub mod database;
 pub mod downloader;
 pub mod platforms;
+pub mod serve_tile;
 pub mod storage;
 pub mod tile_proxy;
-pub mod serve_tile;
 pub mod types;

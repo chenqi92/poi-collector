@@ -30,12 +30,10 @@ impl TilePlatform for TencentPlatform {
         let flipped_y = self.flip_y(z, y);
 
         match map_type {
-            MapType::Street => {
-                Some(format!(
-                    "http://rt{}.map.gtimg.com/realtimerender?z={}&x={}&y={}&type=vector&style=0",
-                    s, z, x, flipped_y
-                ))
-            }
+            MapType::Street => Some(format!(
+                "http://rt{}.map.gtimg.com/realtimerender?z={}&x={}&y={}&type=vector&style=0",
+                s, z, x, flipped_y
+            )),
             MapType::Satellite => {
                 // 腾讯卫星图需要分块
                 let sx = x >> 4;
@@ -45,12 +43,10 @@ impl TilePlatform for TencentPlatform {
                     s, z, sx, sy, x, flipped_y
                 ))
             }
-            MapType::Terrain => {
-                Some(format!(
-                    "http://rt{}.map.gtimg.com/realtimerender?z={}&x={}&y={}&type=vector&style=4",
-                    s, z, x, flipped_y
-                ))
-            }
+            MapType::Terrain => Some(format!(
+                "http://rt{}.map.gtimg.com/realtimerender?z={}&x={}&y={}&type=vector&style=4",
+                s, z, x, flipped_y
+            )),
             _ => None,
         }
     }

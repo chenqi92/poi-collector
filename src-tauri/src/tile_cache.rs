@@ -54,12 +54,7 @@ pub async fn clear_osm_tile_cache(app: AppHandle) -> Result<String, String> {
 /// base64-encoded PNG bytes (empty string on hard failure so the frontend
 /// can render a transparent tile instead of throwing).
 #[tauri::command]
-pub async fn cached_osm_tile(
-    app: AppHandle,
-    z: u32,
-    x: u32,
-    y: u32,
-) -> Result<String, String> {
+pub async fn cached_osm_tile(app: AppHandle, z: u32, x: u32, y: u32) -> Result<String, String> {
     // Reasonable zoom guard.
     if z > 19 {
         return Ok(String::new());
@@ -74,10 +69,7 @@ pub async fn cached_osm_tile(
     }
 
     // Cache miss → fetch.  OSM's usage policy asks for an honest UA.
-    let url = format!(
-        "https://tile.openstreetmap.org/{}/{}/{}.png",
-        z, x, y
-    );
+    let url = format!("https://tile.openstreetmap.org/{}/{}/{}.png", z, x, y);
     let client = match reqwest::Client::builder()
         .user_agent(OSM_USER_AGENT)
         .timeout(Duration::from_secs(15))

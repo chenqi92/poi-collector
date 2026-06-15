@@ -17,7 +17,7 @@ pub struct CjhyTaskInfo {
     pub zoom_levels: Vec<u32>,
 }
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 /// 从本地磁盘读取瓦片图片，返回 base64 编码
 /// 路径格式: {base_path}/{z}/{x}/{y}.png

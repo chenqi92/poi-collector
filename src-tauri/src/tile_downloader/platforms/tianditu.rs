@@ -48,7 +48,12 @@ impl TilePlatform for TiandituPlatform {
     }
 
     fn supported_map_types(&self) -> Vec<MapType> {
-        vec![MapType::Street, MapType::Satellite, MapType::Terrain, MapType::Annotation]
+        vec![
+            MapType::Street,
+            MapType::Satellite,
+            MapType::Terrain,
+            MapType::Annotation,
+        ]
     }
 
     fn requires_api_key(&self) -> bool {

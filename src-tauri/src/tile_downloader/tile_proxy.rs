@@ -39,10 +39,7 @@ pub async fn proxy_tile_request(request: TileRequest) -> Result<Vec<u8>, String>
         req = req.header(&key, &value);
     }
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+    let response = req.send().await.map_err(|e| format!("请求失败: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP 错误: {}", response.status()));

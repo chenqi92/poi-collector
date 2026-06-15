@@ -80,6 +80,8 @@ pub fn run() {
             serve_tile::serve_local_tile,
             serve_tile::get_cjhy_tile_tasks,
             boundaries::get_region_boundary,
+            boundaries::collect_region_boundaries,
+            boundaries::export_region_boundaries_to_file,
             boundaries::clear_boundary_cache,
             // 航道图采集
             chart_commands::chart_estimate_tiles,

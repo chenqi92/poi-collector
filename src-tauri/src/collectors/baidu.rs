@@ -26,7 +26,12 @@ impl BaiduCollector {
         }
     }
 
-    fn parse_poi_from_json(&self, raw: &Value, category: &str, category_id: &str) -> Option<POIData> {
+    fn parse_poi_from_json(
+        &self,
+        raw: &Value,
+        category: &str,
+        category_id: &str,
+    ) -> Option<POIData> {
         let location = raw.get("location")?;
         let bd_lon = location.get("lng")?.as_f64()?;
         let bd_lat = location.get("lat")?.as_f64()?;
@@ -41,8 +46,11 @@ impl BaiduCollector {
         // 检查是否在区域范围内
         if let Some(ref region) = self.region {
             let bounds = &region.bounds;
-            if wgs_lon < bounds.min_lon || wgs_lon > bounds.max_lon ||
-               wgs_lat < bounds.min_lat || wgs_lat > bounds.max_lat {
+            if wgs_lon < bounds.min_lon
+                || wgs_lon > bounds.max_lon
+                || wgs_lat < bounds.min_lat
+                || wgs_lat > bounds.max_lat
+            {
                 return None;
             }
         }
@@ -60,8 +68,16 @@ impl BaiduCollector {
             original_lat: bd_lat,
             category: category.to_string(),
             category_id: category_id.to_string(),
-            address: raw.get("address").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            phone: raw.get("telephone").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            address: raw
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            phone: raw
+                .get("telephone")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             platform: "baidu".to_string(),
             raw_data: raw.to_string(),
         })
@@ -81,10 +97,17 @@ impl Collector for BaiduCollector {
         self.region = Some(region);
     }
 
-    fn search_poi(&self, keyword: &str, page: usize, category_name: &str, category_id: &str) -> Result<(Vec<POIData>, bool), String> {
+    fn search_poi(
+        &self,
+        keyword: &str,
+        page: usize,
+        category_name: &str,
+        category_id: &str,
+    ) -> Result<(Vec<POIData>, bool), String> {
         let region = self.region.as_ref().ok_or("未设置区域配置")?;
 
-        let response = self.client
+        let response = self
+            .client
             .get(Self::API_URL)
             .query(&[
                 ("ak", self.api_key.as_str()),
@@ -103,7 +126,8 @@ impl Collector for BaiduCollector {
             return Err("请求过于频繁 (429)".to_string());
         }
 
-        let data: Value = response.json()
+        let data: Value = response
+            .json()
             .map_err(|e| format!("解析响应失败: {}", e))?;
 
         // 检查响应状态
@@ -115,14 +139,19 @@ impl Collector for BaiduCollector {
             return Ok((vec![], false));
         }
 
-        let pois = data.get("results").and_then(|p| p.as_array()).cloned().unwrap_or_default();
+        let pois = data
+            .get("results")
+            .and_then(|p| p.as_array())
+            .cloned()
+            .unwrap_or_default();
         let total = data.get("total").and_then(|t| t.as_i64()).unwrap_or(0);
 
-        let parsed: Vec<POIData> = pois.iter()
+        let parsed: Vec<POIData> = pois
+            .iter()
             .filter_map(|raw| self.parse_poi_from_json(raw, category_name, category_id))
             .collect();
 
-        let has_more = (page as i64 * Self::PAGE_SIZE as i64) < total 
+        let has_more = (page as i64 * Self::PAGE_SIZE as i64) < total
             && pois.len() >= Self::PAGE_SIZE as usize;
 
         Ok((parsed, has_more))

@@ -635,8 +635,16 @@ pub fn search_poi_by_bounds(
         .as_ref()
         .filter(|p| p.as_str() != "all")
         .map(|s| s.as_str());
-    db.get_poi_in_bounds(south, west, north, east, query_filter, platform_filter, 2000)
-        .map_err(|e| e.to_string())
+    db.get_poi_in_bounds(
+        south,
+        west,
+        north,
+        east,
+        query_filter,
+        platform_filter,
+        2000,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -734,10 +742,7 @@ pub struct PoiPage {
 /// 综合过滤 + 分页查询。底层使用 FTS5 trigram 索引做文本搜索。
 /// 走只读连接池，不阻塞写入。
 #[tauri::command]
-pub fn search_pois(
-    filters: PoiSearchFilters,
-    pagination: Pagination,
-) -> Result<PoiPage, String> {
+pub fn search_pois(filters: PoiSearchFilters, pagination: Pagination) -> Result<PoiPage, String> {
     let bounds_tuple = filters
         .bounds
         .as_ref()
@@ -800,7 +805,10 @@ pub fn export_poi_to_file(
 
     // 用过滤条件直接在 SQLite 内 SELECT 出符合的所有行，避免前端把 23k 全拉到 JS。
     let data: Vec<ExportPOI> = if let Some(f) = filters {
-        let bounds_tuple = f.bounds.as_ref().map(|b| (b.south, b.west, b.north, b.east));
+        let bounds_tuple = f
+            .bounds
+            .as_ref()
+            .map(|b| (b.south, b.west, b.north, b.east));
         db.search_export_pois_filtered(
             f.query.as_deref(),
             &f.platforms,
