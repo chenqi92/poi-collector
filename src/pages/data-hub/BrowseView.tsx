@@ -15,6 +15,7 @@ import {
 import { ClusteredMarkers, type ClusterPoint } from './ClusteredMarkers'
 import {
     ChartOverlayLayer,
+    ChartFeatureOverlay,
     FitChartBounds,
     ChartZoomIndicator,
     fetchCjhyTasks,
@@ -61,10 +62,41 @@ function MapResizeOnView({ trigger }: { trigger: unknown }) {
     const map = useMap()
     useEffect(() => {
         // Run after the grid layout has applied the new column template.
-        const t1 = setTimeout(() => map.invalidateSize(), 50)
-        const t2 = setTimeout(() => map.invalidateSize(), 250)
-        return () => { clearTimeout(t1); clearTimeout(t2) }
+        let frame = 0
+        const resize = () => {
+            if (frame) cancelAnimationFrame(frame)
+            frame = requestAnimationFrame(() => {
+                frame = 0
+                map.invalidateSize({ pan: false })
+            })
+        }
+        resize()
+        const t1 = setTimeout(resize, 50)
+        const t2 = setTimeout(resize, 250)
+        const t3 = setTimeout(resize, 600)
+        return () => {
+            clearTimeout(t1)
+            clearTimeout(t2)
+            clearTimeout(t3)
+            if (frame) cancelAnimationFrame(frame)
+        }
     }, [map, trigger])
+
+    useEffect(() => {
+        const container = map.getContainer()
+        let frame = 0
+        const resize = () => {
+            if (frame) cancelAnimationFrame(frame)
+            frame = requestAnimationFrame(() => map.invalidateSize({ pan: false }))
+        }
+        const observer = new ResizeObserver(resize)
+        observer.observe(container)
+        return () => {
+            if (frame) cancelAnimationFrame(frame)
+            observer.disconnect()
+        }
+    }, [map])
+
     return null
 }
 
@@ -229,6 +261,9 @@ export function BrowseView() {
     const [chartTasks, setChartTasks] = useState<CjhyTask[]>([])
     const [chartTaskId, setChartTaskId] = useState<string>('')
     const [chartLoaded, setChartLoaded] = useState(false)
+    const [showChartLayer, setShowChartLayer] = useState(true)
+    const [showFenceLayer, setShowFenceLayer] = useState(true)
+    const [showHydroLayer, setShowHydroLayer] = useState(false)
     useEffect(() => {
         if (dataType !== 'chart' || chartLoaded) return
         fetchCjhyTasks().then(list => {
@@ -492,6 +527,35 @@ export function BrowseView() {
                                 ))}
                             </select>
                         )}
+                        <span style={{ width: 1, height: 18, background: 'var(--hairline)', margin: '0 4px' }} />
+                        <label className="checkbox" style={{ height: 24 }} title="显示或隐藏本地航道图瓦片图层">
+                            <input
+                                type="checkbox"
+                                checked={Boolean(selectedChartTask && showChartLayer)}
+                                onChange={e => setShowChartLayer(e.target.checked)}
+                                disabled={!selectedChartTask}
+                            />
+                            <GcIcon name="map" size={11} />
+                            航道图层
+                        </label>
+                        <label className="checkbox" style={{ height: 24 }} title="显示或隐藏电子围栏专题要素">
+                            <input
+                                type="checkbox"
+                                checked={showFenceLayer}
+                                onChange={e => setShowFenceLayer(e.target.checked)}
+                            />
+                            <GcIcon name="polygon" size={11} />
+                            电子围栏
+                        </label>
+                        <label className="checkbox" style={{ height: 24 }} title="显示或隐藏 HYDRO_A 水域面">
+                            <input
+                                type="checkbox"
+                                checked={showHydroLayer}
+                                onChange={e => setShowHydroLayer(e.target.checked)}
+                            />
+                            <GcIcon name="layers" size={11} />
+                            水域面
+                        </label>
                     </div>
                 )}
 
@@ -567,7 +631,7 @@ export function BrowseView() {
                         <BoundsTracker onChange={setBounds} />
                         <MapClickClearer onClickEmpty={() => setActiveId(null)} />
                         <PanToWhenActive point={activePoint} />
-                        <MapResizeOnView trigger={view} />
+                        <MapResizeOnView trigger={`${dataType}:${view}:${chartTaskId}:${showMap}:${showChartLayer}`} />
                         <FitToBounds bounds={dataType === 'chart' ? null : initialFit} />
                         {dataType !== 'chart' && (
                             <ClusteredMarkers
@@ -577,10 +641,32 @@ export function BrowseView() {
                                 onSelect={setActiveId}
                             />
                         )}
-                        {dataType === 'chart' && selectedChartTask && (
+                        {dataType === 'chart' && (
                             <>
-                                <ChartOverlayLayer basePath={selectedChartTask.output_path} visible={true} />
-                                <FitChartBounds bounds={chartBounds} />
+                                {selectedChartTask && (
+                                    <>
+                                        {showChartLayer && (
+                                            <ChartOverlayLayer basePath={selectedChartTask.output_path} visible={true} />
+                                        )}
+                                        <FitChartBounds bounds={chartBounds} />
+                                    </>
+                                )}
+                                <ChartFeatureOverlay
+                                    visible={showHydroLayer}
+                                    sourceLayer="HYDRO_A"
+                                    label="水域面"
+                                    kind="hydro"
+                                    fitBounds={!selectedChartTask && !showFenceLayer}
+                                    controlOffsetTop={showFenceLayer ? 38 : 0}
+                                    viewportLoad
+                                />
+                                <ChartFeatureOverlay
+                                    visible={showFenceLayer}
+                                    sourceLayer="electronic_fence"
+                                    label="电子围栏"
+                                    kind="fence"
+                                    fitBounds={!selectedChartTask}
+                                />
                                 <ChartZoomIndicator />
                             </>
                         )}

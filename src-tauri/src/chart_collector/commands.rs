@@ -4,6 +4,7 @@
 use super::buoy_collector::BuoyCollector;
 use super::composer::ChartComposer;
 use super::database::ChartDatabase;
+use super::feature_collector::FeatureCollector;
 use super::tile_fetcher::{estimate_chart_tiles, ChartTileFetcher};
 use super::types::*;
 use once_cell::sync::Lazy;
@@ -87,7 +88,9 @@ pub async fn chart_start_buoy_collection(
     {
         let status = TASK_STATUS.read();
         match *status {
-            ChartTaskStatus::CollectingBuoys | ChartTaskStatus::DownloadingTiles => {
+            ChartTaskStatus::CollectingBuoys
+            | ChartTaskStatus::CollectingFeatures
+            | ChartTaskStatus::DownloadingTiles => {
                 return Err("已有任务在运行中，请先停止当前任务".to_string());
             }
             _ => {}
@@ -113,7 +116,9 @@ pub async fn chart_start_buoy_collection(
     // 创建任务记录（在进度转发之前创建，保证 task_id 可共享）
     let db_path = get_db_path();
     let task_id = match ChartDatabase::new(&db_path) {
-        Ok(db) => db.create_chart_task("buoy", 0, Some(&bounds), Some(step)).unwrap_or(0),
+        Ok(db) => db
+            .create_chart_task("buoy", 0, Some(&bounds), Some(step))
+            .unwrap_or(0),
         Err(_) => 0,
     };
 
@@ -148,7 +153,6 @@ pub async fn chart_start_buoy_collection(
     // 后台执行采集，不阻塞 Tauri command
     let app_final = app.clone();
     tokio::spawn(async move {
-
         let collector = BuoyCollector::new(step);
         let result = collector
             .collect(&bounds, stop_flag, progress_tx, log_tx.clone())
@@ -157,7 +161,7 @@ pub async fn chart_start_buoy_collection(
         match result {
             Ok(buoys) => {
                 let _ = log_tx
-                    .send(format!("💾 正在保存 {} 个航标到数据库...", buoys.len()))
+                    .send(format!("[SAVE] 正在保存 {} 个航标到数据库...", buoys.len()))
                     .await;
 
                 match ChartDatabase::new(&db_path) {
@@ -170,7 +174,7 @@ pub async fn chart_start_buoy_collection(
                                     db.complete_chart_task(task_id, "completed", count as i64, 0);
                             }
                             let _ = log_tx
-                                .send(format!("✅ 航标采集完成，入库 {} 条", count))
+                                .send(format!("[OK] 航标采集完成，入库 {} 条", count))
                                 .await;
                             let _ = app_final.emit(
                                 "chart-progress",
@@ -188,12 +192,12 @@ pub async fn chart_start_buoy_collection(
                             if task_id > 0 {
                                 let _ = db.complete_chart_task(task_id, "failed", 0, 0);
                             }
-                            let _ = log_tx.send(format!("❌ 保存数据库失败: {}", e)).await;
+                            let _ = log_tx.send(format!("[ERROR] 保存数据库失败: {}", e)).await;
                         }
                     },
                     Err(e) => {
                         *TASK_STATUS.write() = ChartTaskStatus::Failed;
-                        let _ = log_tx.send(format!("❌ 打开数据库失败: {}", e)).await;
+                        let _ = log_tx.send(format!("[ERROR] 打开数据库失败: {}", e)).await;
                     }
                 }
             }
@@ -205,13 +209,156 @@ pub async fn chart_start_buoy_collection(
                         let _ = db.complete_chart_task(task_id, "failed", 0, 0);
                     }
                 }
-                let _ = log_tx.send(format!("❌ 航标采集失败: {}", e)).await;
+                let _ = log_tx.send(format!("[ERROR] 航标采集失败: {}", e)).await;
             }
         }
     });
 
     // 立即返回，不阻塞
     Ok("航标采集已启动（后台运行）".to_string())
+}
+
+/// 开始航道专题要素采集（电子围栏 + 水域面）
+#[tauri::command]
+pub async fn chart_start_feature_collection(
+    app: AppHandle,
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+    grid_step: Option<f64>,
+    include_fences: Option<bool>,
+    include_hydro: Option<bool>,
+) -> Result<String, String> {
+    {
+        let status = TASK_STATUS.read();
+        match *status {
+            ChartTaskStatus::CollectingBuoys
+            | ChartTaskStatus::CollectingFeatures
+            | ChartTaskStatus::DownloadingTiles => {
+                return Err("已有任务在运行中，请先停止当前任务".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    let bounds = ChartBounds::new(west, south, east, north);
+    if !bounds.is_valid() {
+        return Err("无效的边界范围".to_string());
+    }
+
+    let step = grid_step.unwrap_or(0.2);
+    let fences = include_fences.unwrap_or(true);
+    let hydro = include_hydro.unwrap_or(true);
+    if !fences && !hydro {
+        return Err("至少选择一种航道要素".to_string());
+    }
+
+    STOP_FLAG.store(false, Ordering::Relaxed);
+    *TASK_STATUS.write() = ChartTaskStatus::CollectingFeatures;
+
+    let stop_flag = STOP_FLAG.clone();
+    let (progress_tx, mut progress_rx) = mpsc::channel::<ChartProgressEvent>(100);
+    let (log_tx, mut log_rx) = mpsc::channel::<String>(500);
+
+    let db_path = get_db_path();
+    let task_id = match ChartDatabase::new(&db_path) {
+        Ok(db) => db
+            .create_chart_task("feature", 0, Some(&bounds), Some(step))
+            .unwrap_or(0),
+        Err(_) => 0,
+    };
+
+    let app_progress = app.clone();
+    let db_path_progress = db_path.clone();
+    tokio::spawn(async move {
+        while let Some(event) = progress_rx.recv().await {
+            let _ = app_progress.emit("chart-progress", &event);
+            if task_id > 0 && event.total > 0 {
+                if let Ok(db) = ChartDatabase::new(&db_path_progress) {
+                    let _ = db.update_chart_task_progress(
+                        task_id,
+                        event.current as i64,
+                        0,
+                        Some(event.total as i64),
+                    );
+                }
+            }
+        }
+    });
+
+    let app_log = app.clone();
+    tokio::spawn(async move {
+        while let Some(msg) = log_rx.recv().await {
+            let _ = app_log.emit("chart-log", &msg);
+        }
+    });
+
+    let app_final = app.clone();
+    tokio::spawn(async move {
+        let collector = FeatureCollector::new(step, fences, hydro);
+        let result = collector
+            .collect(&bounds, stop_flag, progress_tx, log_tx.clone())
+            .await;
+
+        match result {
+            Ok(features) => {
+                let _ = log_tx
+                    .send(format!(
+                        "[SAVE] 正在保存 {} 个航道要素到数据库...",
+                        features.len()
+                    ))
+                    .await;
+
+                match ChartDatabase::new(&db_path) {
+                    Ok(db) => match db.upsert_features(&features) {
+                        Ok(count) => {
+                            *TASK_STATUS.write() = ChartTaskStatus::Completed;
+                            if task_id > 0 {
+                                let _ =
+                                    db.complete_chart_task(task_id, "completed", count as i64, 0);
+                            }
+                            let _ = log_tx
+                                .send(format!("[OK] 航道要素采集完成，入库 {} 条", count))
+                                .await;
+                            let _ = app_final.emit(
+                                "chart-progress",
+                                &ChartProgressEvent {
+                                    task_type: "feature".to_string(),
+                                    status: "completed".to_string(),
+                                    current: count as u64,
+                                    total: count as u64,
+                                    message: Some(format!("入库 {} 条", count)),
+                                },
+                            );
+                        }
+                        Err(e) => {
+                            *TASK_STATUS.write() = ChartTaskStatus::Failed;
+                            if task_id > 0 {
+                                let _ = db.complete_chart_task(task_id, "failed", 0, 0);
+                            }
+                            let _ = log_tx.send(format!("[ERROR] 保存航道要素失败: {}", e)).await;
+                        }
+                    },
+                    Err(e) => {
+                        *TASK_STATUS.write() = ChartTaskStatus::Failed;
+                        let _ = log_tx.send(format!("[ERROR] 打开数据库失败: {}", e)).await;
+                    }
+                }
+            }
+            Err(e) => {
+                *TASK_STATUS.write() = ChartTaskStatus::Failed;
+                if task_id > 0 {
+                    if let Ok(db) = ChartDatabase::new(&db_path) {
+                        let _ = db.complete_chart_task(task_id, "failed", 0, 0);
+                    }
+                }
+                let _ = log_tx.send(format!("[ERROR] 航道要素采集失败: {}", e)).await;
+            }
+        }
+    });
+
+    Ok("航道要素采集已启动（后台运行）".to_string())
 }
 
 /// 开始瓦片下载（后台异步执行）
@@ -230,7 +377,9 @@ pub async fn chart_start_tile_download(
     {
         let status = TASK_STATUS.read();
         match *status {
-            ChartTaskStatus::CollectingBuoys | ChartTaskStatus::DownloadingTiles => {
+            ChartTaskStatus::CollectingBuoys
+            | ChartTaskStatus::CollectingFeatures
+            | ChartTaskStatus::DownloadingTiles => {
                 return Err("已有任务在运行中，请先停止当前任务".to_string());
             }
             _ => {}
@@ -285,7 +434,7 @@ pub async fn chart_start_tile_download(
     tokio::spawn(async move {
         let _ = log_tx
             .send(format!(
-                "🗺️ 开始瓦片下载: {} 个图层, 级别 {:?}, 输出: {}",
+                "[INFO] 开始瓦片下载: {} 个图层, 级别 {:?}, 输出: {}",
                 chart_layers.len(),
                 zoom_levels,
                 out_dir
@@ -301,12 +450,12 @@ pub async fn chart_start_tile_download(
             Ok(count) => {
                 *TASK_STATUS.write() = ChartTaskStatus::Completed;
                 let _ = log_tx
-                    .send(format!("✅ 瓦片下载完成，共 {} 个", count))
+                    .send(format!("[OK] 瓦片下载完成，共 {} 个", count))
                     .await;
             }
             Err(e) => {
                 *TASK_STATUS.write() = ChartTaskStatus::Failed;
-                let _ = log_tx.send(format!("❌ 瓦片下载失败: {}", e)).await;
+                let _ = log_tx.send(format!("[ERROR] 瓦片下载失败: {}", e)).await;
             }
         }
     });
@@ -353,12 +502,27 @@ pub fn chart_get_buoy_count() -> Result<u64, String> {
     db.get_buoy_count()
 }
 
+/// 获取航道专题要素总数
+#[tauri::command]
+pub fn chart_get_feature_count() -> Result<u64, String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_feature_count()
+}
+
 /// 清空航标数据
 #[tauri::command]
 pub fn chart_clear_buoys() -> Result<String, String> {
     let db = ChartDatabase::new(&get_db_path())?;
     db.clear_buoys()?;
     Ok("航标数据已清空".to_string())
+}
+
+/// 清空航道专题要素
+#[tauri::command]
+pub fn chart_clear_features() -> Result<String, String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.clear_features()?;
+    Ok("航道要素数据已清空".to_string())
 }
 
 /// 执行图像合成
@@ -538,6 +702,162 @@ pub fn chart_export_buoys(
     ))
 }
 
+fn sql_literal(value: Option<&str>) -> String {
+    value
+        .map(|v| format!("'{}'", v.replace('\'', "''")))
+        .unwrap_or_else(|| "NULL".to_string())
+}
+
+fn sql_number(value: Option<f64>) -> String {
+    value
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "NULL".to_string())
+}
+
+/// 导出航道专题要素（JSON、GeoJSON、CSV 或 SQL）
+#[tauri::command]
+pub fn chart_export_features(
+    format: String,
+    output_path: String,
+    west: Option<f64>,
+    south: Option<f64>,
+    east: Option<f64>,
+    north: Option<f64>,
+) -> Result<String, String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+
+    let features = if let (Some(w), Some(s), Some(e), Some(n)) = (west, south, east, north) {
+        let bounds = ChartBounds::new(w, s, e, n);
+        db.get_features_in_bounds(&bounds)?
+    } else {
+        db.get_all_features()?
+    };
+
+    if features.is_empty() {
+        return Err("没有可导出的航道要素数据".to_string());
+    }
+
+    let content_bytes: Vec<u8> = match format.as_str() {
+        "json" => {
+            let json = serde_json::to_string_pretty(&features)
+                .map_err(|e| format!("JSON 序列化失败: {}", e))?;
+            json.into_bytes()
+        }
+        "geojson" => {
+            let geo_features: Vec<serde_json::Value> = features
+                .iter()
+                .map(|f| {
+                    let geometry = serde_json::from_str::<serde_json::Value>(&f.geometry_json)
+                        .unwrap_or(serde_json::Value::Null);
+                    serde_json::json!({
+                        "type": "Feature",
+                        "id": f.id,
+                        "properties": {
+                            "source": f.source,
+                            "source_layer": f.source_layer,
+                            "source_feature_id": f.source_feature_id,
+                            "name": f.name,
+                            "feature_type": f.feature_type,
+                            "geometry_type": f.geometry_type,
+                            "min_lon": f.min_lon,
+                            "min_lat": f.min_lat,
+                            "max_lon": f.max_lon,
+                            "max_lat": f.max_lat,
+                        },
+                        "geometry": geometry,
+                    })
+                })
+                .collect();
+            let fc = serde_json::json!({
+                "type": "FeatureCollection",
+                "name": "cjhy_chart_features",
+                "features": geo_features,
+            });
+            serde_json::to_string_pretty(&fc)
+                .map_err(|e| format!("GeoJSON 序列化失败: {}", e))?
+                .into_bytes()
+        }
+        "csv" => {
+            let mut csv = String::from("id,source,source_layer,source_feature_id,name,feature_type,geometry_type,min_lon,min_lat,max_lon,max_lat\n");
+            for f in &features {
+                csv.push_str(&format!(
+                    "{},{},{},{},{},{},{},{},{},{},{}\n",
+                    csv_escape(&f.id),
+                    csv_escape(&f.source),
+                    csv_escape(&f.source_layer),
+                    csv_escape(f.source_feature_id.as_deref().unwrap_or("")),
+                    csv_escape(f.name.as_deref().unwrap_or("")),
+                    csv_escape(f.feature_type.as_deref().unwrap_or("")),
+                    csv_escape(f.geometry_type.as_deref().unwrap_or("")),
+                    f.min_lon.map(|v| v.to_string()).unwrap_or_default(),
+                    f.min_lat.map(|v| v.to_string()).unwrap_or_default(),
+                    f.max_lon.map(|v| v.to_string()).unwrap_or_default(),
+                    f.max_lat.map(|v| v.to_string()).unwrap_or_default(),
+                ));
+            }
+            let mut bytes = vec![0xEF, 0xBB, 0xBF];
+            bytes.extend_from_slice(csv.as_bytes());
+            bytes
+        }
+        "mysql" => {
+            let mut sql_bytes: Vec<u8> = vec![0xEF, 0xBB, 0xBF];
+            let mut sql = String::new();
+            sql.push_str("-- 航道专题要素导出\n");
+            sql.push_str("-- 生成时间: ");
+            sql.push_str(&chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+            sql.push_str(
+                "\n-- geometry_json 为 GeoJSON Geometry，可导入后转换为 PostGIS geometry\n\n",
+            );
+            sql.push_str("SET NAMES utf8mb4;\n\n");
+            sql.push_str("CREATE TABLE IF NOT EXISTS chart_feature_data (\n");
+            sql.push_str("  id VARCHAR(128) PRIMARY KEY,\n");
+            sql.push_str("  source VARCHAR(64) NOT NULL,\n");
+            sql.push_str("  source_layer VARCHAR(64) NOT NULL,\n");
+            sql.push_str("  source_feature_id VARCHAR(128),\n");
+            sql.push_str("  name VARCHAR(255),\n");
+            sql.push_str("  feature_type VARCHAR(128),\n");
+            sql.push_str("  geometry_type VARCHAR(64),\n");
+            sql.push_str("  min_lon DOUBLE,\n");
+            sql.push_str("  min_lat DOUBLE,\n");
+            sql.push_str("  max_lon DOUBLE,\n");
+            sql.push_str("  max_lat DOUBLE,\n");
+            sql.push_str("  geometry_json LONGTEXT NOT NULL,\n");
+            sql.push_str("  raw_json LONGTEXT NOT NULL\n");
+            sql.push_str(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;\n\n");
+
+            for f in &features {
+                sql.push_str(&format!(
+                    "INSERT INTO chart_feature_data (id, source, source_layer, source_feature_id, name, feature_type, geometry_type, min_lon, min_lat, max_lon, max_lat, geometry_json, raw_json) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {});\n",
+                    sql_literal(Some(&f.id)),
+                    sql_literal(Some(&f.source)),
+                    sql_literal(Some(&f.source_layer)),
+                    sql_literal(f.source_feature_id.as_deref()),
+                    sql_literal(f.name.as_deref()),
+                    sql_literal(f.feature_type.as_deref()),
+                    sql_literal(f.geometry_type.as_deref()),
+                    sql_number(f.min_lon),
+                    sql_number(f.min_lat),
+                    sql_number(f.max_lon),
+                    sql_number(f.max_lat),
+                    sql_literal(Some(&f.geometry_json)),
+                    sql_literal(Some(&f.raw_json)),
+                ));
+            }
+            sql_bytes.extend_from_slice(sql.as_bytes());
+            sql_bytes
+        }
+        _ => return Err(format!("不支持的格式: {}", format)),
+    };
+
+    std::fs::write(&output_path, &content_bytes).map_err(|e| format!("写入文件失败: {}", e))?;
+
+    Ok(format!(
+        "导出成功: {} 条航道要素 → {}",
+        features.len(),
+        output_path
+    ))
+}
+
 /// 瓦片文件统计结果
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChartTileStats {
@@ -603,11 +923,65 @@ pub fn chart_get_buoy_stats() -> Result<Vec<(String, i64)>, String> {
     db.get_buoy_stats()
 }
 
+/// 获取航道专题要素按类型分组统计
+#[tauri::command]
+pub fn chart_get_feature_stats() -> Result<Vec<(String, i64)>, String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_feature_stats()
+}
+
 /// 获取所有航标数据（供前端表格展示）
 #[tauri::command]
 pub fn chart_get_all_buoys() -> Result<Vec<BuoyInfo>, String> {
     let db = ChartDatabase::new(&get_db_path())?;
     db.get_all_buoys()
+}
+
+/// 获取所有航道专题要素
+#[tauri::command]
+pub fn chart_get_all_features() -> Result<Vec<ChartFeatureInfo>, String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_all_features()
+}
+
+/// 获取电子围栏要素（供航道图叠加展示）
+#[tauri::command]
+pub fn chart_get_fence_features() -> Result<Vec<ChartFeatureInfo>, String> {
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_features_by_layer("electronic_fence")
+}
+
+/// 按来源图层获取航道专题要素（供航道图叠加展示）
+#[tauri::command]
+pub fn chart_get_features_by_layer(source_layer: String) -> Result<Vec<ChartFeatureInfo>, String> {
+    if source_layer != "electronic_fence" && source_layer != "HYDRO_A" {
+        return Err(format!("不支持的航道要素图层: {}", source_layer));
+    }
+
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_features_by_layer(&source_layer)
+}
+
+/// 按来源图层和 bbox 获取航道专题要素（供视野内叠加展示）
+#[tauri::command]
+pub fn chart_get_features_by_layer_in_bounds(
+    source_layer: String,
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+) -> Result<Vec<ChartFeatureInfo>, String> {
+    if source_layer != "electronic_fence" && source_layer != "HYDRO_A" {
+        return Err(format!("不支持的航道要素图层: {}", source_layer));
+    }
+
+    let bounds = ChartBounds::new(west, south, east, north);
+    if !bounds.is_valid() {
+        return Err("无效的边界范围".to_string());
+    }
+
+    let db = ChartDatabase::new(&get_db_path())?;
+    db.get_features_by_layer_in_bounds(&source_layer, &bounds)
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -628,4 +1002,3 @@ pub fn chart_get_buoy_extent() -> Result<Option<BuoyExtent>, String> {
         east: e,
     }))
 }
-

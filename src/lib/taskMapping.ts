@@ -39,7 +39,7 @@ export function normalizeStatus(s: string): TaskStatus {
 export function inferType(taskType: string): TaskType {
     const t = taskType.toLowerCase()
     if (t.includes('tile')) return 'tile'
-    if (t.includes('buoy') || t.includes('aton')) return 'aton'
+    if (t.includes('buoy') || t.includes('aton') || t.includes('feature')) return 'aton'
     return 'poi'
 }
 

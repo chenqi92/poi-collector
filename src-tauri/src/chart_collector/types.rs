@@ -157,6 +157,32 @@ pub struct BuoyInfo {
     pub raw_json: String,
 }
 
+/// 长江航道图专题/水域矢量要素
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChartFeatureInfo {
+    pub id: String,
+    /// 数据来源，如 cjhy_fence / cjshoudong_mapserver
+    pub source: String,
+    /// 来源图层，如 electronic_fence / HYDRO_A
+    pub source_layer: String,
+    /// 来源系统里的原始要素 ID
+    pub source_feature_id: Option<String>,
+    /// 要素名称
+    pub name: Option<String>,
+    /// 业务类型，如 电子围栏 / DEPARE
+    pub feature_type: Option<String>,
+    /// GeoJSON 几何类型
+    pub geometry_type: Option<String>,
+    /// GeoJSON geometry 字符串
+    pub geometry_json: String,
+    pub min_lon: Option<f64>,
+    pub min_lat: Option<f64>,
+    pub max_lon: Option<f64>,
+    pub max_lat: Option<f64>,
+    /// 原始 JSON 数据
+    pub raw_json: String,
+}
+
 /// 网格切片单元
 #[derive(Debug, Clone)]
 pub struct GridCell {
@@ -188,6 +214,7 @@ impl ChartTileCoord {
 pub enum ChartTaskStatus {
     Idle,
     CollectingBuoys,
+    CollectingFeatures,
     DownloadingTiles,
     Composing,
     Completed,
@@ -216,6 +243,23 @@ pub struct BuoyApiResponse {
     #[serde(rename = "errorMsg")]
     pub error_msg: Option<String>,
     pub data: Option<serde_json::Value>,
+    pub total: Option<u64>,
+}
+
+/// 长江 e+ 通用 API 响应结构
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct ChartApiResponse {
+    pub result: Option<String>,
+    pub status: Option<i32>,
+    pub time: Option<u64>,
+    #[serde(rename = "errorCode")]
+    pub error_code: Option<i32>,
+    #[serde(rename = "errorMsg")]
+    pub error_msg: Option<String>,
+    pub data: Option<serde_json::Value>,
+    pub rows: Option<serde_json::Value>,
+    pub list: Option<serde_json::Value>,
     pub total: Option<u64>,
 }
 

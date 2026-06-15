@@ -1,4 +1,4 @@
-import { Moon, Sun, Monitor } from "lucide-react"
+import { Check, Moon, Sun, Monitor } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -25,17 +25,17 @@ export function ThemeToggle() {
                 <DropdownMenuItem onClick={() => setTheme("light")}>
                     <Sun className="mr-2 h-4 w-4" />
                     浅色
-                    {theme === "light" && <span className="ml-auto">✓</span>}
+                    {theme === "light" && <Check className="ml-auto h-4 w-4" />}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setTheme("dark")}>
                     <Moon className="mr-2 h-4 w-4" />
                     深色
-                    {theme === "dark" && <span className="ml-auto">✓</span>}
+                    {theme === "dark" && <Check className="ml-auto h-4 w-4" />}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setTheme("system")}>
                     <Monitor className="mr-2 h-4 w-4" />
                     跟随系统
-                    {theme === "system" && <span className="ml-auto">✓</span>}
+                    {theme === "system" && <Check className="ml-auto h-4 w-4" />}
                 </DropdownMenuItem>
             </DropdownMenuContent>
         </DropdownMenu>

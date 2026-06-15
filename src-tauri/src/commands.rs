@@ -1014,28 +1014,38 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
         }
     }
 
-    // 2. 航标采集任务
+    // 2. 航道图采集任务（航标 / 航道要素）
     {
         use crate::chart_collector::commands::get_db_path;
         use crate::chart_collector::database::ChartDatabase;
         if let Ok(chart_db) = ChartDatabase::new(&get_db_path()) {
             if let Ok(chart_tasks) = chart_db.get_chart_tasks() {
                 for t in chart_tasks {
-                    let name = format!("航标采集 - {}", t.task_type);
+                    let (task_type, name) = match t.task_type.as_str() {
+                        "feature" => ("feature".to_string(), "航道要素采集".to_string()),
+                        "tile" => ("tile".to_string(), "航道图瓦片下载".to_string()),
+                        _ => ("buoy".to_string(), "航标采集".to_string()),
+                    };
+                    let id_prefix = match task_type.as_str() {
+                        "feature" => "feature",
+                        "tile" => "charttile",
+                        _ => "buoy",
+                    };
                     tasks.push(UnifiedTask {
-                        id: format!("buoy_{}", t.id),
-                        task_type: "buoy".to_string(),
+                        id: format!("{}_{}", id_prefix, t.id),
+                        task_type,
                         name,
                         status: t.status,
                         total: t.total_items as u64,
                         completed: t.completed_items as u64,
                         failed: t.failed_items as u64,
-                        platform: None,
+                        platform: Some("cjhd".to_string()),
                         output_path: t.output_path,
                         created_at: t.created_at,
                         completed_at: t.completed_at,
                         extra: Some(
                             serde_json::json!({
+                                "chart_task_type": t.task_type,
                                 "layers": t.layers,
                                 "zoom_levels": t.zoom_levels,
                                 "bounds_west": t.bounds_west,
@@ -1043,6 +1053,8 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                                 "bounds_east": t.bounds_east,
                                 "bounds_north": t.bounds_north,
                                 "grid_step": t.grid_step,
+                                "include_fences": t.task_type == "feature",
+                                "include_hydro": t.task_type == "feature",
                             })
                             .to_string(),
                         ),

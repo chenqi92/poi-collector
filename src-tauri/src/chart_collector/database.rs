@@ -70,6 +70,30 @@ impl ChartDatabase {
             CREATE INDEX IF NOT EXISTS idx_chart_buoys_coords
                 ON chart_buoys(lon_84, lat_84);
 
+            CREATE TABLE IF NOT EXISTS chart_features (
+                id TEXT PRIMARY KEY,
+                source TEXT NOT NULL,
+                source_layer TEXT NOT NULL,
+                source_feature_id TEXT,
+                name TEXT,
+                feature_type TEXT,
+                geometry_type TEXT,
+                geometry_json TEXT NOT NULL,
+                min_lon REAL,
+                min_lat REAL,
+                max_lon REAL,
+                max_lat REAL,
+                raw_json TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chart_features_source
+                ON chart_features(source, source_layer);
+
+            CREATE INDEX IF NOT EXISTS idx_chart_features_bbox
+                ON chart_features(min_lon, min_lat, max_lon, max_lat);
+
             CREATE TABLE IF NOT EXISTS chart_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_type TEXT NOT NULL,
@@ -154,6 +178,68 @@ impl ChartDatabase {
                     buoy.raw_json,
                 ])
                 .map_err(|e| format!("插入航标失败: {}", e))?;
+                count += 1;
+            }
+        }
+
+        tx.commit().map_err(|e| format!("提交事务失败: {}", e))?;
+
+        Ok(count)
+    }
+
+    /// 批量 upsert 航道专题要素
+    pub fn upsert_features(&self, features: &[ChartFeatureInfo]) -> Result<usize, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut count = 0;
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("开启事务失败: {}", e))?;
+
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO chart_features
+                     (id, source, source_layer, source_feature_id, name, feature_type, geometry_type, geometry_json,
+                      min_lon, min_lat, max_lon, max_lat, raw_json, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, CURRENT_TIMESTAMP)
+                     ON CONFLICT(id) DO UPDATE SET
+                        source = excluded.source,
+                        source_layer = excluded.source_layer,
+                        source_feature_id = excluded.source_feature_id,
+                        name = excluded.name,
+                        feature_type = excluded.feature_type,
+                        geometry_type = excluded.geometry_type,
+                        geometry_json = excluded.geometry_json,
+                        min_lon = excluded.min_lon,
+                        min_lat = excluded.min_lat,
+                        max_lon = excluded.max_lon,
+                        max_lat = excluded.max_lat,
+                        raw_json = excluded.raw_json,
+                        updated_at = CURRENT_TIMESTAMP",
+                )
+                .map_err(|e| format!("准备插入要素语句失败: {}", e))?;
+
+            for feature in features {
+                stmt.execute(params![
+                    feature.id,
+                    feature.source,
+                    feature.source_layer,
+                    feature.source_feature_id,
+                    feature.name,
+                    feature.feature_type,
+                    feature.geometry_type,
+                    feature.geometry_json,
+                    feature.min_lon,
+                    feature.min_lat,
+                    feature.max_lon,
+                    feature.max_lat,
+                    feature.raw_json,
+                ])
+                .map_err(|e| format!("插入航道要素失败: {}", e))?;
                 count += 1;
             }
         }
@@ -359,6 +445,202 @@ impl ChartDatabase {
         conn.execute("DELETE FROM chart_buoys", [])
             .map_err(|e| format!("清空航标数据失败: {}", e))?;
         Ok(())
+    }
+
+    fn row_to_feature(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChartFeatureInfo> {
+        Ok(ChartFeatureInfo {
+            id: row.get(0)?,
+            source: row.get(1)?,
+            source_layer: row.get(2)?,
+            source_feature_id: row.get(3)?,
+            name: row.get(4)?,
+            feature_type: row.get(5)?,
+            geometry_type: row.get(6)?,
+            geometry_json: row.get(7)?,
+            min_lon: row.get(8)?,
+            min_lat: row.get(9)?,
+            max_lon: row.get(10)?,
+            max_lat: row.get(11)?,
+            raw_json: row.get(12)?,
+        })
+    }
+
+    /// 获取所有航道专题要素
+    pub fn get_all_features(&self) -> Result<Vec<ChartFeatureInfo>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source, source_layer, source_feature_id, name, feature_type, geometry_type,
+                        geometry_json, min_lon, min_lat, max_lon, max_lat, raw_json
+                 FROM chart_features
+                 ORDER BY source_layer, name, id",
+            )
+            .map_err(|e| format!("查询航道要素失败: {}", e))?;
+
+        let features = stmt
+            .query_map([], Self::row_to_feature)
+            .map_err(|e| format!("映射航道要素失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(features)
+    }
+
+    /// 获取指定来源图层的航道专题要素
+    pub fn get_features_by_layer(
+        &self,
+        source_layer: &str,
+    ) -> Result<Vec<ChartFeatureInfo>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source, source_layer, source_feature_id, name, feature_type, geometry_type,
+                        geometry_json, min_lon, min_lat, max_lon, max_lat, raw_json
+                 FROM chart_features
+                 WHERE source_layer = ?1
+                 ORDER BY name, id",
+            )
+            .map_err(|e| format!("查询航道要素图层失败: {}", e))?;
+
+        let features = stmt
+            .query_map(params![source_layer], Self::row_to_feature)
+            .map_err(|e| format!("映射航道要素图层失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(features)
+    }
+
+    /// 获取指定来源图层与范围内相交的航道专题要素（按 bbox 粗筛）
+    pub fn get_features_by_layer_in_bounds(
+        &self,
+        source_layer: &str,
+        bounds: &ChartBounds,
+    ) -> Result<Vec<ChartFeatureInfo>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source, source_layer, source_feature_id, name, feature_type, geometry_type,
+                        geometry_json, min_lon, min_lat, max_lon, max_lat, raw_json
+                 FROM chart_features
+                 WHERE source_layer = ?1
+                   AND max_lon >= ?2 AND min_lon <= ?3 AND max_lat >= ?4 AND min_lat <= ?5
+                 ORDER BY name, id",
+            )
+            .map_err(|e| format!("查询范围内航道要素图层失败: {}", e))?;
+
+        let features = stmt
+            .query_map(
+                params![
+                    source_layer,
+                    bounds.west,
+                    bounds.east,
+                    bounds.south,
+                    bounds.north
+                ],
+                Self::row_to_feature,
+            )
+            .map_err(|e| format!("映射范围内航道要素图层失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(features)
+    }
+
+    /// 获取指定范围内相交的航道专题要素（按 bbox 粗筛）
+    pub fn get_features_in_bounds(
+        &self,
+        bounds: &ChartBounds,
+    ) -> Result<Vec<ChartFeatureInfo>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, source, source_layer, source_feature_id, name, feature_type, geometry_type,
+                        geometry_json, min_lon, min_lat, max_lon, max_lat, raw_json
+                 FROM chart_features
+                 WHERE max_lon >= ?1 AND min_lon <= ?2 AND max_lat >= ?3 AND min_lat <= ?4
+                 ORDER BY source_layer, name, id",
+            )
+            .map_err(|e| format!("查询范围内航道要素失败: {}", e))?;
+
+        let features = stmt
+            .query_map(
+                params![bounds.west, bounds.east, bounds.south, bounds.north],
+                Self::row_to_feature,
+            )
+            .map_err(|e| format!("映射范围内航道要素失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(features)
+    }
+
+    /// 获取航道专题要素总数
+    pub fn get_feature_count(&self) -> Result<u64, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chart_features", [], |row| row.get(0))
+            .map_err(|e| format!("查询航道要素总数失败: {}", e))?;
+
+        Ok(count as u64)
+    }
+
+    /// 清空航道专题要素
+    pub fn clear_features(&self) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.execute("DELETE FROM chart_features", [])
+            .map_err(|e| format!("清空航道要素失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 按来源图层统计航道专题要素
+    pub fn get_feature_stats(&self) -> Result<Vec<(String, i64)>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT source_layer || ':' || COALESCE(feature_type, '未知'), COUNT(*) as cnt
+                 FROM chart_features
+                 GROUP BY source_layer, feature_type
+                 ORDER BY cnt DESC",
+            )
+            .map_err(|e| format!("要素统计查询失败: {}", e))?;
+
+        let stats = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| format!("映射要素统计数据失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(stats)
     }
 
     /// 按类型分组统计航标

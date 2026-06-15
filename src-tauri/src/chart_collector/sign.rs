@@ -5,6 +5,8 @@ use md5::{Digest, Md5};
 
 /// 硬编码盐值（从前端JS源码提取）
 const SALT: &str = "C38568FF5709EDBEFF9F6EC9373069F8";
+/// 电子围栏接口盐值（从 eweb 前端 JS 源码提取）
+const FENCE_SALT: &str = "6AE6896F2F3147109EBAAA2D484D3BG9";
 
 /// 为航标 API 生成签名
 ///
@@ -58,6 +60,52 @@ pub fn build_buoy_api_url(
     )
 }
 
+/// 为电子围栏 API 生成签名
+///
+/// 参数按前端实际顺序拼接:
+/// `bottom={v}&left={v}&organizationId={v}&right={v}&timeStamp={v}&up={v}{FENCE_SALT}`
+pub fn generate_fence_sign(
+    bottom: f64,
+    left: f64,
+    right: f64,
+    up: f64,
+    organization_id: &str,
+    timestamp: u64,
+) -> String {
+    let sign_str = format!(
+        "bottom={}&left={}&organizationId={}&right={}&timeStamp={}&up={}{}",
+        bottom, left, organization_id, right, timestamp, up, FENCE_SALT
+    );
+
+    let mut hasher = Md5::new();
+    hasher.update(sign_str.as_bytes());
+    let result = hasher.finalize();
+
+    format!("{:X}", result)
+}
+
+#[allow(dead_code)]
+pub fn build_fence_api_url(
+    bottom: f64,
+    left: f64,
+    right: f64,
+    up: f64,
+    organization_id: &str,
+) -> String {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+
+    let sign = generate_fence_sign(bottom, left, right, up, organization_id, timestamp);
+
+    format!(
+        "https://www.cjhy.com.cn/eweb/dzhdtapp/fenceService/getFencFromEs?\
+        bottom={}&left={}&organizationId={}&right={}&timeStamp={}&up={}&sign={}",
+        bottom, left, organization_id, right, timestamp, up, sign
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +140,12 @@ mod tests {
         assert!(url.contains("getAllBuoyInfoByRectUid"));
         assert!(url.contains("sign="));
         assert!(url.contains("timeStamp="));
+    }
+
+    #[test]
+    fn test_fence_sign_generation() {
+        let sign = generate_fence_sign(29.35, 112.35, 113.30, 30.05, "100001", 1772514532819);
+        assert_eq!(sign.len(), 32);
+        assert!(sign.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

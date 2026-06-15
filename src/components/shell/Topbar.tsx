@@ -29,11 +29,9 @@ export function Topbar({ collapsed, setCollapsed, onCmdOpen }: TopbarProps) {
     const [notifOpen, setNotifOpen] = useState(false)
 
     const toggleNotif = () => {
-        setNotifOpen(o => {
-            const next = !o
-            if (next && unreadCount > 0) markAllRead()
-            return next
-        })
+        const next = !notifOpen
+        setNotifOpen(next)
+        if (next && unreadCount > 0) markAllRead()
     }
 
     const loc = useLocation()

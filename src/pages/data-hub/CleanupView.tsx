@@ -25,6 +25,7 @@ export function CleanupView() {
     const [regionNames, setRegionNames] = useState<Map<string, string>>(new Map())
     const [selected, setSelected] = useState<Set<string>>(new Set())
     const [buoyCount, setBuoyCount] = useState(0)
+    const [featureCount, setFeatureCount] = useState(0)
     const [tilePackages, setTilePackages] = useState(0)
     const [search, setSearch] = useState('')
 
@@ -32,12 +33,14 @@ export function CleanupView() {
         setLoading(true)
         try {
             await invoke<[number, number]>('fix_region_codes').catch(() => { })
-            const [s, bc] = await Promise.all([
+            const [s, bc, fc] = await Promise.all([
                 invoke<[string, number][]>('get_poi_stats_by_region').catch(() => [] as [string, number][]),
                 invoke<number>('chart_get_buoy_count').catch(() => 0),
+                invoke<number>('chart_get_feature_count').catch(() => 0),
             ])
             setStats(s)
             setBuoyCount(bc)
+            setFeatureCount(fc)
         } catch (e) {
             errorToast('加载失败', String(e))
         } finally {
@@ -143,7 +146,7 @@ export function CleanupView() {
     }
 
     const clearAllPoi = async () => {
-        if (!confirm('⚠ 危险操作\n\n确定要清空所有 POI 数据吗？此操作不可撤销！')) return
+        if (!confirm('危险操作\n\n确定要清空所有 POI 数据吗？此操作不可撤销！')) return
         if (!confirm('再次确认：真的要删除全部 POI 吗？')) return
         try {
             const n = await invoke<number>('clear_all_poi')
@@ -155,10 +158,21 @@ export function CleanupView() {
     }
 
     const clearAllBuoys = async () => {
-        if (!confirm('⚠ 危险操作\n\n确定要清空所有航标数据吗？此操作不可撤销！')) return
+        if (!confirm('危险操作\n\n确定要清空所有航标数据吗？此操作不可撤销！')) return
         try {
             await invoke('chart_clear_buoys')
             success('已清空', '所有航标数据已删除')
+            load()
+        } catch (e) {
+            errorToast('清空失败', String(e))
+        }
+    }
+
+    const clearAllFeatures = async () => {
+        if (!confirm('危险操作\n\n确定要清空所有航道要素数据吗？此操作不可撤销！')) return
+        try {
+            await invoke('chart_clear_features')
+            success('已清空', '所有航道要素数据已删除')
             load()
         } catch (e) {
             errorToast('清空失败', String(e))
@@ -173,6 +187,23 @@ export function CleanupView() {
             })
             if (!path) return
             const result = await invoke<string>('chart_export_buoys', {
+                format: fmt,
+                outputPath: path,
+            })
+            success('导出成功', result)
+        } catch (e) {
+            errorToast('导出失败', String(e))
+        }
+    }
+
+    const exportFeatures = async (fmt: 'json' | 'geojson' | 'csv') => {
+        try {
+            const path = await save({
+                defaultPath: `chart_features.${fmt === 'geojson' ? 'geojson' : fmt}`,
+                filters: [{ name: fmt.toUpperCase(), extensions: [fmt === 'geojson' ? 'geojson' : fmt] }],
+            })
+            if (!path) return
+            const result = await invoke<string>('chart_export_features', {
                 format: fmt,
                 outputPath: path,
             })
@@ -320,9 +351,53 @@ export function CleanupView() {
                     </div>
                 </div>
 
+                {/* 航道要素 */}
+                <div className="section-head">
+                    <h2>航道要素数据</h2>
+                    <span className="section-link">
+                        共 <b className="mono" style={{ color: 'var(--text)' }}>{featureCount.toLocaleString()}</b> 条
+                    </span>
+                </div>
+
+                <div className="panel" style={{ marginBottom: 16 }}>
+                    <div style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <GcIcon name="database" size={18} style={{ color: 'var(--st-blue)' }} />
+                        <div style={{ flex: 1, minWidth: 260, fontSize: 12.5, color: 'var(--text-2)' }}>
+                            航道要素包含电子围栏和 HYDRO_A 水域面。GeoJSON 可直接用于空间校验或导入 GIS。
+                        </div>
+                        <button
+                            type="button"
+                            className="btn"
+                            disabled={featureCount === 0}
+                            onClick={() => exportFeatures('geojson')}
+                        >
+                            <GcIcon name="download" size={13} />导出 GeoJSON
+                        </button>
+                        <button
+                            type="button"
+                            className="btn"
+                            disabled={featureCount === 0}
+                            onClick={() => exportFeatures('json')}
+                        >
+                            <GcIcon name="download" size={13} />导出 JSON
+                        </button>
+                        <button
+                            type="button"
+                            className="btn"
+                            disabled={featureCount === 0}
+                            onClick={() => exportFeatures('csv')}
+                        >
+                            <GcIcon name="download" size={13} />导出 CSV
+                        </button>
+                    </div>
+                </div>
+
                 {/* 危险区 */}
                 <div className="danger-zone">
-                    <div className="danger-zone-title">⚠ 危险操作</div>
+                    <div className="danger-zone-title">
+                        <GcIcon name="alertTriangle" size={14} />
+                        危险操作
+                    </div>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <button
                             type="button"
@@ -341,6 +416,15 @@ export function CleanupView() {
                         >
                             <GcIcon name="trash" size={13} />
                             清空所有航标 ({buoyCount.toLocaleString()})
+                        </button>
+                        <button
+                            type="button"
+                            className="btn danger"
+                            onClick={clearAllFeatures}
+                            disabled={featureCount === 0}
+                        >
+                            <GcIcon name="trash" size={13} />
+                            清空航道要素 ({featureCount.toLocaleString()})
                         </button>
                         <button
                             type="button"

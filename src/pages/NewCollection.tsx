@@ -231,7 +231,7 @@ const STATUS_NORMALIZE: Record<string, TaskStatus> = {
 function inferType(t: string): TaskType {
     const s = t.toLowerCase()
     if (s.includes('tile')) return 'tile'
-    if (s.includes('buoy') || s.includes('aton')) return 'aton'
+    if (s.includes('buoy') || s.includes('aton') || s.includes('feature')) return 'aton'
     return 'poi'
 }
 
@@ -310,10 +310,19 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                 const w = extra.bounds_west as number, s = extra.bounds_south as number
                 const e = extra.bounds_east as number, n = extra.bounds_north as number
                 if (!w && !s && !e && !n) { warning('无法继续', '该任务未记录边界范围'); return }
-                await invoke('chart_start_buoy_collection', {
-                    west: w, south: s, east: e, north: n,
-                    gridStep: (extra.grid_step as number) || 0.1,
-                })
+                if (h.task_type === 'feature' || extra.chart_task_type === 'feature') {
+                    await invoke('chart_start_feature_collection', {
+                        west: w, south: s, east: e, north: n,
+                        gridStep: (extra.grid_step as number) || 0.2,
+                        includeFences: (extra.include_fences as boolean | undefined) ?? true,
+                        includeHydro: (extra.include_hydro as boolean | undefined) ?? true,
+                    })
+                } else {
+                    await invoke('chart_start_buoy_collection', {
+                        west: w, south: s, east: e, north: n,
+                        gridStep: (extra.grid_step as number) || 0.1,
+                    })
+                }
             } else if (kind === 'poi') {
                 const regionCode = extra.region_code as string
                 if (!h.platform || !regionCode) { warning('无法继续', '该任务缺少平台或区域信息'); return }

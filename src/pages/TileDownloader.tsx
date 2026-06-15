@@ -17,7 +17,10 @@ import {
     Search,
     Download,
     AlertTriangle,
+    Globe2,
     Info,
+    X,
+    XCircle,
 } from 'lucide-react';
 import { TileBoundsMap } from '@/components/TileBoundsMap';
 import { Button } from '@/components/ui/button';
@@ -563,8 +566,9 @@ export default function TileDownloader({ embedded = false }: TileDownloaderProps
 
                                     {/* 坐标系信息 - 全宽显示 */}
                                     {currentPlatform?.crs_info && (
-                                        <p className={`text-xs ${currentPlatform.crs_info.includes('3857') ? 'text-muted-foreground' : 'text-red-500 font-medium'}`}>
-                                            🌐 坐标系: {currentPlatform.crs_info}
+                                        <p className={`text-xs inline-flex items-center gap-1 ${currentPlatform.crs_info.includes('3857') ? 'text-muted-foreground' : 'text-red-500 font-medium'}`}>
+                                            <Globe2 className="h-3 w-3" />
+                                            坐标系: {currentPlatform.crs_info}
                                         </p>
                                     )}
 
@@ -630,8 +634,9 @@ export default function TileDownloader({ embedded = false }: TileDownloaderProps
                                                             setBounds({ north: 0, south: 0, east: 0, west: 0 });
                                                         }}
                                                         className="text-muted-foreground hover:text-destructive shrink-0"
+                                                        aria-label="清除行政区域"
                                                     >
-                                                        <span className="text-xs">✕</span>
+                                                        <X className="h-3 w-3" />
                                                     </button>
                                                 </div>
                                             ) : (
@@ -921,9 +926,15 @@ export default function TileDownloader({ embedded = false }: TileDownloaderProps
                                                                     <span className="text-foreground">{task.completed_tiles.toLocaleString()}</span>
                                                                     {task.failed_tiles > 0 && (
                                                                         task.platform === 'cjhy' ? (
-                                                                            <span className="text-amber-500 ml-1" title="航道图空白区域瓦片不存在，属正常现象">○{task.failed_tiles.toLocaleString()}空白</span>
+                                                                            <span className="text-amber-500 ml-1 inline-flex items-center gap-0.5" title="航道图空白区域瓦片不存在，属正常现象">
+                                                                                <Info className="h-3 w-3" />
+                                                                                {task.failed_tiles.toLocaleString()}空白
+                                                                            </span>
                                                                         ) : (
-                                                                            <span className="text-red-500 ml-1">✗{task.failed_tiles.toLocaleString()}</span>
+                                                                            <span className="text-red-500 ml-1 inline-flex items-center gap-0.5">
+                                                                                <XCircle className="h-3 w-3" />
+                                                                                {task.failed_tiles.toLocaleString()}
+                                                                            </span>
                                                                         )
                                                                     )}
                                                                     <span className="opacity-40 mx-1">/</span>

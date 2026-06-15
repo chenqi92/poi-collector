@@ -977,3 +977,56 @@
   box-shadow: 0 1px 4px rgba(0,0,0,0.25);
 }
 .chart-zoom-pill .sep { color: rgba(255,255,255,0.45); }
+
+/* 航道专题要素叠加层（航道图区域） */
+.chart-fence-shape {
+  filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.95));
+}
+
+.chart-hydro-shape {
+  filter: drop-shadow(0 0 2px rgba(2, 132, 199, 0.45));
+}
+
+.chart-fence-point {
+  filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.95));
+}
+
+.chart-hydro-point {
+  filter: drop-shadow(0 0 4px rgba(2, 132, 199, 0.7));
+}
+
+.chart-feature-pill {
+  pointer-events: auto;
+  background: rgba(24, 24, 27, 0.78);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font: 600 12px/1.45 var(--sans);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+
+.chart-feature-pill .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.chart-fence-pill .dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25), 0 0 8px rgba(245, 158, 11, 0.9);
+}
+
+.chart-hydro-pill .dot {
+  background: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.25), 0 0 8px rgba(2, 132, 199, 0.75);
+}
+
+.chart-feature-pill.is-error .dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25), 0 0 8px rgba(239, 68, 68, 0.85);
+}

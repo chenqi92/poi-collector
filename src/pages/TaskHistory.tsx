@@ -28,7 +28,7 @@ import SimpleBar from 'simplebar-react';
 // 统一任务类型
 type UnifiedTask = {
     id: string;
-    task_type: 'poi' | 'buoy' | 'tile';
+    task_type: 'poi' | 'buoy' | 'feature' | 'tile';
     name: string;
     status: string;
     total: number;
@@ -41,12 +41,13 @@ type UnifiedTask = {
     extra: string | null;
 };
 
-type TabType = 'all' | 'poi' | 'buoy' | 'tile';
+type TabType = 'all' | 'poi' | 'buoy' | 'feature' | 'tile';
 
 const TAB_CONFIG: { key: TabType; label: string; icon: typeof MapPin }[] = [
     { key: 'all', label: '全部', icon: Clock },
     { key: 'poi', label: 'POI采集', icon: MapPin },
     { key: 'buoy', label: '航标采集', icon: Navigation },
+    { key: 'feature', label: '航道要素', icon: Navigation },
     { key: 'tile', label: '瓦片下载', icon: Map },
 ];
 
@@ -66,6 +67,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: typeof Ch
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
     poi: { label: 'POI', color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' },
     buoy: { label: '航标', color: 'text-cyan-600 bg-cyan-500/10 border-cyan-500/20' },
+    feature: { label: '要素', color: 'text-sky-600 bg-sky-500/10 border-sky-500/20' },
     tile: { label: '瓦片', color: 'text-violet-600 bg-violet-500/10 border-violet-500/20' },
 };
 
@@ -285,6 +287,34 @@ export default function TaskHistory() {
         }
     };
 
+    // 航道要素任务：继续执行（使用原始 bounds 重新开始采集）
+    const handleFeatureResume = async (task: UnifiedTask) => {
+        let extra: Record<string, unknown> = {};
+        try { if (task.extra) extra = JSON.parse(task.extra); } catch { /* ignore */ }
+        const w = extra.bounds_west as number;
+        const s = extra.bounds_south as number;
+        const e = extra.bounds_east as number;
+        const n = extra.bounds_north as number;
+        if (!w && !s && !e && !n) {
+            alert('该任务没有记录边界范围，无法继续执行');
+            return;
+        }
+        setOperatingTaskId(task.id);
+        try {
+            await invoke('chart_start_feature_collection', {
+                west: w, south: s, east: e, north: n,
+                gridStep: (extra.grid_step as number) || 0.2,
+                includeFences: (extra.include_fences as boolean | undefined) ?? true,
+                includeHydro: (extra.include_hydro as boolean | undefined) ?? true,
+            });
+            loadTasks();
+        } catch (err) {
+            alert(`启动采集失败: ${err}`);
+        } finally {
+            setOperatingTaskId(null);
+        }
+    };
+
     // POI 任务：继续执行（使用原始 platform/region 重新开始采集）
     const handlePoiResume = async (task: UnifiedTask) => {
         let extra: Record<string, unknown> = {};
@@ -358,6 +388,7 @@ export default function TaskHistory() {
         const isFailed = ['failed', 'error'].includes(task.status);
         const hasFailed = task.failed > 0;
         const isBuoy = task.task_type === 'buoy';
+        const isFeature = task.task_type === 'feature';
         const isPoi = task.task_type === 'poi';
 
         // Parse extra
@@ -438,6 +469,14 @@ export default function TaskHistory() {
                             </Button>
                         )}
 
+                        {/* 航道要素任务：继续执行 */}
+                        {isFeature && (isInterrupted || isFailed) && !isActive && (
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-500 hover:text-green-600 hover:bg-green-500/10"
+                                onClick={() => handleFeatureResume(task)} title="继续采集" disabled={isOperating}>
+                                <Play className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
+
                         {/* POI 任务：继续执行 */}
                         {isPoi && (isInterrupted || isFailed) && !isActive && (
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-500 hover:text-green-600 hover:bg-green-500/10"
@@ -461,7 +500,7 @@ export default function TaskHistory() {
                                 <FileText className="h-3.5 w-3.5" />
                             </Button>
                         )}
-                        {(isBuoy || isPoi) && (
+                        {(isBuoy || isFeature || isPoi) && (
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                                 onClick={() => handleViewTaskDetails(task)} title="查看详情">
                                 <FileText className="h-3.5 w-3.5" />
@@ -494,11 +533,15 @@ export default function TaskHistory() {
                                 <span className="text-green-500">{task.completed.toLocaleString()}</span>
                                 {task.failed > 0 && (
                                     task.platform === 'cjhy' ? (
-                                        <span className="text-amber-500" title="航道图空白区域瓦片不存在，属正常现象">
-                                            ○{task.failed.toLocaleString()}空白
+                                        <span className="text-amber-500 inline-flex items-center gap-0.5" title="航道图空白区域瓦片不存在，属正常现象">
+                                            <AlertTriangle className="h-3 w-3" />
+                                            {task.failed.toLocaleString()}空白
                                         </span>
                                     ) : (
-                                        <span className="text-red-500">✗{task.failed.toLocaleString()}</span>
+                                        <span className="text-red-500 inline-flex items-center gap-0.5">
+                                            <XCircle className="h-3 w-3" />
+                                            {task.failed.toLocaleString()}
+                                        </span>
                                     )
                                 )}
                                 <span className="text-muted-foreground/50">/</span>
@@ -736,7 +779,10 @@ export default function TaskHistory() {
 
                                         {logData.error_summary.length > 0 && (
                                             <div>
-                                                <h4 className="text-sm font-medium mb-2">❌ 错误摘要</h4>
+                                                <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                                                    <XCircle className="h-4 w-4 text-red-500" />
+                                                    错误摘要
+                                                </h4>
                                                 <div className="space-y-1.5">
                                                     {logData.error_summary.map((item: any, i: number) => (
                                                         <div key={i} className="flex items-start gap-2 text-xs bg-red-500/5 border border-red-500/10 rounded-md p-2">
@@ -752,8 +798,9 @@ export default function TaskHistory() {
 
                                         {logData.failed_tiles.length > 0 && (
                                             <div>
-                                                <h4 className="text-sm font-medium mb-2">
-                                                    📍 失败瓦片详情
+                                                <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                                                    <MapPin className="h-4 w-4 text-red-500" />
+                                                    失败瓦片详情
                                                     <span className="text-muted-foreground font-normal ml-1">
                                                         (显示前 {Math.min(logData.failed_tiles.length, 200)} 条)
                                                     </span>

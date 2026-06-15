@@ -124,7 +124,7 @@ impl BuoyCollector {
         );
 
         logs.push(format!(
-            "📡 请求: [{:.4},{:.4}]-[{:.4},{:.4}] ts={} sign={}",
+            "[REQUEST] 请求: [{:.4},{:.4}]-[{:.4},{:.4}] ts={} sign={}",
             grid.lon1,
             grid.lat1,
             grid.lon2,
@@ -142,14 +142,14 @@ impl BuoyCollector {
         {
             Ok(r) => r,
             Err(e) => {
-                let msg = format!("❌ 网络请求失败: {}", e);
+                let msg = format!("[ERROR] 网络请求失败: {}", e);
                 logs.push(msg.clone());
                 return (Err(msg), logs);
             }
         };
 
         let status = response.status();
-        logs.push(format!("📥 HTTP {}", status.as_u16()));
+        logs.push(format!("[HTTP] {}", status.as_u16()));
 
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
@@ -158,7 +158,7 @@ impl BuoyCollector {
             } else {
                 body.clone()
             };
-            let msg = format!("❌ HTTP 错误 {}: {}", status, body_preview);
+            let msg = format!("[ERROR] HTTP 错误 {}: {}", status, body_preview);
             logs.push(msg.clone());
             return (Err(msg), logs);
         }
@@ -166,7 +166,7 @@ impl BuoyCollector {
         let body = match response.text().await {
             Ok(b) => b,
             Err(e) => {
-                let msg = format!("❌ 读取响应体失败: {}", e);
+                let msg = format!("[ERROR] 读取响应体失败: {}", e);
                 logs.push(msg.clone());
                 return (Err(msg), logs);
             }
@@ -178,12 +178,12 @@ impl BuoyCollector {
         } else {
             body.clone()
         };
-        logs.push(format!("📄 响应: {}", body_preview));
+        logs.push(format!("[RESPONSE] 响应: {}", body_preview));
 
         let api_response: BuoyApiResponse = match serde_json::from_str(&body) {
             Ok(r) => r,
             Err(e) => {
-                let msg = format!("❌ JSON 解析失败: {}", e);
+                let msg = format!("[ERROR] JSON 解析失败: {}", e);
                 logs.push(msg.clone());
                 return (Err(msg), logs);
             }
@@ -196,7 +196,7 @@ impl BuoyCollector {
                     .error_msg
                     .unwrap_or_else(|| "未知错误".to_string());
                 let err_code = api_response.error_code.unwrap_or(-1);
-                let msg = format!("⚠️ API 返回错误: {} (code: {})", err_msg, err_code);
+                let msg = format!("[WARN] API 返回错误: {} (code: {})", err_msg, err_code);
                 logs.push(msg.clone());
                 return (Err(msg), logs);
             }
@@ -204,7 +204,7 @@ impl BuoyCollector {
 
         // 解析航标数据
         let buoys = self.parse_buoy_data(&api_response.data);
-        logs.push(format!("✅ 解析到 {} 个航标", buoys.len()));
+        logs.push(format!("[OK] 解析到 {} 个航标", buoys.len()));
 
         (Ok(buoys), logs)
     }
@@ -373,7 +373,7 @@ impl BuoyCollector {
 
         let _ = log_tx
             .send(format!(
-                "🗺️ 范围切分为 {} 个网格 (步长: {}°), 范围: [{:.4},{:.4}]-[{:.4},{:.4}]",
+                "[INFO] 范围切分为 {} 个网格 (步长: {}°), 范围: [{:.4},{:.4}]-[{:.4},{:.4}]",
                 total_grids, self.grid_step, bounds.west, bounds.south, bounds.east, bounds.north
             ))
             .await;
@@ -393,7 +393,7 @@ impl BuoyCollector {
 
         for (idx, grid) in grids.iter().enumerate() {
             if stop_flag.load(Ordering::Relaxed) {
-                let _ = log_tx.send("⏹️ 采集已被用户停止".to_string()).await;
+                let _ = log_tx.send("[STOP] 采集已被用户停止".to_string()).await;
                 return Ok(all_buoys.into_values().collect());
             }
 
@@ -420,7 +420,7 @@ impl BuoyCollector {
                     }
                     let _ = log_tx
                         .send(format!(
-                            "📊 获取 {} 个, 新增 {} 个, 去重后累计: {}",
+                            "[STATS] 获取 {} 个, 新增 {} 个, 去重后累计: {}",
                             new_count,
                             added,
                             all_buoys.len()
@@ -430,7 +430,7 @@ impl BuoyCollector {
                 Err(e) => {
                     error_count += 1;
                     let _ = log_tx
-                        .send(format!("❌ 网格 {} 失败: {}", idx + 1, e))
+                        .send(format!("[ERROR] 网格 {} 失败: {}", idx + 1, e))
                         .await;
                 }
             }
@@ -463,7 +463,7 @@ impl BuoyCollector {
 
         let _ = log_tx
             .send(format!(
-                "🏁 航标采集完成: 共 {} 个航标, {} 个网格失败",
+                "[DONE] 航标采集完成: 共 {} 个航标, {} 个网格失败",
                 total_buoys, error_count
             ))
             .await;

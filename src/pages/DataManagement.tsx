@@ -117,7 +117,7 @@ export default function DataManagement({ embedded = false }: DataManagementProps
     };
 
     const clearAll = async () => {
-        if (!confirm('⚠️ 危险操作！\n\n确定要清空所有 POI 数据吗？\n\n此操作将删除所有已采集的数据，不可撤销！')) return;
+        if (!confirm('危险操作！\n\n确定要清空所有 POI 数据吗？\n\n此操作将删除所有已采集的数据，不可撤销！')) return;
         if (!confirm('再次确认：您真的要删除全部数据吗？')) return;
         try {
             const count = await invoke<number>('clear_all_poi');
