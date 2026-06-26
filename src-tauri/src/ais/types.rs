@@ -181,6 +181,20 @@ pub struct RouteResponse {
     pub truncated: bool,
 }
 
+/// 渐进式单船航迹分页（scroll，无 max_result_window 限制）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutePage {
+    pub points: Vec<AisPoint>,
+    /// 下一页用的 scroll_id；done=true 时无意义
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scroll_id: Option<String>,
+    /// 命中总数（仅首页准确）
+    pub total: u64,
+    /// 是否已取尽
+    pub done: bool,
+}
+
 /// raw 模式拉取并解码一个时间窗的结果。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

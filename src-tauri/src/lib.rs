@@ -124,6 +124,7 @@ pub fn run() {
             ais_commands::ais_list_indices,
             ais_commands::ais_list_ships,
             ais_commands::ais_get_ship_route,
+            ais_commands::ais_route_page,
             ais_commands::ais_pull_window,
         ])
         .setup(|app| {

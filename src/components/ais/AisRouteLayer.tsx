@@ -81,6 +81,7 @@ export function AisRouteLayer({
 
         // 2) 航迹分段
         let prevEnd: [number, number] | null = null
+        let firstDisp: [number, number] | null = null
         for (const seg of segments) {
             // 新航次：断开与上一航次的连线
             if (seg.newTrip) prevEnd = null
@@ -88,6 +89,7 @@ export function AisRouteLayer({
                 const pts =
                     simplifyToleranceM > 0 ? douglasPeucker(seg.points, simplifyToleranceM) : seg.points
                 const latlngs = pts.map((p) => disp(p.lon, p.lat))
+                if (!firstDisp && latlngs.length) firstDisp = latlngs[0]
                 if (prevEnd && latlngs.length) {
                     L.polyline([prevEnd, latlngs[0]], {
                         pane: 'aisRoutePane',
@@ -109,16 +111,18 @@ export function AisRouteLayer({
                 } else if (latlngs.length === 1) {
                     L.circleMarker(latlngs[0], {
                         pane: 'aisRoutePane',
-                        radius: 3,
+                        radius: 4,
                         color: '#2563eb',
-                        weight: 1,
+                        weight: 1.5,
                         fillColor: '#2563eb',
                         fillOpacity: 1,
+                        className: 'ais-pulse-point',
                     }).addTo(group)
                 }
                 if (latlngs.length) prevEnd = latlngs[latlngs.length - 1]
             } else {
                 const c = disp(seg.centroid[0], seg.centroid[1])
+                if (!firstDisp) firstDisp = c
                 if (prevEnd) {
                     L.polyline([prevEnd, c], {
                         pane: 'aisRoutePane',
@@ -167,6 +171,23 @@ export function AisRouteLayer({
             }
         }
 
+        // 起点（绿）/终点（红）脉冲环，方便在地图上定位航迹
+        const ringMarker = (latlng: [number, number], color: string) =>
+            L.marker(latlng, {
+                interactive: false,
+                zIndexOffset: 500,
+                icon: L.divIcon({
+                    className: '',
+                    html: `<span class="ais-pulse-ring" style="--ring:${color}"></span>`,
+                    iconSize: [16, 16],
+                    iconAnchor: [8, 8],
+                }),
+            }).addTo(group)
+        if (firstDisp) ringMarker(firstDisp, '#16a34a')
+        if (prevEnd && (!firstDisp || prevEnd[0] !== firstDisp[0] || prevEnd[1] !== firstDisp[1])) {
+            ringMarker(prevEnd, '#dc2626')
+        }
+
         // 3) 异常点（水域外）
         for (const p of anomalies) {
             L.circleMarker(disp(p.lon, p.lat), {
@@ -176,7 +197,7 @@ export function AisRouteLayer({
                 weight: 2,
                 fillColor: '#fca5a5',
                 fillOpacity: 0.9,
-                className: 'ais-anomaly-point',
+                className: 'ais-anomaly-point ais-pulse-point',
             })
                 .bindTooltip('水域外异常点', { direction: 'top' })
                 .addTo(group)

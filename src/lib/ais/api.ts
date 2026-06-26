@@ -7,6 +7,7 @@ import type {
     FieldMapping,
     IndexInfo,
     PullResult,
+    RoutePage,
     RouteResponse,
     ShipSummary,
 } from './types'
@@ -53,6 +54,20 @@ export function aisGetShipRoute(params: {
     maxPoints?: number
 }): Promise<RouteResponse> {
     return invoke<RouteResponse>('ais_get_ship_route', params)
+}
+
+/** 渐进式单船航迹分页：首页不传 scrollId，续页传上一页返回的 scrollId，直到 done。 */
+export function aisRoutePage(params: {
+    connId: string
+    indices: string[]
+    mapping: FieldMapping
+    mmsi: string
+    timeFrom?: number
+    timeTo?: number
+    size?: number
+    scrollId?: string
+}): Promise<RoutePage> {
+    return invoke<RoutePage>('ais_route_page', params)
 }
 
 export function aisPullWindow(params: {

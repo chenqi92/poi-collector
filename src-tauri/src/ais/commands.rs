@@ -426,6 +426,124 @@ pub async fn ais_get_ship_route(
     })
 }
 
+// ===== 渐进式单船航迹（scroll 分页，无 max_result_window 上限）=====
+
+#[tauri::command]
+pub async fn ais_route_page(
+    app: AppHandle,
+    conn_id: String,
+    indices: Vec<String>,
+    mapping: FieldMapping,
+    mmsi: String,
+    time_from: Option<i64>,
+    time_to: Option<i64>,
+    size: Option<u32>,
+    scroll_id: Option<String>,
+) -> Result<RoutePage, String> {
+    let db = get_ais_db(&app)?;
+    let conn = db
+        .get(&conn_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "连接不存在".to_string())?;
+    let client = EsClient::new(&conn)?;
+    let m = mapping;
+
+    // 续页：直接 scroll_next
+    if let Some(sid) = scroll_id.filter(|s| !s.trim().is_empty()) {
+        let resp = client.scroll_next(&sid, "2m").await?;
+        let hits = resp["hits"]["hits"].as_array().cloned().unwrap_or_default();
+        let mut points = Vec::with_capacity(hits.len());
+        for h in &hits {
+            if let Some(src) = h.get("_source") {
+                if let Some(p) = extract_point(src, &m, &mmsi) {
+                    points.push(p);
+                }
+            }
+        }
+        let done = hits.is_empty();
+        let new_sid = resp["_scroll_id"]
+            .as_str()
+            .map(|s| s.to_string())
+            .or(Some(sid.clone()));
+        if done {
+            client.scroll_clear(&sid).await;
+        }
+        return Ok(RoutePage {
+            points,
+            scroll_id: new_sid,
+            total: 0,
+            done,
+        });
+    }
+
+    // 首页：起 scroll（按时间升序）
+    let idx = join_indices(&indices);
+    if idx.is_empty() {
+        return Err("请先选择至少一个索引".to_string());
+    }
+    let id_f = id_field(&m);
+    if id_f.is_empty() {
+        return Err("请先在字段映射里设置 MMSI（或可聚合的 aggField）".to_string());
+    }
+    if m.timestamp.trim().is_empty() {
+        return Err("请先在字段映射里设置时间字段".to_string());
+    }
+    let ts_field = m.timestamp.trim().to_string();
+    let page = size.unwrap_or(5000).clamp(500, 10000) as usize;
+
+    let mut filters: Vec<Value> = vec![json!({ "term": { id_f.clone(): mmsi.clone() } })];
+    if let Some(tf) = time_filter(&ts_field, &m.timestamp_format, time_from, time_to) {
+        filters.push(tf);
+    }
+    // 只取用到的字段，减小每条文档的传输体积，加快加载
+    let mut src: Vec<String> = Vec::new();
+    for c in [
+        m.mmsi.as_str(),
+        m.name.as_str(),
+        m.lat.as_str(),
+        m.lon.as_str(),
+        m.geo_point.as_str(),
+        ts_field.as_str(),
+        m.sog.as_str(),
+        m.cog.as_str(),
+        m.heading.as_str(),
+        m.nav_status.as_str(),
+    ] {
+        let c = c.trim();
+        if !c.is_empty() && !src.iter().any(|x| x == c) {
+            src.push(c.to_string());
+        }
+    }
+    let body = json!({
+        "size": page,
+        "_source": src,
+        "query": { "bool": { "filter": filters } },
+        "sort": [ { ts_field.clone(): { "order": "asc" } } ]
+    });
+    let (sid, resp) = client.scroll_start(&idx, &body, "2m").await?;
+    let (total, _gte) = total_from_hits(&resp);
+    let hits = resp["hits"]["hits"].as_array().cloned().unwrap_or_default();
+    let mut points = Vec::with_capacity(hits.len());
+    for h in &hits {
+        if let Some(src) = h.get("_source") {
+            if let Some(p) = extract_point(src, &m, &mmsi) {
+                points.push(p);
+            }
+        }
+    }
+    let done = hits.is_empty();
+    let new_sid = resp["_scroll_id"]
+        .as_str()
+        .map(|s| s.to_string())
+        .or(Some(sid));
+    Ok(RoutePage {
+        points,
+        scroll_id: new_sid,
+        total,
+        done,
+    })
+}
+
 // ===== raw 模式：scroll 拉取一个时间窗并解码 AIVDM =====
 
 #[tauri::command]

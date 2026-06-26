@@ -6,6 +6,36 @@
     display: grid;
     grid-template-columns: 340px 1fr;
 }
+.ais-layout.panel-collapsed {
+    grid-template-columns: 1fr;
+}
+.ais-layout.panel-collapsed .ais-panel {
+    display: none;
+}
+.ais-panel-toggle {
+    position: absolute;
+    top: 50%;
+    left: 6px;
+    transform: translateY(-50%);
+    z-index: 800;
+    width: 22px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    color: var(--text-2);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+}
+.ais-panel-toggle:hover {
+    background: var(--panel-2);
+    color: var(--text);
+}
 
 /* 左控制栏 */
 .ais-panel {
@@ -47,6 +77,52 @@
     outline: none;
     border-color: var(--accent);
 }
+
+/* 航迹点脉冲：起点/终点跳动环 + 单点/异常点闪烁，便于定位 */
+@keyframes ais-pulse-ring {
+    0% { transform: scale(0.5); opacity: 0.85; }
+    100% { transform: scale(2.4); opacity: 0; }
+}
+.ais-pulse-ring {
+    display: block;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--ring, #2563eb);
+    animation: ais-pulse-ring 1.3s ease-out infinite;
+}
+@keyframes ais-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.15; }
+}
+.ais-pulse-point { animation: ais-blink 1s ease-in-out infinite; }
+
+/* 索引选择弹窗：自有的紧凑列表行 + 不挤压的预设按钮 */
+.ais-idx-preset {
+    white-space: nowrap;
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--bg);
+    color: var(--text-2);
+    cursor: pointer;
+}
+.ais-idx-preset:hover { background: var(--hover); color: var(--text); }
+.ais-idx-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text);
+}
+.ais-idx-row:hover { background: var(--hover); }
+.ais-idx-row.on { background: var(--accent-soft, color-mix(in oklch, var(--accent), transparent 90%)); }
+.ais-idx-row .idx-count { margin-left: auto; flex-shrink: 0; font-size: 11.5px; color: var(--text-3); }
 
 .ais-presets {
     display: flex;

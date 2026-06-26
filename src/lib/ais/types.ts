@@ -109,6 +109,14 @@ export interface RouteResponse {
     truncated: boolean
 }
 
+/** 渐进式单船航迹分页（scroll） */
+export interface RoutePage {
+    points: AisPoint[]
+    scrollId?: string
+    total: number
+    done: boolean
+}
+
 export function emptyMapping(): FieldMapping {
     return {
         mmsi: '',
