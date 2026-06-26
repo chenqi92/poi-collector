@@ -12,10 +12,12 @@ import 'leaflet/dist/leaflet.css'
 import { CachedOsmTileLayer } from '@/components/CachedOsmTileLayer'
 import { GcIcon } from '@/components/shell'
 import { AisRouteLayer } from '@/components/ais/AisRouteLayer'
-import { aisGetShipRoute, aisListShips, aisPullWindow } from '@/lib/ais/api'
-import type { AisPoint, BaseCrs, EsConnection, ShipSummary, TrajParams } from '@/lib/ais/types'
+import { aisGetShipRoute, aisListIndices, aisListShips, aisPullWindow, aisTestConnection } from '@/lib/ais/api'
+import type { AisPoint, BaseCrs, DataMode, EsConnection, FieldMapping, IndexInfo, ShipSummary, TrajParams } from '@/lib/ais/types'
+import { emptyMapping } from '@/lib/ais/types'
+import { autoDetect, mappingSummary } from '@/lib/ais/autodetect'
 import { cleanTrack, DEFAULT_TRAJ, type Segment, segmentTrips } from '@/lib/ais/trajectory'
-import { geometryToPolygons, outermostPolygons, pointInWater, type WaterPolygon } from '@/lib/ais/geo'
+import { geometryToPolygons, dissolveOutline, pointInWater, type WaterPolygon } from '@/lib/ais/geo'
 import { normalizeToWgs84 } from '@/lib/ais/coords'
 
 const AMAP_STREET_URL =
@@ -89,13 +91,23 @@ interface Props {
 }
 
 export function AisMapView({ conn, connections, connId, onConnId, onGoConnections }: Props) {
-    const mode = conn?.dataMode ?? 'fields'
-
     // 选择 / 搜索 / 时间
     const [selectedMmsi, setSelectedMmsi] = useState('')
     const [shipSearch, setShipSearch] = useState('')
     const [timeFrom, setTimeFrom] = useState('')
     const [timeTo, setTimeTo] = useState('')
+
+    // 索引多选 + 字段映射（连接后选索引、自动识别、本地缓存）
+    const [availIndices, setAvailIndices] = useState<IndexInfo[]>([])
+    const [indicesLoading, setIndicesLoading] = useState(false)
+    const [selectedIndices, setSelectedIndices] = useState<string[]>([])
+    const [indexFilter, setIndexFilter] = useState('')
+    const [queryMapping, setQueryMapping] = useState<FieldMapping>(emptyMapping)
+    const [queryDataMode, setQueryDataMode] = useState<DataMode>('fields')
+    const [mappingReady, setMappingReady] = useState(false)
+    const [mappingErr, setMappingErr] = useState('')
+    const [showAdvMapping, setShowAdvMapping] = useState(false)
+    const mode = queryDataMode
 
     // fields 模式：服务端列船 + 按船查询航迹
     const [fetchedShips, setFetchedShips] = useState<ShipSummary[]>([])
@@ -143,17 +155,100 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [connId])
 
-    const anchoredValues = conn?.fieldMapping.navStatusAnchored ?? []
+    // 连接变化：拉索引列表 + 恢复缓存的索引选择与映射
+    useEffect(() => {
+        setSelectedIndices([])
+        setAvailIndices([])
+        setMappingReady(false)
+        setMappingErr('')
+        if (!conn) return
+        setIndicesLoading(true)
+        aisListIndices(conn)
+            .then((list) => {
+                setAvailIndices(list)
+                let restored: string[] = []
+                try {
+                    const raw = localStorage.getItem(`ais-idx-${connId}`)
+                    if (raw) restored = JSON.parse(raw)
+                } catch { /* ignore */ }
+                const names = new Set(list.map((i) => i.name))
+                setSelectedIndices(restored.filter((n) => names.has(n) || n.includes('*')))
+            })
+            .catch(() => setAvailIndices([]))
+            .finally(() => setIndicesLoading(false))
+        try {
+            const raw = localStorage.getItem(`ais-map-${connId}`)
+            if (raw) {
+                const c = JSON.parse(raw)
+                setQueryMapping({ ...emptyMapping(), ...c.mapping })
+                setQueryDataMode(c.dataMode === 'raw' ? 'raw' : 'fields')
+                setMappingReady(true)
+            } else {
+                setQueryMapping(emptyMapping())
+            }
+        } catch { /* ignore */ }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [connId])
+
+    // 选了索引且还没有映射：采样首个索引自动识别字段
+    useEffect(() => {
+        if (!conn || selectedIndices.length === 0 || mappingReady) return
+        let cancelled = false
+        setMappingErr('')
+        const sampleIdx = selectedIndices.find((s) => !s.includes('*')) ?? selectedIndices[0]
+        aisTestConnection(conn, sampleIdx)
+            .then((r) => {
+                if (cancelled) return
+                const det = autoDetect(r.sample)
+                if (det) {
+                    setQueryMapping(det.fieldMapping)
+                    setQueryDataMode(det.dataMode)
+                    setMappingReady(true)
+                    try { localStorage.setItem(`ais-map-${connId}`, JSON.stringify({ dataMode: det.dataMode, mapping: det.fieldMapping })) } catch { /* ignore */ }
+                } else {
+                    setMappingErr('未能自动识别字段，请展开「字段映射」手动设置')
+                }
+            })
+            .catch((e) => { if (!cancelled) setMappingErr(String(e)) })
+        return () => { cancelled = true }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [conn, connId, selectedIndices, mappingReady])
+
+    const updateMapping = (patch: Partial<FieldMapping>) =>
+        setQueryMapping((m) => {
+            const next = { ...m, ...patch }
+            setMappingReady(true)
+            try { localStorage.setItem(`ais-map-${connId}`, JSON.stringify({ dataMode: queryDataMode, mapping: next })) } catch { /* ignore */ }
+            return next
+        })
+
+    // 用户显式改选索引时才写缓存（避免切连接时把旧选择写到新连接的键）
+    const setSel = (next: string[]) => {
+        setSelectedIndices(next)
+        try { localStorage.setItem(`ais-idx-${connId}`, JSON.stringify(next)) } catch { /* ignore */ }
+    }
+    const toggleIndex = (name: string) =>
+        setSel(selectedIndices.includes(name) ? selectedIndices.filter((n) => n !== name) : [...selectedIndices, name])
+
+    const filteredIndices = useMemo(() => {
+        const f = indexFilter.trim().toLowerCase()
+        return f ? availIndices.filter((i) => i.name.toLowerCase().includes(f)) : availIndices
+    }, [availIndices, indexFilter])
+
+    const indicesKey = selectedIndices.join(',')
+    const anchoredValues = queryMapping.navStatusAnchored ?? []
     const sourceCrs = conn?.sourceCrs ?? 'wgs84'
 
     // —— fields 模式：列船 ——
     const loadShips = async () => {
-        if (!connId) return
+        if (!connId || selectedIndices.length === 0 || !mappingReady) return
         setShipsLoading(true)
         setShipError('')
         try {
             const list = await aisListShips({
                 connId,
+                indices: selectedIndices,
+                mapping: queryMapping,
                 timeFrom: toMs(timeFrom),
                 timeTo: toMs(timeTo),
                 limit: 500,
@@ -170,11 +265,11 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     useEffect(() => {
         if (mode === 'fields' && connId) loadShips()
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, connId, timeFrom, timeTo])
+    }, [mode, connId, indicesKey, mappingReady, timeFrom, timeTo])
 
     // —— fields 模式：按船查询航迹 ——
     useEffect(() => {
-        if (mode !== 'fields' || !connId || !selectedMmsi) {
+        if (mode !== 'fields' || !connId || !selectedMmsi || selectedIndices.length === 0 || !mappingReady) {
             setRoutePoints([])
             return
         }
@@ -183,6 +278,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         setRouteError('')
         aisGetShipRoute({
             connId,
+            indices: selectedIndices,
+            mapping: queryMapping,
             mmsi: selectedMmsi,
             timeFrom: toMs(timeFrom),
             timeTo: toMs(timeTo),
@@ -209,17 +306,22 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
             cancelled = true
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, connId, selectedMmsi, timeFrom, timeTo, sourceCrs])
+    }, [mode, connId, indicesKey, mappingReady, selectedMmsi, timeFrom, timeTo, sourceCrs])
 
     // —— raw 模式：拉取并解码 ——
     const doPull = async () => {
-        if (!connId) return
+        if (!connId || selectedIndices.length === 0 || !mappingReady) {
+            setPullError('请先选择索引（连接后在上方勾选）')
+            return
+        }
         setPulling(true)
         setPullError('')
         setSelectedMmsi('')
         try {
             const r = await aisPullWindow({
                 connId,
+                indices: selectedIndices,
+                mapping: queryMapping,
                 timeFrom: toMs(timeFrom),
                 timeTo: toMs(timeTo),
                 maxPoints,
@@ -338,9 +440,10 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         }
     }, [waterLayer, waterTaskId, waterTasks])
 
-    // 只取最外层水域面（去掉大大小小嵌套的内层，做范围粗判）；原始 waterPolys 不变
+    // 合并为水域范围（扫描线并集，消掉嵌套内框、挖掉中间岛屿），用于范围判断与渲染；
+    // 与数据中心同一套 dissolveOutline；原始 waterPolys 不变
     const effectiveWaterPolys = useMemo(
-        () => (onlyOutermost ? outermostPolygons(waterPolys) : waterPolys),
+        () => (onlyOutermost ? dissolveOutline(waterPolys) : waterPolys),
         [onlyOutermost, waterPolys],
     )
 
@@ -429,10 +532,92 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         {connections.map((c) => (
                             <option key={c.id} value={c.id}>
                                 {c.name || `${c.host}:${c.port}`}
-                                {c.dataMode === 'raw' ? ' · 报文' : ''}
                             </option>
                         ))}
                     </select>
+                </div>
+
+                <div className="ais-field">
+                    <label className="ais-label">索引{selectedIndices.length ? ` · 选了 ${selectedIndices.length}` : ''}</label>
+                    {indicesLoading ? (
+                        <div className="ais-hint">载入索引…</div>
+                    ) : availIndices.length === 0 ? (
+                        <div className="ais-hint">未发现索引。到「ES 连接」页测试连接确认端点可达。</div>
+                    ) : (
+                        <>
+                            <input className="ais-select" placeholder="过滤索引名…（支持手填通配 ais-*）" value={indexFilter} onChange={(e) => setIndexFilter(e.target.value)} />
+                            <div className="ais-presets">
+                                <button type="button" onClick={() => setSel(filteredIndices.map((i) => i.name))}>全选可见</button>
+                                <button type="button" onClick={() => setSel([])}>清空</button>
+                                {indexFilter.trim() && (
+                                    <button type="button" onClick={() => { const p = indexFilter.trim(); setSel(selectedIndices.includes(p) ? selectedIndices : [...selectedIndices, p]) }}>
+                                        用通配 {indexFilter.trim()}
+                                    </button>
+                                )}
+                            </div>
+                            <div className="ais-ship-list" style={{ maxHeight: 150 }}>
+                                {filteredIndices.slice(0, 400).map((i) => {
+                                    const on = selectedIndices.includes(i.name)
+                                    return (
+                                        <label
+                                            key={i.name}
+                                            className={`ais-ship-row${on ? ' active' : ''}`}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
+                                        >
+                                            <input type="checkbox" checked={on} onChange={() => toggleIndex(i.name)} />
+                                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.name}</span>
+                                            {typeof i.docsCount === 'number' && (
+                                                <span className="ais-ship-meta" style={{ flexShrink: 0 }}>{i.docsCount}</span>
+                                            )}
+                                        </label>
+                                    )
+                                })}
+                            </div>
+                            {/* 手填的通配/索引也展示成可移除的 chip */}
+                            {selectedIndices.filter((n) => !filteredIndices.some((i) => i.name === n)).map((n) => (
+                                <label key={n} className="ais-ship-row active" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                                    <input type="checkbox" checked onChange={() => toggleIndex(n)} />
+                                    <span style={{ flex: 1 }}>{n}</span>
+                                </label>
+                            ))}
+                        </>
+                    )}
+                    {selectedIndices.length > 0 && (
+                        <>
+                            <div className="ais-row-between" style={{ marginTop: 6 }}>
+                                {mappingReady ? (
+                                    <span className="ais-hint" style={{ color: 'var(--st-green, #10b981)' }}>✓ {mappingSummary(queryDataMode, queryMapping)}</span>
+                                ) : mappingErr ? (
+                                    <span className="ais-hint err">{mappingErr}</span>
+                                ) : (
+                                    <span className="ais-hint">识别字段中…</span>
+                                )}
+                                <button type="button" className="ais-mini-btn" onClick={() => setShowAdvMapping((v) => !v)}>字段映射</button>
+                            </div>
+                            {showAdvMapping && (
+                                <div style={{ marginTop: 6 }}>
+                                    <div className="seg ais-seg" style={{ marginBottom: 6 }}>
+                                        <button type="button" className={queryDataMode === 'fields' ? 'active' : ''} onClick={() => { setQueryDataMode('fields'); setMappingReady(true) }}>结构化字段</button>
+                                        <button type="button" className={queryDataMode === 'raw' ? 'active' : ''} onClick={() => { setQueryDataMode('raw'); setMappingReady(true) }}>原始 AIVDM</button>
+                                    </div>
+                                    {queryDataMode === 'raw' ? (
+                                        <>
+                                            <MapInput label="报文字段" value={queryMapping.message} onChange={(v) => updateMapping({ message: v })} />
+                                            <MapInput label="时间字段" value={queryMapping.timestamp} onChange={(v) => updateMapping({ timestamp: v })} />
+                                        </>
+                                    ) : (
+                                        <>
+                                            <MapInput label="MMSI" value={queryMapping.mmsi} onChange={(v) => updateMapping({ mmsi: v })} />
+                                            <MapInput label="聚合字段 (keyword)" value={queryMapping.aggField} onChange={(v) => updateMapping({ aggField: v })} />
+                                            <MapInput label="纬度 lat" value={queryMapping.lat} onChange={(v) => updateMapping({ lat: v })} />
+                                            <MapInput label="经度 lon" value={queryMapping.lon} onChange={(v) => updateMapping({ lon: v })} />
+                                            <MapInput label="时间字段" value={queryMapping.timestamp} onChange={(v) => updateMapping({ timestamp: v })} />
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </>
+                    )}
                 </div>
 
                 <div className="ais-field">
@@ -663,6 +848,15 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
 
                 {/* 顶部状态条 */}
                 <div className="ais-map-status">
+                    {selectedIndices.length > 0 && mappingReady && (
+                        <span
+                            className="ais-chip"
+                            style={{ maxWidth: 460, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={`索引（${selectedIndices.length}）：${selectedIndices.join(', ')}\n映射：${mappingSummary(queryDataMode, queryMapping)}`}
+                        >
+                            <GcIcon name="layers" size={11} /> {selectedIndices.length} 索引 · {mappingSummary(queryDataMode, queryMapping)}
+                        </span>
+                    )}
                     {routeLoading && <span className="ais-chip">航迹加载中…</span>}
                     {routeError && <span className="ais-chip err">{routeError}</span>}
                     {!routeLoading && selectedMmsi && (
@@ -697,6 +891,23 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     {waterLayer !== 'none' && <div className="ais-legend-row"><i className={`lg-water ${waterKind}`} /> 水域面</div>}
                 </div>
             </div>
+        </div>
+    )
+}
+
+function MapInput({
+    label,
+    value,
+    onChange,
+}: {
+    label: string
+    value: string
+    onChange: (v: string) => void
+}) {
+    return (
+        <div className="ais-num-row">
+            <span>{label}</span>
+            <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="字段路径，如 a.b.c" />
         </div>
     )
 }

@@ -12,7 +12,6 @@ use std::time::Duration;
 pub struct EsClient {
     client: reqwest::Client,
     base: String,
-    index: String,
     headers: HeaderMap,
 }
 
@@ -57,7 +56,6 @@ impl EsClient {
         Ok(Self {
             client,
             base,
-            index: conn.index.trim().to_string(),
             headers,
         })
     }
@@ -88,12 +86,13 @@ impl EsClient {
         self.get("").await
     }
 
-    /// POST /{index}/_search
-    pub async fn search(&self, body: &Value) -> Result<Value, String> {
-        if self.index.is_empty() {
+    /// POST /{index}/_search。index 可为逗号分隔的多个索引或通配（如 `a,b` / `ais-*`）。
+    pub async fn search(&self, index: &str, body: &Value) -> Result<Value, String> {
+        let index = index.trim();
+        if index.is_empty() {
             return Err("索引名不能为空".to_string());
         }
-        let url = format!("{}/{}/_search", self.base, self.index);
+        let url = format!("{}/{}/_search", self.base, index);
         let resp = self
             .client
             .post(&url)
@@ -118,11 +117,17 @@ impl EsClient {
     }
 
     /// 开启 scroll：POST /{index}/_search?scroll=keep，返回 (scroll_id, 首批响应)。
-    pub async fn scroll_start(&self, body: &Value, keep: &str) -> Result<(String, Value), String> {
-        if self.index.is_empty() {
+    pub async fn scroll_start(
+        &self,
+        index: &str,
+        body: &Value,
+        keep: &str,
+    ) -> Result<(String, Value), String> {
+        let index = index.trim();
+        if index.is_empty() {
             return Err("索引名不能为空".to_string());
         }
-        let url = format!("{}/{}/_search?scroll={}", self.base, self.index, keep);
+        let url = format!("{}/{}/_search?scroll={}", self.base, index, keep);
         let resp = self
             .client
             .post(&url)

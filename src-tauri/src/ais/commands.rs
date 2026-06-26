@@ -82,6 +82,19 @@ fn val_to_string(v: &Value) -> Option<String> {
     }
 }
 
+/// 把多个索引拼成 ES 接受的逗号分隔模式；去空去重保序。支持通配（如 ais-*）。
+fn join_indices(indices: &[String]) -> String {
+    let mut seen = HashSet::new();
+    let mut parts: Vec<&str> = Vec::new();
+    for s in indices {
+        let t = s.trim();
+        if !t.is_empty() && seen.insert(t) {
+            parts.push(t);
+        }
+    }
+    parts.join(",")
+}
+
 // ===== 连接配置 CRUD =====
 
 #[tauri::command]
@@ -150,7 +163,10 @@ pub async fn ais_list_indices(conn: EsConnection) -> Result<Vec<IndexInfo>, Stri
 // ===== 测试连接 + 采样字段 =====
 
 #[tauri::command]
-pub async fn ais_test_connection(conn: EsConnection) -> Result<EsTestResult, String> {
+pub async fn ais_test_connection(
+    conn: EsConnection,
+    index: Option<String>,
+) -> Result<EsTestResult, String> {
     let client = EsClient::new(&conn)?;
     let root = client.get_root().await?;
     let version = root
@@ -165,7 +181,9 @@ pub async fn ais_test_connection(conn: EsConnection) -> Result<EsTestResult, Str
         .map(|s| s.to_string());
 
     // 采样若干文档，收集字段路径用于驱动映射 UI
-    if conn.index.trim().is_empty() {
+    let idx = index.unwrap_or_default();
+    let idx = idx.trim();
+    if idx.is_empty() {
         return Ok(EsTestResult {
             ok: true,
             version: version.clone(),
@@ -173,12 +191,12 @@ pub async fn ais_test_connection(conn: EsConnection) -> Result<EsTestResult, Str
             doc_count: None,
             field_paths: vec![],
             sample: Value::Null,
-            message: format!("已连接 ES {}（未填索引名，无法采样字段）", version),
+            message: format!("已连接 ES {}（未指定索引，无法采样字段）", version),
         });
     }
 
     let body = json!({ "size": 5, "query": { "match_all": {} } });
-    match client.search(&body).await {
+    match client.search(idx, &body).await {
         Ok(resp) => {
             let (total, _gte) = total_from_hits(&resp);
             let mut field_paths = Vec::new();
@@ -219,6 +237,8 @@ pub async fn ais_test_connection(conn: EsConnection) -> Result<EsTestResult, Str
 pub async fn ais_list_ships(
     app: AppHandle,
     conn_id: String,
+    indices: Vec<String>,
+    mapping: FieldMapping,
     time_from: Option<i64>,
     time_to: Option<i64>,
     search: Option<String>,
@@ -229,7 +249,11 @@ pub async fn ais_list_ships(
         .get(&conn_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "连接不存在".to_string())?;
-    let m = conn.field_mapping.clone();
+    let idx = join_indices(&indices);
+    if idx.is_empty() {
+        return Err("请先选择至少一个索引".to_string());
+    }
+    let m = mapping;
     let id_f = id_field(&m);
     if id_f.is_empty() {
         return Err("请先在字段映射里设置 MMSI（或可聚合的 aggField）".to_string());
@@ -273,7 +297,7 @@ pub async fn ais_list_ships(
     });
 
     let client = EsClient::new(&conn)?;
-    let resp = client.search(&body).await?;
+    let resp = client.search(&idx, &body).await?;
     let buckets = resp["aggregations"]["ships"]["buckets"]
         .as_array()
         .cloned()
@@ -320,6 +344,8 @@ pub async fn ais_list_ships(
 pub async fn ais_get_ship_route(
     app: AppHandle,
     conn_id: String,
+    indices: Vec<String>,
+    mapping: FieldMapping,
     mmsi: String,
     time_from: Option<i64>,
     time_to: Option<i64>,
@@ -330,7 +356,11 @@ pub async fn ais_get_ship_route(
         .get(&conn_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "连接不存在".to_string())?;
-    let m = conn.field_mapping.clone();
+    let idx = join_indices(&indices);
+    if idx.is_empty() {
+        return Err("请先选择至少一个索引".to_string());
+    }
+    let m = mapping;
     let id_f = id_field(&m);
     if id_f.is_empty() {
         return Err("请先在字段映射里设置 MMSI（或可聚合的 aggField）".to_string());
@@ -366,7 +396,7 @@ pub async fn ais_get_ship_route(
             "query": { "bool": { "filter": filters.clone() } },
             "sort": [ { ts_field.clone(): { "order": "asc" } } ]
         });
-        let resp = client.search(&body).await?;
+        let resp = client.search(&idx, &body).await?;
         let (t, g) = total_from_hits(&resp);
         total = t;
         gte = g;
@@ -402,6 +432,8 @@ pub async fn ais_get_ship_route(
 pub async fn ais_pull_window(
     app: AppHandle,
     conn_id: String,
+    indices: Vec<String>,
+    mapping: FieldMapping,
     time_from: Option<i64>,
     time_to: Option<i64>,
     max_points: Option<u32>,
@@ -411,7 +443,11 @@ pub async fn ais_pull_window(
         .get(&conn_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "连接不存在".to_string())?;
-    let m = conn.field_mapping.clone();
+    let idx = join_indices(&indices);
+    if idx.is_empty() {
+        return Err("请先选择至少一个索引".to_string());
+    }
+    let m = mapping;
     let msg_field = if m.message.trim().is_empty() {
         "message".to_string()
     } else {
@@ -444,7 +480,7 @@ pub async fn ais_pull_window(
     let mut scanned: u64 = 0;
     let mut reached_cap = false;
 
-    let (mut scroll_id, mut resp) = client.scroll_start(&body, "2m").await?;
+    let (mut scroll_id, mut resp) = client.scroll_start(&idx, &body, "2m").await?;
     loop {
         let hits = resp["hits"]["hits"].as_array().cloned().unwrap_or_default();
         if hits.is_empty() {

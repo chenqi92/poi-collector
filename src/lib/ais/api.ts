@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
     EsConnection,
     EsTestResult,
+    FieldMapping,
     IndexInfo,
     PullResult,
     RouteResponse,
@@ -22,8 +23,8 @@ export function aisDeleteConnection(id: string): Promise<void> {
     return invoke<void>('ais_delete_connection', { id })
 }
 
-export function aisTestConnection(conn: EsConnection): Promise<EsTestResult> {
-    return invoke<EsTestResult>('ais_test_connection', { conn })
+export function aisTestConnection(conn: EsConnection, index?: string): Promise<EsTestResult> {
+    return invoke<EsTestResult>('ais_test_connection', { conn, index })
 }
 
 export function aisListIndices(conn: EsConnection): Promise<IndexInfo[]> {
@@ -32,6 +33,8 @@ export function aisListIndices(conn: EsConnection): Promise<IndexInfo[]> {
 
 export function aisListShips(params: {
     connId: string
+    indices: string[]
+    mapping: FieldMapping
     timeFrom?: number
     timeTo?: number
     search?: string
@@ -42,6 +45,8 @@ export function aisListShips(params: {
 
 export function aisGetShipRoute(params: {
     connId: string
+    indices: string[]
+    mapping: FieldMapping
     mmsi: string
     timeFrom?: number
     timeTo?: number
@@ -52,6 +57,8 @@ export function aisGetShipRoute(params: {
 
 export function aisPullWindow(params: {
     connId: string
+    indices: string[]
+    mapping: FieldMapping
     timeFrom?: number
     timeTo?: number
     maxPoints?: number
