@@ -12,6 +12,7 @@
 @import './styles/geocollector/overlays.css';
 @import './styles/geocollector/new-collection.css';
 @import './styles/geocollector/settings.css';
+@import './styles/geocollector/ais.css';
 
 @tailwind base;
 @tailwind components;

@@ -1,3 +1,4 @@
+mod ais;
 mod chart_collector;
 mod collectors;
 mod commands;
@@ -8,6 +9,7 @@ mod regions;
 mod tile_cache;
 mod tile_downloader;
 
+use ais::commands as ais_commands;
 use chart_collector::commands as chart_commands;
 use commands::*;
 use tile_downloader::boundaries;
@@ -101,6 +103,8 @@ pub fn run() {
             chart_commands::chart_export_buoys,
             chart_commands::chart_export_features,
             chart_commands::chart_get_tile_count,
+            chart_commands::chart_get_display_tasks,
+            chart_commands::chart_serve_layer_tile,
             chart_commands::chart_get_buoy_stats,
             chart_commands::chart_get_feature_stats,
             chart_commands::chart_get_all_buoys,
@@ -112,7 +116,21 @@ pub fn run() {
             // OSM 瓦片本地缓存
             tile_cache::cached_osm_tile,
             tile_cache::clear_osm_tile_cache,
+            // 船舶 AIS 航迹
+            ais_commands::ais_list_connections,
+            ais_commands::ais_save_connection,
+            ais_commands::ais_delete_connection,
+            ais_commands::ais_test_connection,
+            ais_commands::ais_list_indices,
+            ais_commands::ais_list_ships,
+            ais_commands::ais_get_ship_route,
+            ais_commands::ais_pull_window,
         ])
+        .setup(|app| {
+            // 把 chart_data.db 定位到持久化目录并迁移旧库（防止重建/移动 exe 丢数据）
+            chart_commands::init_chart_db_path(app.handle());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

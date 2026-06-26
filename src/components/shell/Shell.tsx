@@ -13,7 +13,7 @@ const COLLAPSE_KEY = 'poi-ui-sidebar-collapsed'
 
 /* Routes that have been rewritten to the new design and own their own
    padding/layout via the .page system. As more pages migrate this list grows. */
-const NEW_DESIGN_ROUTES = ['/workspace', '/new', '/data', '/offline', '/settings']
+const NEW_DESIGN_ROUTES = ['/workspace', '/new', '/data', '/offline', '/ais', '/settings']
 
 function detectPlatformLabel(): string {
     if (typeof navigator === 'undefined') return 'Desktop'
@@ -61,6 +61,8 @@ export function Shell() {
                 e.preventDefault(); navigate('/data')
             } else if (mod && !e.shiftKey && e.key === '4') {
                 e.preventDefault(); navigate('/offline')
+            } else if (mod && !e.shiftKey && e.key === '5') {
+                e.preventDefault(); navigate('/ais')
             } else if (mod && e.key === ',') {
                 e.preventDefault(); navigate('/settings')
             }

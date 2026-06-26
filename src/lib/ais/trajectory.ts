@@ -1,0 +1,329 @@
+// 航迹分段：把单船按时间排序的点分成「行驶段」与「停泊段」。
+// 停泊段把连续静止点聚成一个锚点（质心 + 摆动半径），渲染时航线跨过它连线，
+// 避免停泊抖动产生一堆碎线。
+
+import type { AisPoint, TrajParams } from './types'
+
+export const DEFAULT_TRAJ: TrajParams = {
+    speedAnchorKn: 0.5,
+    anchorRadiusM: 60,
+    anchorMinDurationS: 300,
+    simplifyToleranceM: 8,
+    anchorMaxDriftKn: 0.2,
+    maxJumpKn: 30,
+    tripGapMinutes: 30,
+}
+
+export interface SailingSegment {
+    kind: 'sailing'
+    points: AisPoint[]
+    /** 为某航次的首段时为真，渲染时不与上一航次连线 */
+    newTrip?: boolean
+}
+
+export interface AnchorSegment {
+    kind: 'anchored'
+    centroid: [number, number] // [lon, lat] WGS-84
+    radiusM: number
+    startTs: number
+    endTs: number
+    points: AisPoint[]
+    newTrip?: boolean
+}
+
+export type Segment = SailingSegment | AnchorSegment
+
+const KN_PER_MS = 1 / 0.514444 // m/s -> 节
+
+export function haversineM(aLon: number, aLat: number, bLon: number, bLat: number): number {
+    const R = 6371000
+    const dLat = ((bLat - aLat) * Math.PI) / 180
+    const dLon = ((bLon - aLon) * Math.PI) / 180
+    const la1 = (aLat * Math.PI) / 180
+    const la2 = (bLat * Math.PI) / 180
+    const h =
+        Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
+}
+
+export interface CleanOpts {
+    /** 相邻对地速度超过此值(节)视为跳点/串号边界 */
+    maxJumpKn: number
+    /** 静默超过此分钟数视为新航次 */
+    tripGapMinutes: number
+}
+
+export const DEFAULT_CLEAN: CleanOpts = {
+    maxJumpKn: DEFAULT_TRAJ.maxJumpKn,
+    tripGapMinutes: DEFAULT_TRAJ.tripGapMinutes,
+}
+
+export interface CleanResult {
+    /** 保留的全部点（按航次顺序拼接） */
+    points: AisPoint[]
+    /** 切分出的连贯航次 */
+    trips: AisPoint[][]
+    /** 去掉的重复/孤立跳点/碎片点数 */
+    dropped: number
+}
+
+function impliedKn(a: AisPoint, b: AisPoint): number {
+    const dt = (b.ts - a.ts) / 1000
+    if (dt <= 0) return Infinity
+    return (haversineM(a.lon, a.lat, b.lon, b.lat) / dt) * KN_PER_MS
+}
+
+/**
+ * 单 MMSI 航迹清洗 + 多目标拆分（按位置把多船共号/多航次还原成各自的连贯航迹）：
+ *  1) 按时间排序，去非法坐标与重复时间戳；
+ *  2) 全局最近邻多目标跟踪：逐点选「对地速度最小且 ≤ maxJumpKn」的已有航迹接上，
+ *     接不上的另起一条新航迹；静默超过 tripGapMinutes 的航迹关闭。
+ *     —— 这样逐点交替的串号(多船共用一个 MMSI)会被分到各自航迹，
+ *        孤立跳点会落入只有 1 个点的航迹被丢弃，长静默自然切成新航次。
+ *  3) 丢掉只剩 1 个点的碎片航迹，按起始时间排序输出。
+ * 解决内河 AIS 的 GPS 跳点与 MMSI 串号拼接问题。
+ */
+export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN): CleanResult {
+    const sorted = points
+        .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat))
+        .sort((a, b) => a.ts - b.ts)
+    let dropped = points.length - sorted.length
+
+    // 1) 去重复时间戳
+    const dedup: AisPoint[] = []
+    for (const p of sorted) {
+        const prev = dedup[dedup.length - 1]
+        if (prev && p.ts - prev.ts <= 0) {
+            dropped++
+            continue
+        }
+        dedup.push(p)
+    }
+
+    // 2) 全局最近邻多目标跟踪
+    const gapS = opts.tripGapMinutes * 60
+    const open: { points: AisPoint[]; last: AisPoint }[] = []
+    const finished: AisPoint[][] = []
+    for (const p of dedup) {
+        // 关闭静默过久的航迹
+        for (let k = open.length - 1; k >= 0; k--) {
+            if ((p.ts - open[k].last.ts) / 1000 > gapS) {
+                finished.push(open[k].points)
+                open.splice(k, 1)
+            }
+        }
+        // 选对地速度最小且在阈值内的航迹接上
+        let best = -1
+        let bestKn = Infinity
+        for (let k = 0; k < open.length; k++) {
+            const kn = impliedKn(open[k].last, p)
+            if (kn <= opts.maxJumpKn && kn < bestKn) {
+                bestKn = kn
+                best = k
+            }
+        }
+        if (best >= 0) {
+            open[best].points.push(p)
+            open[best].last = p
+        } else {
+            open.push({ points: [p], last: p })
+        }
+    }
+    for (const t of open) finished.push(t.points)
+
+    // 3) 丢碎片，按起始时间排序
+    const trips: AisPoint[][] = []
+    for (const t of finished) {
+        if (t.length >= 2) trips.push(t)
+        else dropped += t.length
+    }
+    trips.sort((a, b) => a[0].ts - b[0].ts)
+
+    return { points: trips.flat(), trips, dropped }
+}
+
+/** 逐点判定是否静止：导航状态优先，其次 SOG，再次相邻点推算速度兜底。 */
+function classify(pts: AisPoint[], params: TrajParams, anchoredSet: Set<string>): boolean[] {
+    const n = pts.length
+    const flags = new Array<boolean>(n).fill(false)
+    for (let i = 0; i < n; i++) {
+        const p = pts[i]
+        if (p.navStatus != null && anchoredSet.has(String(p.navStatus))) {
+            flags[i] = true
+            continue
+        }
+        if (p.sog != null && Number.isFinite(p.sog)) {
+            flags[i] = p.sog <= params.speedAnchorKn
+            continue
+        }
+        let minKn = Infinity
+        for (const k of [i - 1, i + 1]) {
+            if (k < 0 || k >= n) continue
+            const dt = Math.abs(pts[k].ts - p.ts) / 1000
+            if (dt <= 0) continue
+            const d = haversineM(p.lon, p.lat, pts[k].lon, pts[k].lat)
+            minKn = Math.min(minKn, (d / dt) * KN_PER_MS)
+        }
+        flags[i] = Number.isFinite(minKn) ? minKn <= params.speedAnchorKn * 2 : false
+    }
+    return flags
+}
+
+export function segmentTrack(
+    points: AisPoint[],
+    params: TrajParams,
+    anchoredValues: string[] = [],
+): Segment[] {
+    if (points.length === 0) return []
+    const pts = [...points].sort((a, b) => a.ts - b.ts)
+    const anchoredSet = new Set(anchoredValues.map(String))
+    const flags = classify(pts, params, anchoredSet)
+
+    const segs: Segment[] = []
+    let sailing: AisPoint[] = []
+    const flush = () => {
+        if (sailing.length) {
+            segs.push({ kind: 'sailing', points: sailing })
+            sailing = []
+        }
+    }
+
+    let i = 0
+    while (i < pts.length) {
+        if (!flags[i]) {
+            sailing.push(pts[i])
+            i++
+            continue
+        }
+        // 收集一段连续静止点
+        let j = i
+        while (j < pts.length && flags[j]) j++
+        const cluster = pts.slice(i, j)
+        const durS = (cluster[cluster.length - 1].ts - cluster[0].ts) / 1000
+        let lo = 0
+        let la = 0
+        for (const p of cluster) {
+            lo += p.lon
+            la += p.lat
+        }
+        lo /= cluster.length
+        la /= cluster.length
+        let radius = 0
+        for (const p of cluster) radius = Math.max(radius, haversineM(lo, la, p.lon, p.lat))
+
+        // 净进展速度：低速但净位移仍在推进(顶流)不算停泊，避免把缓慢顶流航行误判为锚泊
+        const first = cluster[0]
+        const lastP = cluster[cluster.length - 1]
+        const netM = haversineM(first.lon, first.lat, lastP.lon, lastP.lat)
+        const progressKn = durS > 0 ? (netM / durS) * KN_PER_MS : 0
+        const maxDriftKn = params.anchorMaxDriftKn ?? DEFAULT_TRAJ.anchorMaxDriftKn
+        const isAnchor =
+            cluster.length >= 3 && durS >= params.anchorMinDurationS && progressKn <= maxDriftKn
+        if (isAnchor) {
+            flush()
+            segs.push({
+                kind: 'anchored',
+                centroid: [lo, la],
+                radiusM: Math.min(Math.max(radius, 8), params.anchorRadiusM * 6),
+                startTs: cluster[0].ts,
+                endTs: cluster[cluster.length - 1].ts,
+                points: cluster,
+            })
+        } else {
+            // 不够停泊条件，并回行驶段
+            for (const p of cluster) sailing.push(p)
+        }
+        i = j
+    }
+    flush()
+    return segs
+}
+
+/**
+ * 对多个航次分别分段，并把每个航次（除第一个）的首段标记 newTrip，
+ * 渲染时不与上一航次连线（避免跨航次/跨静默拉出假航线）。
+ */
+export function segmentTrips(
+    trips: AisPoint[][],
+    params: TrajParams,
+    anchoredValues: string[] = [],
+): Segment[] {
+    const out: Segment[] = []
+    trips.forEach((trip, ti) => {
+        const segs = segmentTrack(trip, params, anchoredValues)
+        if (ti > 0 && segs.length > 0) {
+            segs[0] = { ...segs[0], newTrip: true }
+        }
+        for (const s of segs) out.push(s)
+    })
+    return out
+}
+
+/** Douglas-Peucker 抽稀（容差为米），用等距投影近似垂距。 */
+export function douglasPeucker(points: AisPoint[], toleranceM: number): AisPoint[] {
+    if (points.length <= 2 || toleranceM <= 0) return points
+    const lat0 = (points[0].lat * Math.PI) / 180
+    const mPerDegLat = 111320
+    const mPerDegLon = 111320 * Math.cos(lat0)
+    const X = (p: AisPoint) => p.lon * mPerDegLon
+    const Y = (p: AisPoint) => p.lat * mPerDegLat
+
+    const keep = new Array<boolean>(points.length).fill(false)
+    keep[0] = true
+    keep[points.length - 1] = true
+    const stack: Array<[number, number]> = [[0, points.length - 1]]
+    while (stack.length) {
+        const seg = stack.pop()!
+        const s = seg[0]
+        const e = seg[1]
+        const ax = X(points[s])
+        const ay = Y(points[s])
+        const bx = X(points[e])
+        const by = Y(points[e])
+        const dx = bx - ax
+        const dy = by - ay
+        const len2 = dx * dx + dy * dy || 1e-9
+        let maxD = -1
+        let idx = -1
+        for (let k = s + 1; k < e; k++) {
+            const px = X(points[k])
+            const py = Y(points[k])
+            const t = ((px - ax) * dx + (py - ay) * dy) / len2
+            const cx = ax + t * dx
+            const cy = ay + t * dy
+            const d = Math.hypot(px - cx, py - cy)
+            if (d > maxD) {
+                maxD = d
+                idx = k
+            }
+        }
+        if (maxD > toleranceM && idx > 0) {
+            keep[idx] = true
+            stack.push([s, idx], [idx, e])
+        }
+    }
+    return points.filter((_, k) => keep[k])
+}
+
+/** 取分段轨迹的整体 WGS-84 包围盒（用于自动定位），无数据返回 null。 */
+export function segmentsBounds(segs: Segment[]): [number, number, number, number] | null {
+    let minLon = Infinity
+    let minLat = Infinity
+    let maxLon = -Infinity
+    let maxLat = -Infinity
+    const acc = (lon: number, lat: number) => {
+        if (lon < minLon) minLon = lon
+        if (lon > maxLon) maxLon = lon
+        if (lat < minLat) minLat = lat
+        if (lat > maxLat) maxLat = lat
+    }
+    for (const s of segs) {
+        if (s.kind === 'sailing') {
+            for (const p of s.points) acc(p.lon, p.lat)
+        } else {
+            acc(s.centroid[0], s.centroid[1])
+        }
+    }
+    if (!Number.isFinite(minLon)) return null
+    return [minLon, minLat, maxLon, maxLat] // [west, south, east, north]
+}

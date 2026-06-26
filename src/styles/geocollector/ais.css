@@ -1,0 +1,616 @@
+/* ── AIS 航迹模块 ───────────────────────────────────────────── */
+
+.ais-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 340px 1fr;
+}
+
+/* 左控制栏 */
+.ais-panel {
+    border-right: 1px solid var(--border);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--panel);
+    overflow-y: auto;
+}
+
+.ais-field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.ais-label {
+    font-size: var(--fs-xs, 11px);
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.ais-select {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    width: 100%;
+}
+
+.ais-select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.ais-presets {
+    display: flex;
+    gap: 4px;
+}
+
+.ais-presets button {
+    flex: 1;
+    height: 24px;
+    font-size: 11px;
+    color: var(--text-2);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.ais-presets button:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+
+.ais-row-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.ais-mini-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-3);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+}
+
+.ais-mini-btn:hover {
+    color: var(--accent);
+}
+
+/* 船只列表 */
+.ais-ship-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.ais-ship-row {
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+}
+
+.ais-ship-row:hover {
+    background: var(--hover);
+}
+
+.ais-ship-row.active {
+    border-color: var(--accent);
+    background: var(--accent-soft, color-mix(in oklch, var(--accent), transparent 88%));
+}
+
+.ais-ship-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ais-ship-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-3);
+    margin-top: 2px;
+}
+
+.ais-ship-time {
+    font-size: 10px;
+    color: var(--text-4, var(--text-3));
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ais-hint {
+    font-size: 11px;
+    color: var(--text-3);
+    line-height: 1.5;
+}
+
+.ais-hint.err {
+    color: var(--st-red);
+}
+
+.ais-hint code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    background: var(--bg);
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+/* 开关 */
+.ais-toggle {
+    width: 34px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--border-2, #555);
+    position: relative;
+    flex: 0 0 auto;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.15s;
+}
+
+.ais-toggle.on {
+    background: var(--accent);
+}
+
+.ais-toggle:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.ais-toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s;
+}
+
+.ais-toggle.on .ais-toggle-knob {
+    transform: translateX(14px);
+}
+
+.ais-toggle-text {
+    font-size: 12px;
+    color: var(--text-2);
+}
+
+.ais-seg button {
+    font-size: 11px;
+}
+
+.ais-mode-seg {
+    width: fit-content;
+}
+
+.ais-badge {
+    font-size: 10.5px;
+    color: var(--text-2);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 8px;
+}
+
+.ais-num-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--text-2);
+}
+
+.ais-num-row input {
+    width: 84px;
+    height: 26px;
+    padding: 0 6px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 地图 */
+.ais-map-wrap {
+    position: relative;
+    overflow: hidden;
+}
+
+.ais-map-status {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 800;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 80%;
+}
+
+.ais-chip {
+    font-size: 11px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    font-variant-numeric: tabular-nums;
+}
+
+.ais-chip.err {
+    color: #fff;
+    background: var(--st-red);
+    border-color: var(--st-red);
+}
+
+.ais-chip.warn {
+    color: #111;
+    background: var(--st-amber, #f59e0b);
+    border-color: var(--st-amber, #f59e0b);
+}
+
+.ais-chip.danger {
+    color: #fff;
+    background: #ef4444;
+    border-color: #ef4444;
+}
+
+.ais-legend {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 800;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.ais-legend-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    color: var(--text-2);
+}
+
+.ais-legend-row i {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.lg-line {
+    width: 18px;
+    height: 0;
+    border-top-width: 3px;
+    border-top-style: solid;
+}
+
+.lg-line.sail {
+    border-top-color: #2563eb;
+}
+
+.lg-line.conn {
+    border-top-style: dashed;
+    border-top-color: #38bdf8;
+}
+
+.lg-anchor {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #f97316;
+    color: #fff;
+}
+
+.lg-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.lg-dot.anomaly {
+    background: #fca5a5;
+    border: 2px solid #ef4444;
+}
+
+.lg-water {
+    width: 14px;
+    height: 10px;
+    border-radius: 3px;
+}
+
+.lg-water.hydro {
+    background: rgba(34, 211, 238, 0.25);
+    border: 1px solid #0891b2;
+}
+
+.lg-water.fence {
+    background: rgba(251, 191, 36, 0.25);
+    border: 1px solid #f59e0b;
+}
+
+/* Leaflet 内的标记 */
+.ais-anchor-marker {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #f97316;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.ais-anomaly-point {
+    filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.6));
+}
+
+/* 空状态 */
+.ais-empty {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-3);
+}
+
+.ais-empty-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.ais-empty-sub {
+    font-size: 12px;
+}
+
+/* ── ES 连接 / 字段映射 ──────────────────────────────────────── */
+
+.ais-conn-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    overflow-y: auto;
+}
+
+.ais-conn-list {
+    border-right: 1px solid var(--border);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--panel);
+}
+
+.ais-conn-new {
+    width: 100%;
+    justify-content: center;
+}
+
+.ais-conn-card {
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    cursor: pointer;
+}
+
+.ais-conn-card:hover {
+    background: var(--hover);
+}
+
+.ais-conn-card.active {
+    border-color: var(--accent);
+}
+
+.ais-conn-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ais-conn-sub {
+    font-size: 10.5px;
+    color: var(--text-3);
+    margin-top: 2px;
+    word-break: break-all;
+}
+
+.ais-conn-editor {
+    padding: 16px 20px;
+    max-width: 760px;
+}
+
+.ais-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin: 18px 0 10px;
+}
+
+.ais-conn-editor .ais-section-title:first-child {
+    margin-top: 0;
+}
+
+.ais-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+}
+
+.ais-mf {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ais-mf.full {
+    grid-column: 1 / -1;
+}
+
+.ais-mf > span {
+    font-size: 11px;
+    color: var(--text-3);
+}
+
+.ais-mf .req {
+    color: var(--st-red);
+    margin-left: 2px;
+    font-style: normal;
+}
+
+.ais-mf input,
+.ais-mf select {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    width: 100%;
+}
+
+.ais-mf input:focus,
+.ais-mf select:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.ais-mf.ais-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+
+.ais-mf.ais-check input {
+    width: auto;
+    height: auto;
+}
+
+.ais-form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.ais-test-result {
+    margin-top: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-2);
+}
+
+.ais-test-result.ok {
+    border-color: color-mix(in oklch, var(--st-green, #22c55e), transparent 60%);
+}
+
+.ais-test-result.warn {
+    border-color: color-mix(in oklch, var(--st-amber, #f59e0b), transparent 60%);
+}
+
+/* 索引点选 */
+.ais-index-pick {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ais-index-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 160px;
+    overflow-y: auto;
+}
+
+.ais-index-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 4px 0 9px;
+    font-size: 11.5px;
+    color: var(--text-2);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    max-width: 100%;
+}
+
+.ais-index-chip:hover {
+    background: var(--hover);
+    border-color: var(--border-2, var(--border));
+}
+
+.ais-index-chip.active {
+    border-color: var(--accent);
+    color: var(--text);
+}
+
+.ais-index-chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+.ais-index-count {
+    font-size: 10px;
+    color: var(--text-3);
+    background: var(--panel-2, var(--panel));
+    border-radius: 999px;
+    padding: 1px 6px;
+    font-variant-numeric: tabular-nums;
+}

@@ -229,6 +229,7 @@ pub fn start_collector(
     platform: String,
     categories: Option<Vec<String>>,
     regions: Option<Vec<String>>,
+    task_name: Option<String>,
 ) -> Result<(), String> {
     // 检查是否已在运行
     {
@@ -341,6 +342,7 @@ pub fn start_collector(
             api_key,
             collector_region,
             selected_cats,
+            task_name,
         );
     });
 
@@ -354,6 +356,7 @@ fn run_collector(
     api_key: String,
     region: CollectorRegionConfig,
     categories: Vec<Category>,
+    task_name: Option<String>,
 ) {
     emit_log(&app, &format!("[{}] 开始采集...", platform));
 
@@ -362,6 +365,7 @@ fn run_collector(
     let poi_task_id = {
         if let Ok(db) = DB.lock() {
             db.create_poi_task(
+                task_name.as_deref().filter(|s| !s.trim().is_empty()),
                 &platform,
                 Some(&region.name),
                 Some(&region.admin_code),
@@ -830,7 +834,7 @@ pub fn export_poi_to_file(
             json_bytes.extend_from_slice(json.as_bytes());
             std::fs::write(&path, json_bytes).map_err(|e| e.to_string())?;
         }
-        "excel" => {
+        "excel" | "csv" => {
             // CSV 导出，添加 UTF-8 BOM 以便 Excel 正确识别中文
             let mut csv_bytes: Vec<u8> = vec![0xEF, 0xBB, 0xBF]; // UTF-8 BOM
             csv_bytes.extend_from_slice("ID,名称,经度,纬度,地址,电话,类别,平台\n".as_bytes());
@@ -969,6 +973,12 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                     },
                     t.region_name.as_deref().unwrap_or("未知区域")
                 );
+                let name = t
+                    .task_name
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(name.as_str())
+                    .to_string();
 
                 let mut status = t.status.clone();
                 let mut completed = t.completed_categories as u64;
@@ -1034,6 +1044,12 @@ pub fn get_all_task_history(app: AppHandle) -> Result<Vec<UnifiedTask>, String> 
                         "tile" => ("tile".to_string(), "航道图瓦片下载".to_string()),
                         _ => ("buoy".to_string(), "航标采集".to_string()),
                     };
+                    let name = t
+                        .task_name
+                        .as_deref()
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or(name.as_str())
+                        .to_string();
                     let id_prefix = match task_type.as_str() {
                         "feature" => "feature",
                         "tile" => "charttile",

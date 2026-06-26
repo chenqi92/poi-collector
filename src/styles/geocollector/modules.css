@@ -55,7 +55,12 @@
 }
 .task-row.t-poi .task-row-icon  { color: var(--st-violet); }
 .task-row.t-aton .task-row-icon { color: var(--st-blue); }
+.task-row.t-feature .task-row-icon { color: var(--st-orange); }
 .task-row.t-tile .task-row-icon { color: var(--st-green); }
+.task-row-icon.t-poi { color: var(--st-violet); }
+.task-row-icon.t-aton { color: var(--st-blue); }
+.task-row-icon.t-feature { color: var(--st-orange); }
+.task-row-icon.t-tile { color: var(--st-green); }
 .task-row-main { min-width:0; }
 .task-row-title {
   display:flex; align-items:center; gap:8px;

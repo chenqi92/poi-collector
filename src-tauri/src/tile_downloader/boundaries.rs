@@ -133,6 +133,7 @@ async fn fetch_region_boundary(
 
 fn normalize_region_code(region_code: &str) -> (String, bool) {
     match region_code.len() {
+        6 if region_code == "100000" => (region_code.to_string(), true), // 国家级: 中国
         2 => (format!("{}0000", region_code), true), // 省级: 11 -> 110000
         4 => (format!("{}00", region_code), true),   // 市级: 1101 -> 110100
         _ => (region_code.to_string(), false),       // 区县级: 110101
@@ -145,10 +146,10 @@ pub async fn collect_region_boundaries(
     include_children: bool,
 ) -> Result<Vec<BoundarySummary>, String> {
     if regions.is_empty() {
-        return Err("请先选择行政区".to_string());
+        return Err("请先选择国别或行政区".to_string());
     }
     if regions.len() > 100 {
-        return Err("一次最多预览 100 个行政区边界".to_string());
+        return Err("一次最多预览 100 个区域边界".to_string());
     }
 
     let mut summaries = Vec::with_capacity(regions.len());
@@ -178,10 +179,10 @@ pub async fn export_region_boundaries_to_file(
     include_children: bool,
 ) -> Result<usize, String> {
     if regions.is_empty() {
-        return Err("请先选择行政区".to_string());
+        return Err("请先选择国别或行政区".to_string());
     }
     if regions.len() > 100 {
-        return Err("一次最多导出 100 个行政区边界".to_string());
+        return Err("一次最多导出 100 个区域边界".to_string());
     }
 
     let mut rows = Vec::with_capacity(regions.len());

@@ -156,6 +156,7 @@ export function POIForm() {
                 platform,
                 categories: cats,
                 regions: regions.map(r => r.code),
+                taskName: taskName.trim() || '未命名 POI 采集任务',
             })
             success('已启动', `${platform} 采集已开始`)
         } catch (e) {

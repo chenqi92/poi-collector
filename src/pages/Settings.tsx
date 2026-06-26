@@ -165,19 +165,16 @@ function KeysPanel() {
 
                         {isAdding && (
                             <div
+                                className="set-add-key-form"
                                 style={{
                                     padding: '10px 14px',
                                     borderBottom: '1px solid var(--hairline)',
                                     background: 'var(--panel-2)',
-                                    display: 'flex',
-                                    gap: 6,
-                                    alignItems: 'center',
                                 }}
                             >
                                 <input
                                     className="input"
                                     placeholder="名称（可选）"
-                                    style={{ width: 160 }}
                                     value={form.name}
                                     onChange={e =>
                                         setNewKey(s => ({ ...s, [pf.id]: { ...form, name: e.target.value } }))
@@ -533,7 +530,7 @@ function PrefsPanel() {
                             <div className="set-row-title">默认下载路径</div>
                             <div className="set-row-sub">瓦片包、POI 导出文件的保存位置 · 默认安装目录下的 data（每次任务可覆盖）</div>
                         </div>
-                        <div className="set-row-control" style={{ width: 420 }}>
+                        <div className="set-row-control set-path-control">
                             <input
                                 className="input mono"
                                 style={{ fontSize: 11.5 }}

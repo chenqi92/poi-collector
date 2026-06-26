@@ -96,6 +96,7 @@ impl ChartDatabase {
 
             CREATE TABLE IF NOT EXISTS chart_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_name TEXT,
                 task_type TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'idle',
                 bounds_west REAL,
@@ -129,6 +130,17 @@ impl ChartDatabase {
             ",
         )
         .map_err(|e| format!("初始化数据表失败: {}", e))?;
+
+        let has_task_name: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('chart_tasks') WHERE name = 'task_name'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !has_task_name {
+            let _ = conn.execute("ALTER TABLE chart_tasks ADD COLUMN task_name TEXT", []);
+        }
 
         Ok(())
     }
@@ -673,6 +685,7 @@ impl ChartDatabase {
     /// 创建航标采集任务
     pub fn create_chart_task(
         &self,
+        task_name: Option<&str>,
         task_type: &str,
         total: i64,
         bounds: Option<&super::types::ChartBounds>,
@@ -684,14 +697,58 @@ impl ChartDatabase {
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         if let Some(b) = bounds {
             conn.execute(
-                "INSERT INTO chart_tasks (task_type, status, total_items, bounds_west, bounds_south, bounds_east, bounds_north, grid_step) VALUES (?1, 'running', ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![task_type, total, b.west, b.south, b.east, b.north, grid_step],
+                "INSERT INTO chart_tasks (task_name, task_type, status, total_items, bounds_west, bounds_south, bounds_east, bounds_north, grid_step) VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![task_name, task_type, total, b.west, b.south, b.east, b.north, grid_step],
             )
             .map_err(|e| format!("创建任务失败: {}", e))?;
         } else {
             conn.execute(
-                "INSERT INTO chart_tasks (task_type, status, total_items) VALUES (?1, 'running', ?2)",
-                params![task_type, total],
+                "INSERT INTO chart_tasks (task_name, task_type, status, total_items) VALUES (?1, ?2, 'running', ?3)",
+                params![task_name, task_type, total],
+            )
+            .map_err(|e| format!("创建任务失败: {}", e))?;
+        }
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 创建航道图专题任务，记录任务包含的图层、层级和输出路径。
+    pub fn create_chart_task_with_details(
+        &self,
+        task_name: Option<&str>,
+        task_type: &str,
+        total: i64,
+        bounds: Option<&super::types::ChartBounds>,
+        grid_step: Option<f64>,
+        zoom_levels: Option<&str>,
+        layers: Option<&str>,
+        output_path: Option<&str>,
+    ) -> Result<i64, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        if let Some(b) = bounds {
+            conn.execute(
+                "INSERT INTO chart_tasks (task_name, task_type, status, total_items, bounds_west, bounds_south, bounds_east, bounds_north, grid_step, zoom_levels, layers, output_path) VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    task_name,
+                    task_type,
+                    total,
+                    b.west,
+                    b.south,
+                    b.east,
+                    b.north,
+                    grid_step,
+                    zoom_levels,
+                    layers,
+                    output_path
+                ],
+            )
+            .map_err(|e| format!("创建任务失败: {}", e))?;
+        } else {
+            conn.execute(
+                "INSERT INTO chart_tasks (task_name, task_type, status, total_items, grid_step, zoom_levels, layers, output_path) VALUES (?1, ?2, 'running', ?3, ?4, ?5, ?6, ?7)",
+                params![task_name, task_type, total, grid_step, zoom_levels, layers, output_path],
             )
             .map_err(|e| format!("创建任务失败: {}", e))?;
         }
@@ -750,28 +807,29 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
         let mut stmt = conn.prepare(
-            "SELECT id, task_type, status, total_items, completed_items, failed_items, output_path, zoom_levels, layers, created_at, completed_at, bounds_west, bounds_south, bounds_east, bounds_north, grid_step FROM chart_tasks ORDER BY id DESC"
+            "SELECT id, task_name, task_type, status, total_items, completed_items, failed_items, output_path, zoom_levels, layers, created_at, completed_at, bounds_west, bounds_south, bounds_east, bounds_north, grid_step FROM chart_tasks ORDER BY id DESC"
         ).map_err(|e| format!("准备查询失败: {}", e))?;
 
         let rows = stmt
             .query_map([], |row| {
                 Ok(ChartTask {
                     id: row.get(0)?,
-                    task_type: row.get(1)?,
-                    status: row.get(2)?,
-                    total_items: row.get(3)?,
-                    completed_items: row.get(4)?,
-                    failed_items: row.get(5)?,
-                    output_path: row.get(6)?,
-                    zoom_levels: row.get(7)?,
-                    layers: row.get(8)?,
-                    created_at: row.get(9)?,
-                    completed_at: row.get(10)?,
-                    bounds_west: row.get(11).ok(),
-                    bounds_south: row.get(12).ok(),
-                    bounds_east: row.get(13).ok(),
-                    bounds_north: row.get(14).ok(),
-                    grid_step: row.get(15).ok(),
+                    task_name: row.get(1)?,
+                    task_type: row.get(2)?,
+                    status: row.get(3)?,
+                    total_items: row.get(4)?,
+                    completed_items: row.get(5)?,
+                    failed_items: row.get(6)?,
+                    output_path: row.get(7)?,
+                    zoom_levels: row.get(8)?,
+                    layers: row.get(9)?,
+                    created_at: row.get(10)?,
+                    completed_at: row.get(11)?,
+                    bounds_west: row.get(12).ok(),
+                    bounds_south: row.get(13).ok(),
+                    bounds_east: row.get(14).ok(),
+                    bounds_north: row.get(15).ok(),
+                    grid_step: row.get(16).ok(),
                 })
             })
             .map_err(|e| format!("查询失败: {}", e))?;
@@ -788,6 +846,7 @@ impl ChartDatabase {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChartTask {
     pub id: i64,
+    pub task_name: Option<String>,
     pub task_type: String,
     pub status: String,
     pub total_items: i64,

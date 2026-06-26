@@ -15,6 +15,7 @@ const NAV: NavEntry[] = [
     { to: '/new', icon: 'plus', label: '新建采集', badgeKey: 'active' },
     { to: '/data', icon: 'database', label: '数据中心' },
     { to: '/offline', icon: 'map', label: '离线地图' },
+    { to: '/ais', icon: 'ship', label: 'AIS 航迹' },
     { to: '/settings', icon: 'settings', label: '设置' },
 ]
 

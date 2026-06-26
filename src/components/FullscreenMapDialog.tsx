@@ -30,6 +30,8 @@ interface FullscreenMapDialogProps {
     platform: string
     mapType: string
     apiKey?: string
+    minZoom?: number
+    maxZoom?: number
     initialBounds: Bounds
     onConfirm: (bounds: Bounds) => void
     selectedRegionCode?: string | null
@@ -79,12 +81,26 @@ function MapSearchWrapper() {
     )
 }
 
+function ZoomBoundsSync({ minZoom, maxZoom }: { minZoom: number; maxZoom: number }) {
+    const map = useMap()
+    useEffect(() => {
+        map.setMinZoom(minZoom)
+        map.setMaxZoom(maxZoom)
+        const zoom = map.getZoom()
+        if (zoom < minZoom) map.setZoom(minZoom)
+        if (zoom > maxZoom) map.setZoom(maxZoom)
+    }, [map, minZoom, maxZoom])
+    return null
+}
+
 export function FullscreenMapDialog({
     open,
     onOpenChange,
     platform,
     mapType,
     apiKey,
+    minZoom = 0,
+    maxZoom = 21,
     initialBounds,
     onConfirm,
     selectedRegionCode,
@@ -229,18 +245,34 @@ export function FullscreenMapDialog({
                     <MapContainer
                         center={[33.78, 119.8]}
                         zoom={8}
+                        minZoom={minZoom}
+                        maxZoom={maxZoom}
                         className="w-full h-full"
                         style={{ height: '100%', width: '100%' }}
                         attributionControl={false}
                     >
                         {useBaseMapLayer ? (
-                            <BaseMapLayer baseMapType={previewBaseMapType} />
+                            <>
+                                <BaseMapLayer baseMapType={previewBaseMapType} />
+                                {platform === 'cjhy' && (
+                                    <TilePreviewLayer
+                                        platform={platform}
+                                        mapType={mapType}
+                                        apiKey={apiKey}
+                                        minZoom={minZoom}
+                                        maxZoom={maxZoom}
+                                        zIndex={10}
+                                    />
+                                )}
+                            </>
                         ) : (
                             <>
                                 <TilePreviewLayer
                                     platform={platform}
                                     mapType={mapType}
                                     apiKey={apiKey}
+                                    minZoom={minZoom}
+                                    maxZoom={maxZoom}
                                     zIndex={1}
                                 />
                                 {platform === 'tianditu' &&
@@ -251,6 +283,8 @@ export function FullscreenMapDialog({
                                             platform="tianditu"
                                             mapType="annotation"
                                             apiKey={apiKey}
+                                            minZoom={minZoom}
+                                            maxZoom={maxZoom}
                                             zIndex={10}
                                         />
                                     )}
@@ -258,6 +292,7 @@ export function FullscreenMapDialog({
                         )}
 
                         <ResizeHandler />
+                        <ZoomBoundsSync minZoom={minZoom} maxZoom={maxZoom} />
                         <MapSearchWrapper />
 
                         {hasValidBounds && (

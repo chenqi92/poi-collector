@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { invoke } from '@tauri-apps/api/core'
+import { geometryToPolygons, outermostPolygons, type WaterPolygon } from '@/lib/ais/geo'
 
 /* 航道图（cjhy）使用 ArcGIS EPSG:4326 自定义切片方案：
    原点 (-400, 400)，每级分辨率减半。
@@ -20,7 +21,10 @@ const TILE_SIZE = 256
 export interface CjhyTask {
     id: string
     name: string
-    output_path: string
+    source: string
+    tile_mode?: 'legacy' | 'chart' | string | null
+    output_path?: string | null
+    available_layers: string[]
     total_tiles: number
     completed_tiles: number
     failed_tiles: number
@@ -29,10 +33,12 @@ export interface CjhyTask {
     bounds_east: number
     bounds_west: number
     zoom_levels: number[]
+    created_at?: string | null
+    status: string
 }
 
 export function fetchCjhyTasks(): Promise<CjhyTask[]> {
-    return invoke<CjhyTask[]>('get_cjhy_tile_tasks')
+    return invoke<CjhyTask[]>('chart_get_display_tasks')
 }
 
 export interface ChartFeature {
@@ -159,6 +165,15 @@ function getBufferedMapBounds(map: L.Map, ratio = 0.35): ChartFeatureBounds {
     }
 }
 
+function intersectBounds(a: ChartFeatureBounds, b: ChartFeatureBounds): ChartFeatureBounds | null {
+    const west = Math.max(a.west, b.west)
+    const south = Math.max(a.south, b.south)
+    const east = Math.min(a.east, b.east)
+    const north = Math.min(a.north, b.north)
+    if (east <= west || north <= south) return null
+    return { west, south, east, north }
+}
+
 export function ChartFeatureOverlay({
     visible,
     sourceLayer,
@@ -167,6 +182,8 @@ export function ChartFeatureOverlay({
     fitBounds = false,
     controlOffsetTop = 0,
     viewportLoad = false,
+    queryBounds,
+    outlineOnly = false,
 }: {
     visible: boolean
     sourceLayer: ChartFeatureSourceLayer
@@ -175,6 +192,9 @@ export function ChartFeatureOverlay({
     fitBounds?: boolean
     controlOffsetTop?: number
     viewportLoad?: boolean
+    queryBounds?: ChartFeatureBounds
+    /** 仅水域面有效：只画最外层外环边框（去洞、去嵌套内层） */
+    outlineOnly?: boolean
 }) {
     const map = useMap()
     const layerRef = useRef<L.GeoJSON | null>(null)
@@ -222,24 +242,45 @@ export function ChartFeatureOverlay({
                 if (cancelled) return
                 if (requestSeq !== requestSeqRef.current) return
                 clearLayer()
-                setCount(features.length)
 
-                const geoFeatures = features
-                    .map((feature) => {
+                let geoFeatures: unknown[]
+                if (isHydro && outlineOnly) {
+                    // 水域面默认只画最外层边框：收敛掉大大小小嵌套的内层多边形，只留外环
+                    const polys: WaterPolygon[] = []
+                    for (const f of features) {
                         try {
-                            const geometry = JSON.parse(feature.geometry_json)
-                            if (!geometry?.type) return null
-                            return {
-                                type: 'Feature',
-                                id: feature.id,
-                                geometry,
-                                properties: feature,
-                            }
+                            polys.push(...geometryToPolygons(JSON.parse(f.geometry_json)))
                         } catch {
-                            return null
+                            /* 跳过坏几何 */
                         }
-                    })
-                    .filter(Boolean)
+                    }
+                    const outer = outermostPolygons(polys)
+                    geoFeatures = outer.map((p, i) => ({
+                        type: 'Feature',
+                        id: `outline-${i}`,
+                        geometry: { type: 'Polygon', coordinates: [p.rings[0]] },
+                        properties: {},
+                    }))
+                    setCount(outer.length)
+                } else {
+                    geoFeatures = features
+                        .map((feature) => {
+                            try {
+                                const geometry = JSON.parse(feature.geometry_json)
+                                if (!geometry?.type) return null
+                                return {
+                                    type: 'Feature',
+                                    id: feature.id,
+                                    geometry,
+                                    properties: feature,
+                                }
+                            } catch {
+                                return null
+                            }
+                        })
+                        .filter(Boolean)
+                    setCount(features.length)
+                }
 
                 if (geoFeatures.length === 0) return
 
@@ -253,15 +294,16 @@ export function ChartFeatureOverlay({
                     style: (feature?: GeoJSON.Feature) => {
                         const type = feature?.geometry?.type ?? ''
                         const isPolygon = type.includes('Polygon')
+                        const hydroOutline = isHydro && outlineOnly
                         return {
                             color: styleConfig.stroke,
-                            weight: isHydro ? 0.8 : (isPolygon ? 3 : 4),
-                            opacity: isHydro ? 0.5 : 0.95,
+                            weight: isHydro ? (hydroOutline ? 1.6 : 0.8) : (isPolygon ? 3 : 4),
+                            opacity: isHydro ? (hydroOutline ? 0.9 : 0.5) : 0.95,
                             dashArray: isHydro ? undefined : '8 5',
                             lineCap: 'round',
                             lineJoin: 'round',
                             fillColor: styleConfig.fill,
-                            fillOpacity: isPolygon ? (isHydro ? 0.16 : 0.14) : 0,
+                            fillOpacity: isPolygon ? (isHydro ? (hydroOutline ? 0.08 : 0.16) : 0.14) : 0,
                             className: styleConfig.className,
                             smoothFactor: isHydro ? 2.5 : 1,
                         }
@@ -307,15 +349,33 @@ export function ChartFeatureOverlay({
             if (debounceTimer != null) window.clearTimeout(debounceTimer)
             debounceTimer = window.setTimeout(() => {
                 debounceTimer = null
-                loadFeatures(getBufferedMapBounds(map))
+                const viewportBounds = getBufferedMapBounds(map)
+                const nextBounds = queryBounds
+                    ? intersectBounds(viewportBounds, queryBounds)
+                    : viewportBounds
+                if (queryBounds && !nextBounds) {
+                    clearLayer()
+                    setCount(0)
+                    return
+                }
+                loadFeatures(nextBounds ?? undefined)
             }, 120)
         }
 
         if (viewportLoad) {
-            loadFeatures(getBufferedMapBounds(map))
+            const viewportBounds = getBufferedMapBounds(map)
+            const nextBounds = queryBounds
+                ? intersectBounds(viewportBounds, queryBounds)
+                : viewportBounds
+            if (queryBounds && !nextBounds) {
+                clearLayer()
+                setCount(0)
+            } else {
+                loadFeatures(nextBounds ?? undefined)
+            }
             map.on('moveend zoomend', scheduleViewportLoad)
         } else {
-            loadFeatures()
+            loadFeatures(queryBounds)
         }
 
         return () => {
@@ -325,7 +385,7 @@ export function ChartFeatureOverlay({
             map.off('moveend zoomend', scheduleViewportLoad)
             clearLayer()
         }
-    }, [fitBounds, kind, label, map, sourceLayer, styleConfig, viewportLoad, visible])
+    }, [fitBounds, kind, label, map, outlineOnly, queryBounds, sourceLayer, styleConfig, viewportLoad, visible])
 
     if (!visible || count === null) return null
 
@@ -339,7 +399,17 @@ export function ChartFeatureOverlay({
     )
 }
 
-export function ChartOverlayLayer({ basePath, visible }: { basePath: string; visible: boolean }) {
+export function ChartOverlayLayer({
+    basePath,
+    visible,
+    layer,
+    tileMode = 'legacy',
+}: {
+    basePath: string
+    visible: boolean
+    layer?: string
+    tileMode?: 'legacy' | 'chart' | string | null
+}) {
     const map = useMap()
     const tilesRef = useRef<Record<string, L.ImageOverlay>>({})
     const currentZRef = useRef(-1)
@@ -411,7 +481,10 @@ export function ChartOverlayLayer({ basePath, visible }: { basePath: string; vis
                     const seLat = nwLat - res * TILE_SIZE
                     const tileBounds: L.LatLngBoundsExpression = [[seLat, nwLng], [nwLat, seLng]]
 
-                    invoke<string>('serve_local_tile', { basePath, z: customZ, x, y })
+                    const job = tileMode === 'chart' && layer
+                        ? invoke<string>('chart_serve_layer_tile', { basePath, layer, z: customZ, x, y })
+                        : invoke<string>('serve_local_tile', { basePath, z: customZ, x, y })
+                    job
                         .then((b64) => {
                             if (b64) {
                                 const overlay = L.imageOverlay(
@@ -443,7 +516,7 @@ export function ChartOverlayLayer({ basePath, visible }: { basePath: string; vis
             map.off('zoomend', update)
             clearTiles()
         }
-    }, [map, basePath])
+    }, [map, basePath, layer, tileMode])
 
     return null
 }

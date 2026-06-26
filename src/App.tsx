@@ -11,6 +11,7 @@ const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const NewCollection = lazy(() => import('@/pages/NewCollection'));
 const DataHub = lazy(() => import('@/pages/DataHub'));
 const OfflineMaps = lazy(() => import('@/pages/OfflineMaps'));
+const AisRoutes = lazy(() => import('@/pages/ais/AisRoutes'));
 const Settings = lazy(() => import('@/pages/Settings'));
 
 function RouteFallback() {
@@ -46,6 +47,7 @@ function App() {
                                     <Route path="new" element={<Suspense fallback={<RouteFallback />}><NewCollection /></Suspense>} />
                                     <Route path="data" element={<Suspense fallback={<RouteFallback />}><DataHub /></Suspense>} />
                                     <Route path="offline" element={<Suspense fallback={<RouteFallback />}><OfflineMaps /></Suspense>} />
+                                    <Route path="ais" element={<Suspense fallback={<RouteFallback />}><AisRoutes /></Suspense>} />
                                     <Route path="settings" element={<Suspense fallback={<RouteFallback />}><Settings /></Suspense>} />
 
                                     {/* Legacy paths → new modules */}

@@ -16,6 +16,13 @@ function rawId(id: string): string {
     return i >= 0 ? id.slice(i + 1) : id
 }
 
+function taskIcon(type: ShellTask['type']) {
+    if (type === 'tile') return 'map'
+    if (type === 'aton') return 'navigation'
+    if (type === 'feature') return 'layers'
+    return 'mapPin'
+}
+
 export function TaskTray({ onClose }: TaskTrayProps) {
     const ref = useRef<HTMLDivElement | null>(null)
     const { tasks } = useTasksContext()
@@ -35,7 +42,7 @@ export function TaskTray({ onClose }: TaskTrayProps) {
     const resumeTask = async (t: ShellTask) => {
         try {
             if (t.type === 'tile') { await invoke('start_tile_download', { taskId: rawId(t.id) }); success('已继续', t.name) }
-            else errorToast('无法继续', 'POI / 航标任务请到「任务历史」右键继续采集')
+            else errorToast('无法继续', 'POI / 航标 / 航道图任务请到「任务历史」右键继续采集')
         } catch (e) { errorToast('操作失败', String(e)) }
     }
 
@@ -83,10 +90,7 @@ export function TaskTray({ onClose }: TaskTrayProps) {
                 {active.map(t => (
                     <div className="tray-row" key={t.id}>
                         <div className="task-row-icon" style={{ width: 24, height: 24 }}>
-                            <GcIcon
-                                name={t.type === 'tile' ? 'map' : t.type === 'aton' ? 'navigation' : 'mapPin'}
-                                size={13}
-                            />
+                            <GcIcon name={taskIcon(t.type)} size={13} />
                         </div>
                         <div className="tray-row-main">
                             <div className="tray-row-title">

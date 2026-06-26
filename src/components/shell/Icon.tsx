@@ -48,6 +48,10 @@ import {
     Archive,
     Command,
     MoreHorizontal,
+    Ship,
+    Anchor,
+    Route,
+    Waypoints,
     type LucideIcon,
 } from 'lucide-react'
 import type { CSSProperties } from 'react'
@@ -104,6 +108,10 @@ const MAP: Record<string, LucideIcon> = {
     sparkle: Sparkles,
     navigation: Navigation,
     archive: Archive,
+    ship: Ship,
+    anchor: Anchor,
+    route: Route,
+    waypoints: Waypoints,
 }
 
 interface IconProps {

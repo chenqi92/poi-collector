@@ -135,6 +135,5 @@ pub fn get_all_platforms() -> Vec<PlatformInfo> {
         OsmPlatform::new().info(),
         ArcGisPlatform::new().info(),
         BingPlatform::new().info(),
-        CjhyPlatform::new().info(),
     ]
 }

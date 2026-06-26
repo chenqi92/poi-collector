@@ -260,6 +260,7 @@ impl Database {
 
             CREATE TABLE IF NOT EXISTS poi_collection_tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_name TEXT,
                 platform TEXT NOT NULL,
                 region_name TEXT,
                 region_code TEXT,
@@ -274,6 +275,20 @@ impl Database {
             );
         "#,
         )?;
+
+        let has_task_name: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('poi_collection_tasks') WHERE name = 'task_name'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if !has_task_name {
+            let _ = self
+                .conn
+                .execute("ALTER TABLE poi_collection_tasks ADD COLUMN task_name TEXT", []);
+        }
         Ok(())
     }
 
@@ -887,6 +902,7 @@ impl Database {
     /// 创建 POI 采集任务
     pub fn create_poi_task(
         &self,
+        task_name: Option<&str>,
         platform: &str,
         region_name: Option<&str>,
         region_code: Option<&str>,
@@ -894,8 +910,8 @@ impl Database {
         total_categories: i64,
     ) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO poi_collection_tasks (platform, region_name, region_code, categories, total_categories) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![platform, region_name, region_code, categories, total_categories],
+            "INSERT INTO poi_collection_tasks (task_name, platform, region_name, region_code, categories, total_categories) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![task_name, platform, region_name, region_code, categories, total_categories],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -933,22 +949,23 @@ impl Database {
     /// 获取 POI 采集任务列表
     pub fn get_poi_tasks(&self) -> Result<Vec<PoiTask>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, platform, region_name, region_code, categories, status, total_categories, completed_categories, total_collected, error_message, created_at, completed_at FROM poi_collection_tasks ORDER BY id DESC"
+            "SELECT id, task_name, platform, region_name, region_code, categories, status, total_categories, completed_categories, total_collected, error_message, created_at, completed_at FROM poi_collection_tasks ORDER BY id DESC"
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(PoiTask {
                 id: row.get(0)?,
-                platform: row.get(1)?,
-                region_name: row.get(2)?,
-                region_code: row.get(3)?,
-                categories: row.get(4)?,
-                status: row.get(5)?,
-                total_categories: row.get(6)?,
-                completed_categories: row.get(7)?,
-                total_collected: row.get(8)?,
-                error_message: row.get(9)?,
-                created_at: row.get(10)?,
-                completed_at: row.get(11)?,
+                task_name: row.get(1)?,
+                platform: row.get(2)?,
+                region_name: row.get(3)?,
+                region_code: row.get(4)?,
+                categories: row.get(5)?,
+                status: row.get(6)?,
+                total_categories: row.get(7)?,
+                completed_categories: row.get(8)?,
+                total_collected: row.get(9)?,
+                error_message: row.get(10)?,
+                created_at: row.get(11)?,
+                completed_at: row.get(12)?,
             })
         })?;
         let mut tasks = Vec::new();
@@ -977,6 +994,7 @@ pub struct ExportPOI {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PoiTask {
     pub id: i64,
+    pub task_name: Option<String>,
     pub platform: String,
     pub region_name: Option<String>,
     pub region_code: Option<String>,

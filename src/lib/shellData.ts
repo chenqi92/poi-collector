@@ -11,7 +11,7 @@ export type TaskStatus =
     | 'idle'
     | 'retrying'
 
-export type TaskType = 'poi' | 'aton' | 'tile'
+export type TaskType = 'poi' | 'aton' | 'feature' | 'tile'
 
 export type PlatformKey =
     | 'tianditu'

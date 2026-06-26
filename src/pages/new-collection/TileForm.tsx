@@ -45,6 +45,18 @@ const MAP_TYPE_LABEL: Record<string, string> = {
     annotation: '注记',
 }
 
+// 长江航道图平台复用 street/satellite/terrain 三个 MapType，但语义是 底图/水域/水深
+const CJHY_LAYER_LABEL: Record<string, string> = {
+    street: '底图 (一张图)',
+    satellite: '水域 (手动)',
+    terrain: '水深',
+}
+
+function layerLabel(platformId: string, mapType: string): string {
+    if (platformId === 'cjhy') return CJHY_LAYER_LABEL[mapType] ?? mapType
+    return MAP_TYPE_LABEL[mapType] ?? mapType
+}
+
 const OUTPUT_FORMATS: { id: string; label: string; ext: string }[] = [
     { id: 'folder', label: '目录 (XYZ)', ext: '' },
     { id: 'zip', label: 'ZIP (XYZ)', ext: 'zip' },
@@ -274,7 +286,7 @@ export function TileForm() {
                                 >
                                     {currentPlatform?.map_types.map(t => (
                                         <option key={t} value={t}>
-                                            {MAP_TYPE_LABEL[t] ?? t}
+                                            {layerLabel(platform, t)}
                                         </option>
                                     ))}
                                 </select>
@@ -436,6 +448,8 @@ export function TileForm() {
                         platform={platform}
                         mapType={mapType}
                         apiKey={apiKeyInput || undefined}
+                        minZoom={currentPlatform?.min_zoom ?? 0}
+                        maxZoom={currentPlatform?.max_zoom ?? 21}
                         bounds={bounds}
                         onBoundsChange={setBounds}
                         selectedRegionCode={selectedRegionCode}

@@ -126,6 +126,7 @@
 }
 .type-badge.t-poi   { color: var(--st-violet); }
 .type-badge.t-aton  { color: var(--st-blue); }
+.type-badge.t-feature { color: var(--st-orange); }
 .type-badge.t-tile  { color: var(--st-green); }
 
 @keyframes blink {

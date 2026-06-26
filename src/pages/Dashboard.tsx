@@ -37,6 +37,13 @@ const PLATFORM_UNLIMITED: Record<string, boolean> = {
     cjhd: true,
 }
 
+function taskIcon(type: ShellTask['type']) {
+    if (type === 'tile') return 'map'
+    if (type === 'aton') return 'navigation'
+    if (type === 'feature') return 'layers'
+    return 'mapPin'
+}
+
 interface StatItem {
     label: string
     value: number
@@ -167,10 +174,7 @@ function ActiveTasksCard({
             {tasks.slice(0, 5).map(t => (
                 <div className={`task-row t-${t.type}`} key={t.id}>
                     <div className="task-row-icon">
-                        <GcIcon
-                            name={t.type === 'tile' ? 'map' : t.type === 'aton' ? 'navigation' : 'mapPin'}
-                            size={14}
-                        />
+                        <GcIcon name={taskIcon(t.type)} size={14} />
                     </div>
                     <div className="task-row-main">
                         <div className="task-row-title">

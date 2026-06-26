@@ -1,5 +1,5 @@
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { MapContainer, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { CachedOsmTileLayer } from '@/components/CachedOsmTileLayer'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
@@ -29,6 +29,9 @@ type DataType = 'poi' | 'buoy' | 'chart'
 const PLATFORMS: PlatformKey[] = ['tianditu', 'amap', 'baidu', 'osm']
 
 const PAGE_SIZE = 50
+
+// 水域面「仅边框 / 全部」偏好的持久化键
+const HYDRO_OUTLINE_KEY = 'dh-hydro-outline-only'
 
 function BoundsTracker({ onChange }: { onChange: (b: Bounds) => void }) {
     const map = useMap()
@@ -100,6 +103,18 @@ function MapResizeOnView({ trigger }: { trigger: unknown }) {
     return null
 }
 
+function MapZoomBounds({ minZoom, maxZoom }: { minZoom: number; maxZoom: number }) {
+    const map = useMap()
+    useEffect(() => {
+        map.setMinZoom(minZoom)
+        map.setMaxZoom(maxZoom)
+        const zoom = map.getZoom()
+        if (zoom < minZoom) map.setZoom(minZoom)
+        if (zoom > maxZoom) map.setZoom(maxZoom)
+    }, [map, minZoom, maxZoom])
+    return null
+}
+
 function FitToBounds({ bounds }: { bounds: Bounds | null }) {
     const map = useMap()
     useEffect(() => {
@@ -144,6 +159,26 @@ const PLATFORM_LABEL_CN: Record<string, string> = {
     tencent: '腾讯',
     cjhd: '长江航道图',
 }
+
+const CHART_LAYER_LABEL: Record<string, string> = {
+    yizhangtu: '航道图',
+    cjshoudong: '水域',
+    soundg: '水深',
+    electronic_fence: '航道要素',
+    HYDRO_A: '水域面',
+}
+
+const CHART_LAYER_ICON: Record<string, string> = {
+    yizhangtu: 'map',
+    cjshoudong: 'layers',
+    soundg: 'layers',
+    electronic_fence: 'polygon',
+    HYDRO_A: 'layers',
+}
+
+const CHART_RASTER_LAYERS = new Set(['yizhangtu', 'cjshoudong', 'soundg'])
+const AMAP_STREET_URL = 'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}'
+const AMAP_SUBDOMAINS = ['1', '2', '3', '4']
 
 function esc(s: string | null | undefined): string {
     if (s == null) return ''
@@ -261,9 +296,14 @@ export function BrowseView() {
     const [chartTasks, setChartTasks] = useState<CjhyTask[]>([])
     const [chartTaskId, setChartTaskId] = useState<string>('')
     const [chartLoaded, setChartLoaded] = useState(false)
-    const [showChartLayer, setShowChartLayer] = useState(true)
-    const [showFenceLayer, setShowFenceLayer] = useState(true)
-    const [showHydroLayer, setShowHydroLayer] = useState(false)
+    const [visibleChartLayers, setVisibleChartLayers] = useState<Set<string>>(new Set())
+    // 水域面默认只画最外层边框，可切到「全部」看完整嵌套；偏好持久化到 localStorage
+    const [hydroOutlineOnly, setHydroOutlineOnly] = useState(
+        () => localStorage.getItem(HYDRO_OUTLINE_KEY) !== '0',
+    )
+    useEffect(() => {
+        localStorage.setItem(HYDRO_OUTLINE_KEY, hydroOutlineOnly ? '1' : '0')
+    }, [hydroOutlineOnly])
     useEffect(() => {
         if (dataType !== 'chart' || chartLoaded) return
         fetchCjhyTasks().then(list => {
@@ -276,6 +316,17 @@ export function BrowseView() {
         () => chartTasks.find(t => t.id === chartTaskId) ?? null,
         [chartTasks, chartTaskId]
     )
+    useEffect(() => {
+        if (!selectedChartTask) {
+            setVisibleChartLayers(new Set())
+            return
+        }
+        // 任务自带图层 + 默认开启矢量水域面/航道要素（这些要素全局存储、不一定记在任务的
+        // layers 里，但库里若有就应在任务区域内显示，避免"采过却看不到"）。
+        setVisibleChartLayers(
+            new Set([...selectedChartTask.available_layers, 'HYDRO_A', 'electronic_fence']),
+        )
+    }, [selectedChartTask])
     const chartBounds: [number, number, number, number] | undefined = selectedChartTask
         ? [
             selectedChartTask.bounds_south,
@@ -284,6 +335,34 @@ export function BrowseView() {
             selectedChartTask.bounds_east,
         ]
         : undefined
+    const chartQueryBounds = useMemo(
+        () => selectedChartTask ? {
+            west: selectedChartTask.bounds_west,
+            south: selectedChartTask.bounds_south,
+            east: selectedChartTask.bounds_east,
+            north: selectedChartTask.bounds_north,
+        } : undefined,
+        [selectedChartTask]
+    )
+    const selectedRasterLayers = useMemo(
+        () => selectedChartTask?.available_layers.filter(l => CHART_RASTER_LAYERS.has(l)) ?? [],
+        [selectedChartTask]
+    )
+    // 工具栏图层：任务自带图层 + 始终可切换的矢量水域面/航道要素（即使任务未列出，
+    // 库里若有这些要素也能在任务区域内显示）
+    const toolbarLayers = useMemo(() => {
+        const base = selectedChartTask?.available_layers ?? []
+        const extra = ['HYDRO_A', 'electronic_fence'].filter(l => !base.includes(l))
+        return [...base, ...extra]
+    }, [selectedChartTask])
+    const toggleChartLayer = (layer: string) => {
+        setVisibleChartLayers(prev => {
+            const next = new Set(prev)
+            if (next.has(layer)) next.delete(layer)
+            else next.add(layer)
+            return next
+        })
+    }
 
     // Debounce search input — push into a transition so React can interrupt
     // the heavy filter / re-render if the user keeps typing.
@@ -511,7 +590,7 @@ export function BrowseView() {
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 6 }}>
                         {chartTasks.length === 0 ? (
                             <span style={{ fontSize: 11.5, color: 'var(--text-3)' }}>
-                                {chartLoaded ? '尚无下载的航道图任务，可在「新建采集」下载' : '正在加载...'}
+                                {chartLoaded ? '尚无航道图专题任务，可在「新建采集」创建' : '正在加载...'}
                             </span>
                         ) : (
                             <select
@@ -522,40 +601,53 @@ export function BrowseView() {
                             >
                                 {chartTasks.map(t => (
                                     <option key={t.id} value={t.id}>
-                                        {t.name}（{t.completed_tiles.toLocaleString()} 瓦片）
+                                        {t.name}（{t.available_layers.map(l => CHART_LAYER_LABEL[l] ?? l).join(' / ')}）
                                     </option>
                                 ))}
                             </select>
                         )}
                         <span style={{ width: 1, height: 18, background: 'var(--hairline)', margin: '0 4px' }} />
-                        <label className="checkbox" style={{ height: 24 }} title="显示或隐藏本地航道图瓦片图层">
-                            <input
-                                type="checkbox"
-                                checked={Boolean(selectedChartTask && showChartLayer)}
-                                onChange={e => setShowChartLayer(e.target.checked)}
-                                disabled={!selectedChartTask}
-                            />
-                            <GcIcon name="map" size={11} />
-                            航道图层
-                        </label>
-                        <label className="checkbox" style={{ height: 24 }} title="显示或隐藏电子围栏专题要素">
-                            <input
-                                type="checkbox"
-                                checked={showFenceLayer}
-                                onChange={e => setShowFenceLayer(e.target.checked)}
-                            />
-                            <GcIcon name="polygon" size={11} />
-                            电子围栏
-                        </label>
-                        <label className="checkbox" style={{ height: 24 }} title="显示或隐藏 HYDRO_A 水域面">
-                            <input
-                                type="checkbox"
-                                checked={showHydroLayer}
-                                onChange={e => setShowHydroLayer(e.target.checked)}
-                            />
-                            <GcIcon name="layers" size={11} />
-                            水域面
-                        </label>
+                        {toolbarLayers.map(layer => (
+                            <label
+                                key={layer}
+                                className="checkbox"
+                                style={{ height: 24 }}
+                                title={`显示或隐藏${CHART_LAYER_LABEL[layer] ?? layer}`}
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={visibleChartLayers.has(layer)}
+                                    onChange={() => toggleChartLayer(layer)}
+                                />
+                                <GcIcon name={CHART_LAYER_ICON[layer] ?? 'layers'} size={11} />
+                                {CHART_LAYER_LABEL[layer] ?? layer}
+                            </label>
+                        ))}
+                        {visibleChartLayers.has('HYDRO_A') && (
+                            <>
+                                <span style={{ width: 1, height: 18, background: 'var(--hairline)', margin: '0 4px' }} />
+                                <div
+                                    className="seg"
+                                    title="水域面常是大大小小嵌套的多边形。默认只画最外层边框；切到「全部」显示完整嵌套内容"
+                                >
+                                    <button
+                                        type="button"
+                                        className={hydroOutlineOnly ? 'active' : ''}
+                                        onClick={() => setHydroOutlineOnly(true)}
+                                    >
+                                        <GcIcon name="polygon" size={11} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+                                        水域面仅边框
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className={!hydroOutlineOnly ? 'active' : ''}
+                                        onClick={() => setHydroOutlineOnly(false)}
+                                    >
+                                        全部
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -627,11 +719,25 @@ export function BrowseView() {
                         attributionControl
                         style={{ position: 'absolute', inset: 0 }}
                     >
-                        <CachedOsmTileLayer />
+                        {dataType === 'chart' ? (
+                            <TileLayer
+                                url={AMAP_STREET_URL}
+                                subdomains={AMAP_SUBDOMAINS}
+                                attribution="© 高德地图"
+                                maxNativeZoom={18}
+                                maxZoom={21}
+                            />
+                        ) : (
+                            <CachedOsmTileLayer />
+                        )}
+                        <MapZoomBounds
+                            minZoom={dataType === 'chart' ? 1 : 0}
+                            maxZoom={dataType === 'chart' ? 21 : 19}
+                        />
                         <BoundsTracker onChange={setBounds} />
                         <MapClickClearer onClickEmpty={() => setActiveId(null)} />
                         <PanToWhenActive point={activePoint} />
-                        <MapResizeOnView trigger={`${dataType}:${view}:${chartTaskId}:${showMap}:${showChartLayer}`} />
+                        <MapResizeOnView trigger={`${dataType}:${view}:${chartTaskId}:${showMap}:${Array.from(visibleChartLayers).join(',')}`} />
                         <FitToBounds bounds={dataType === 'chart' ? null : initialFit} />
                         {dataType !== 'chart' && (
                             <ClusteredMarkers
@@ -645,27 +751,36 @@ export function BrowseView() {
                             <>
                                 {selectedChartTask && (
                                     <>
-                                        {showChartLayer && (
-                                            <ChartOverlayLayer basePath={selectedChartTask.output_path} visible={true} />
-                                        )}
+                                        {selectedChartTask.output_path && selectedRasterLayers.map(layer => (
+                                            <ChartOverlayLayer
+                                                key={layer}
+                                                basePath={selectedChartTask.output_path!}
+                                                layer={layer}
+                                                tileMode={selectedChartTask.tile_mode}
+                                                visible={visibleChartLayers.has(layer)}
+                                            />
+                                        ))}
                                         <FitChartBounds bounds={chartBounds} />
                                     </>
                                 )}
                                 <ChartFeatureOverlay
-                                    visible={showHydroLayer}
+                                    visible={Boolean(selectedChartTask && visibleChartLayers.has('HYDRO_A'))}
                                     sourceLayer="HYDRO_A"
-                                    label="水域面"
+                                    label={hydroOutlineOnly ? '水域面边框' : '水域面'}
                                     kind="hydro"
-                                    fitBounds={!selectedChartTask && !showFenceLayer}
-                                    controlOffsetTop={showFenceLayer ? 38 : 0}
+                                    fitBounds={false}
+                                    controlOffsetTop={visibleChartLayers.has('electronic_fence') ? 38 : 0}
+                                    queryBounds={chartQueryBounds}
                                     viewportLoad
+                                    outlineOnly={hydroOutlineOnly}
                                 />
                                 <ChartFeatureOverlay
-                                    visible={showFenceLayer}
+                                    visible={Boolean(selectedChartTask && visibleChartLayers.has('electronic_fence'))}
                                     sourceLayer="electronic_fence"
-                                    label="电子围栏"
+                                    label="航道要素"
                                     kind="fence"
-                                    fitBounds={!selectedChartTask}
+                                    fitBounds={false}
+                                    queryBounds={chartQueryBounds}
                                 />
                                 <ChartZoomIndicator />
                             </>

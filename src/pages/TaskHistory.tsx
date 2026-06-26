@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { save } from '@tauri-apps/plugin-dialog';
 import {
     Play,
     Pause,
@@ -17,6 +18,7 @@ import {
     AlertTriangle,
     Loader2,
     FileText,
+    Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -47,7 +49,7 @@ const TAB_CONFIG: { key: TabType; label: string; icon: typeof MapPin }[] = [
     { key: 'all', label: '全部', icon: Clock },
     { key: 'poi', label: 'POI采集', icon: MapPin },
     { key: 'buoy', label: '航标采集', icon: Navigation },
-    { key: 'feature', label: '航道要素', icon: Navigation },
+    { key: 'feature', label: '航道图专题', icon: Navigation },
     { key: 'tile', label: '瓦片下载', icon: Map },
 ];
 
@@ -67,7 +69,7 @@ const STATUS_MAP: Record<string, { label: string; color: string; icon: typeof Ch
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
     poi: { label: 'POI', color: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20' },
     buoy: { label: '航标', color: 'text-cyan-600 bg-cyan-500/10 border-cyan-500/20' },
-    feature: { label: '要素', color: 'text-sky-600 bg-sky-500/10 border-sky-500/20' },
+    feature: { label: '航道图', color: 'text-sky-600 bg-sky-500/10 border-sky-500/20' },
     tile: { label: '瓦片', color: 'text-violet-600 bg-violet-500/10 border-violet-500/20' },
 };
 
@@ -261,6 +263,117 @@ export default function TaskHistory() {
         }
     };
 
+    const parseExtra = (extraRaw: string | null): Record<string, unknown> => {
+        try { return extraRaw ? JSON.parse(extraRaw) : {}; } catch { return {}; }
+    };
+
+    const parseTaskLayers = (extra: Record<string, unknown>): string[] => {
+        const raw = extra.layers;
+        if (Array.isArray(raw)) return raw.filter((item): item is string => typeof item === 'string');
+        if (typeof raw !== 'string' || !raw.trim()) return [];
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+        } catch {
+            return raw.split(/[,，\s]+/).filter(Boolean);
+        }
+    };
+
+    const parseNumberList = (raw: unknown): number[] => {
+        if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite);
+        if (typeof raw !== 'string' || !raw.trim()) return [];
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+        } catch {
+            return raw.split(/[,，\s]+/).map(Number).filter(Number.isFinite);
+        }
+    };
+
+    const vectorLayersForTask = (task: UnifiedTask, extra: Record<string, unknown>) => {
+        if (task.task_type !== 'feature') return [];
+        const layers = parseTaskLayers(extra);
+        if (layers.length === 0) return ['HYDRO_A', 'electronic_fence'];
+        return layers.filter(layer => layer === 'HYDRO_A' || layer === 'electronic_fence');
+    };
+
+    const boundsParamsFromExtra = (extra: Record<string, unknown>) => {
+        const west = Number(extra.bounds_west);
+        const south = Number(extra.bounds_south);
+        const east = Number(extra.bounds_east);
+        const north = Number(extra.bounds_north);
+        if ([west, south, east, north].every(Number.isFinite) && east > west && north > south) {
+            return { west, south, east, north };
+        }
+        return null;
+    };
+
+    const handleQuickExport = async (task: UnifiedTask) => {
+        const extra = parseExtra(task.extra);
+        const date = new Date().toISOString().slice(0, 10);
+        const safeId = task.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+        try {
+            if (task.task_type === 'feature') {
+                const sourceLayers = vectorLayersForTask(task, extra);
+                if (sourceLayers.length === 0) {
+                    alert('该航道图任务没有水域面或航道要素可导出');
+                    return;
+                }
+                const path = await save({
+                    defaultPath: `chart_features_${safeId}_${date}.geojson`,
+                    filters: [{ name: 'GeoJSON', extensions: ['geojson'] }],
+                });
+                if (!path) return;
+                const bounds = boundsParamsFromExtra(extra);
+                await invoke<string>('chart_export_features', {
+                    format: 'geojson',
+                    outputPath: path,
+                    sourceLayers,
+                    ...(bounds ?? {}),
+                });
+                alert('航道图要素导出成功');
+                return;
+            }
+
+            if (task.task_type === 'buoy') {
+                const path = await save({
+                    defaultPath: `buoys_${safeId}_${date}.csv`,
+                    filters: [{ name: 'CSV', extensions: ['csv'] }],
+                });
+                if (!path) return;
+                const bounds = boundsParamsFromExtra(extra);
+                await invoke<string>('chart_export_buoys', {
+                    format: 'csv',
+                    outputPath: path,
+                    ...(bounds ?? {}),
+                });
+                alert('航标数据导出成功');
+                return;
+            }
+
+            if (task.task_type === 'poi') {
+                const path = await save({
+                    defaultPath: `poi_${safeId}_${date}.csv`,
+                    filters: [{ name: 'CSV', extensions: ['csv'] }],
+                });
+                if (!path) return;
+                await invoke<number>('export_poi_to_file', {
+                    path,
+                    format: 'csv',
+                    filters: {
+                        query: null,
+                        platforms: task.platform ? [task.platform] : [],
+                        bounds: null,
+                        region_codes: typeof extra.region_code === 'string' ? [extra.region_code] : [],
+                    },
+                });
+                alert('POI 数据导出成功');
+            }
+        } catch (e) {
+            alert(`导出失败: ${e}`);
+        }
+    };
+
     // 航标任务：继续执行（使用原始 bounds 重新开始采集）
     const handleBuoyResume = async (task: UnifiedTask) => {
         let extra: Record<string, unknown> = {};
@@ -278,6 +391,7 @@ export default function TaskHistory() {
             await invoke('chart_start_buoy_collection', {
                 west: w, south: s, east: e, north: n,
                 gridStep: (extra.grid_step as number) || 0.1,
+                taskName: task.name,
             });
             loadTasks();
         } catch (err) {
@@ -301,11 +415,19 @@ export default function TaskHistory() {
         }
         setOperatingTaskId(task.id);
         try {
+            const taskLayers = parseTaskLayers(extra);
+            const hasLayerRecord = taskLayers.length > 0;
+            const rasterLayers = taskLayers.filter(layer => ['yizhangtu', 'cjshoudong', 'soundg'].includes(layer));
+            const zoomLevels = parseNumberList(extra.zoom_levels);
             await invoke('chart_start_feature_collection', {
                 west: w, south: s, east: e, north: n,
                 gridStep: (extra.grid_step as number) || 0.2,
-                includeFences: (extra.include_fences as boolean | undefined) ?? true,
-                includeHydro: (extra.include_hydro as boolean | undefined) ?? true,
+                includeFences: hasLayerRecord ? taskLayers.includes('electronic_fence') : ((extra.include_fences as boolean | undefined) ?? true),
+                includeHydro: hasLayerRecord ? taskLayers.includes('HYDRO_A') : ((extra.include_hydro as boolean | undefined) ?? true),
+                layers: rasterLayers,
+                zoomLevels: zoomLevels.length > 0 ? zoomLevels : undefined,
+                outputPath: rasterLayers.length > 0 ? task.output_path : null,
+                taskName: task.name,
             });
             loadTasks();
         } catch (err) {
@@ -332,6 +454,7 @@ export default function TaskHistory() {
                 platform,
                 categories: null,
                 regions: [regionCode],
+                taskName: task.name,
             });
             loadTasks();
         } catch (err) {
@@ -392,10 +515,8 @@ export default function TaskHistory() {
         const isPoi = task.task_type === 'poi';
 
         // Parse extra
-        let extra: Record<string, unknown> = {};
-        try {
-            if (task.extra) extra = JSON.parse(task.extra);
-        } catch { /* ignore */ }
+        const extra = parseExtra(task.extra);
+        const hasVectorFeatureExport = vectorLayersForTask(task, extra).length > 0;
 
         return (
             <div
@@ -490,6 +611,14 @@ export default function TaskHistory() {
                             <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                                 onClick={() => handleOpenFolder(task.output_path!)} title="打开文件夹">
                                 <FolderOpen className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
+
+                        {/* 采集型任务快捷导出 */}
+                        {(isPoi || isBuoy || hasVectorFeatureExport) && !isActive && (
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                                onClick={() => handleQuickExport(task)} title={isFeature ? '导出水域面/航道要素' : '导出数据'}>
+                                <Download className="h-3.5 w-3.5" />
                             </Button>
                         )}
 

@@ -22,6 +22,7 @@ const TERMINAL_STATUSES: TaskStatus[] = ['done', 'failed', 'error', 'canceled', 
 const TYPE_LABEL: Record<ShellTask['type'], string> = {
     poi: 'POI 采集',
     aton: '航标采集',
+    feature: '航道图专题',
     tile: '瓦片下载',
 }
 

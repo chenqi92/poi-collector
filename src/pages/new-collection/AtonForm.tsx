@@ -55,15 +55,9 @@ export function AtonForm() {
         } catch { return [] }
     })
     const [step, setStep] = useState(0.1)
-    const [featureStep, setFeatureStep] = useState(0.2)
-    const [includeFences, setIncludeFences] = useState(true)
-    const [includeHydro, setIncludeHydro] = useState(true)
     const [buoyCount, setBuoyCount] = useState(0)
-    const [featureCount, setFeatureCount] = useState(0)
     const [status, setStatus] = useState<'idle' | 'running'>('idle')
-    const [featureStatus, setFeatureStatus] = useState<'idle' | 'running'>('idle')
     const [progress, setProgress] = useState<ChartProgress | null>(null)
-    const [featureProgress, setFeatureProgress] = useState<ChartProgress | null>(null)
 
     useEffect(() => {
         localStorage.setItem(REGIONS_STORE_KEY, JSON.stringify(regions))
@@ -72,12 +66,7 @@ export function AtonForm() {
     useEffect(() => {
         const load = async () => {
             try {
-                const [c, fc] = await Promise.all([
-                    invoke<number>('chart_get_buoy_count'),
-                    invoke<number>('chart_get_feature_count'),
-                ])
-                setBuoyCount(c)
-                setFeatureCount(fc)
+                setBuoyCount(await invoke<number>('chart_get_buoy_count'))
             } catch { /* ignore */ }
         }
         load()
@@ -90,15 +79,6 @@ export function AtonForm() {
                     load()
                 } else if (p.status === 'running' || p.status === 'collecting') {
                     setStatus('running')
-                }
-            }
-            if (p.task_type === 'feature') {
-                setFeatureProgress(p)
-                if (p.status === 'completed') {
-                    setFeatureStatus('idle')
-                    load()
-                } else if (p.status === 'running' || p.status === 'collecting') {
-                    setFeatureStatus('running')
                 }
             }
         })
@@ -125,12 +105,7 @@ export function AtonForm() {
     const gridX = bounds ? Math.ceil((bounds.east - bounds.west) / step) : 0
     const gridY = bounds ? Math.ceil((bounds.north - bounds.south) / step) : 0
     const totalCells = gridX * gridY
-    const featureGridX = bounds ? Math.ceil((bounds.east - bounds.west) / featureStep) : 0
-    const featureGridY = bounds ? Math.ceil((bounds.north - bounds.south) / featureStep) : 0
-    const featureCells = featureGridX * featureGridY
-    const featureSources = (includeFences ? 1 : 0) + (includeHydro ? 1 : 0)
-    const featureRequests = featureCells * featureSources
-    const anyRunning = status === 'running' || featureStatus === 'running'
+    const anyRunning = status === 'running'
 
     const start = async () => {
         if (!bounds) {
@@ -145,6 +120,7 @@ export function AtonForm() {
                 east: bounds.east,
                 north: bounds.north,
                 gridStep: step,
+                taskName: taskName.trim() || '长江航标采集任务',
             })
             success(
                 '航标采集已启动',
@@ -160,40 +136,9 @@ export function AtonForm() {
         try {
             await invoke('chart_stop_collection')
             setStatus('idle')
-            setFeatureStatus('idle')
             success('已停止', '采集任务已停止')
         } catch (e) {
             errorToast('停止失败', String(e))
-        }
-    }
-
-    const startFeatures = async () => {
-        if (!bounds) {
-            warning('未选择地区', '请先选择沿江省市')
-            return
-        }
-        if (!includeFences && !includeHydro) {
-            warning('未选择要素', '请至少选择电子围栏或 HYDRO_A 水域面')
-            return
-        }
-        try {
-            setFeatureStatus('running')
-            await invoke('chart_start_feature_collection', {
-                west: bounds.west,
-                south: bounds.south,
-                east: bounds.east,
-                north: bounds.north,
-                gridStep: featureStep,
-                includeFences,
-                includeHydro,
-            })
-            success(
-                '航道要素采集已启动',
-                `预计 ${featureRequests.toLocaleString()} 个请求`
-            )
-        } catch (e) {
-            setFeatureStatus('idle')
-            errorToast('启动失败', String(e))
         }
     }
 
@@ -267,56 +212,6 @@ export function AtonForm() {
                         </div>
                     </div>
 
-                    <div className="td-block">
-                        <div className="td-block-title"><span className="step-no">4</span>航道要素</div>
-                        <div className="step-grid">
-                            <label
-                                className={`step-opt${includeFences ? ' active' : ''}`}
-                                onClick={() => setIncludeFences(v => !v)}
-                            >
-                                <span className="step-radio">{includeFences && <i />}</span>
-                                <div>
-                                    <div className="step-label">电子围栏</div>
-                                    <div className="step-desc">报告线 / 卡口 / 保护区</div>
-                                </div>
-                                <span className="mono step-cost">fence</span>
-                            </label>
-                            <label
-                                className={`step-opt${includeHydro ? ' active' : ''}`}
-                                onClick={() => setIncludeHydro(v => !v)}
-                            >
-                                <span className="step-radio">{includeHydro && <i />}</span>
-                                <div>
-                                    <div className="step-label">HYDRO_A 水域面</div>
-                                    <div className="step-desc">AIS 航道外过滤推荐</div>
-                                </div>
-                                <span className="mono step-cost">polygon</span>
-                            </label>
-                        </div>
-                        <div style={{ marginTop: 10 }}>
-                            <div className="lab-tiny" style={{ marginBottom: 6 }}>要素采集步长</div>
-                            <div className="step-grid">
-                                {STEP_OPTIONS.map(opt => (
-                                    <label
-                                        key={`feature-${opt.v}`}
-                                        className={`step-opt${featureStep === opt.v ? ' active' : ''}`}
-                                        onClick={() => setFeatureStep(opt.v)}
-                                    >
-                                        <span className="step-radio">{featureStep === opt.v && <i />}</span>
-                                        <div>
-                                            <div className="step-label">{opt.label}</div>
-                                            <div className="step-desc">{opt.desc}</div>
-                                        </div>
-                                        <span className="mono step-cost">{opt.relCost}</span>
-                                    </label>
-                                ))}
-                            </div>
-                        </div>
-                        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
-                            HYDRO_A 是水域/深度面，适合作为 AIS 点位过滤的基础面；电子围栏作为卡口、报告线、保护区等专题补充。
-                        </div>
-                    </div>
-
                     {status === 'running' && progress && (
                         <div className="td-block">
                             <div className="td-block-title"><span className="step-no">●</span>采集进度</div>
@@ -348,36 +243,6 @@ export function AtonForm() {
                         </div>
                     )}
 
-                    {featureStatus === 'running' && featureProgress && (
-                        <div className="td-block">
-                            <div className="td-block-title"><span className="step-no">●</span>要素采集进度</div>
-                            <div className="panel">
-                                <div style={{ padding: 14 }}>
-                                    <div className="progress running">
-                                        <i
-                                            style={{
-                                                width: `${featureProgress.total > 0 ? (featureProgress.current / featureProgress.total) * 100 : 0}%`,
-                                            }}
-                                        />
-                                    </div>
-                                    <div
-                                        style={{
-                                            marginTop: 8,
-                                            display: 'flex',
-                                            gap: 10,
-                                            fontSize: 11.5,
-                                            color: 'var(--text-3)',
-                                        }}
-                                    >
-                                        <span className="mono">
-                                            {featureProgress.current} / {featureProgress.total}
-                                        </span>
-                                        <span style={{ flex: 1 }}>{featureProgress.message}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
 
                 <div className="nc-form-side">
@@ -397,14 +262,6 @@ export function AtonForm() {
                                 <div className="big-num">{buoyCount.toLocaleString()}</div>
                                 <div className="mono small-meta">来源：长江航道图（实时）</div>
                             </div>
-                            <div className="divider" style={{ margin: 0 }} />
-                            <div>
-                                <div className="lab-tiny">已采航道要素</div>
-                                <div className="big-num">{featureCount.toLocaleString()}</div>
-                                <div className="mono small-meta">
-                                    {bounds ? `${featureGridX} × ${featureGridY} 格 · 约 ${featureRequests.toLocaleString()} 请求` : '请先选择地区'}
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -417,24 +274,14 @@ export function AtonForm() {
                         <GcIcon name="stop" size={13} />停止采集
                     </button>
                 ) : (
-                    <>
-                        <button
-                            type="button"
-                            className="btn"
-                            onClick={startFeatures}
-                            disabled={!bounds || featureSources === 0}
-                        >
-                            <GcIcon name="database" size={13} />采集航道要素
-                        </button>
-                        <button
-                            type="button"
-                            className="btn primary"
-                            onClick={start}
-                            disabled={!bounds}
-                        >
-                            <GcIcon name="play" size={13} />采集航标
-                        </button>
-                    </>
+                    <button
+                        type="button"
+                        className="btn primary"
+                        onClick={start}
+                        disabled={!bounds}
+                    >
+                        <GcIcon name="play" size={13} />采集航标
+                    </button>
                 )}
             </div>
         </div>

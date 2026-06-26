@@ -7,6 +7,8 @@ interface TilePreviewLayerProps {
     platform: string;
     mapType: string;
     apiKey?: string;
+    minZoom?: number;
+    maxZoom?: number;
     /** 显式 z-index, 注记叠加层应设大于底图层（Leaflet 默认 1） */
     zIndex?: number;
 }
@@ -111,20 +113,29 @@ class TauriTileLayer extends L.TileLayer {
     }
 }
 
-export function TilePreviewLayer({ platform, mapType, apiKey, zIndex }: TilePreviewLayerProps) {
+export function TilePreviewLayer({
+    platform,
+    mapType,
+    apiKey,
+    minZoom = 0,
+    maxZoom = 21,
+    zIndex,
+}: TilePreviewLayerProps) {
     const map = useMap();
     const layerRef = useRef<TauriTileLayer | null>(null);
 
     useEffect(() => {
         if (!layerRef.current) {
             layerRef.current = new TauriTileLayer(platform, mapType, apiKey, {
-                maxZoom: 19,
-                minZoom: 1,
+                maxZoom,
+                minZoom,
                 ...(zIndex !== undefined ? { zIndex } : {}),
             });
             map.addLayer(layerRef.current);
         } else {
             layerRef.current.updateParams(platform, mapType, apiKey);
+            layerRef.current.options.minZoom = minZoom;
+            layerRef.current.options.maxZoom = maxZoom;
             if (zIndex !== undefined) {
                 layerRef.current.setZIndex(zIndex);
             }
@@ -136,7 +147,7 @@ export function TilePreviewLayer({ platform, mapType, apiKey, zIndex }: TilePrev
                 layerRef.current = null;
             }
         };
-    }, [map, platform, mapType, apiKey, zIndex]);
+    }, [map, platform, mapType, apiKey, minZoom, maxZoom, zIndex]);
 
     return null;
 }

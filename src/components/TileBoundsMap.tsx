@@ -39,6 +39,8 @@ interface TileBoundsMapProps {
     platform: string;
     mapType: string;
     apiKey?: string;
+    minZoom?: number;
+    maxZoom?: number;
     bounds: Bounds;
     onBoundsChange: (bounds: Bounds) => void;
     selectedRegionCode?: string | null;
@@ -124,6 +126,20 @@ function ZoomLevelDisplay() {
     );
 }
 
+function ZoomBoundsSync({ minZoom, maxZoom }: { minZoom: number; maxZoom: number }) {
+    const map = useMap();
+
+    useEffect(() => {
+        map.setMinZoom(minZoom);
+        map.setMaxZoom(maxZoom);
+        const zoom = map.getZoom();
+        if (zoom < minZoom) map.setZoom(minZoom);
+        if (zoom > maxZoom) map.setZoom(maxZoom);
+    }, [map, minZoom, maxZoom]);
+
+    return null;
+}
+
 // 地图内搜索框包装组件 - 放在右上角避免与缩放按钮重叠
 function MapSearchWrapper() {
     return (
@@ -137,6 +153,8 @@ export function TileBoundsMap({
     platform,
     mapType,
     apiKey,
+    minZoom = 0,
+    maxZoom = 21,
     bounds,
     onBoundsChange,
     selectedRegionCode,
@@ -381,19 +399,35 @@ export function TileBoundsMap({
                     <MapContainer
                         center={[33.78, 119.8]}
                         zoom={8}
+                        minZoom={minZoom}
+                        maxZoom={maxZoom}
                         className="w-full h-full"
                         style={{ height: '100%', width: '100%' }}
                         attributionControl={false}
                     >
                         {/* 底图层 */}
                         {useBaseMapLayer ? (
-                            <BaseMapLayer baseMapType={previewBaseMapType} />
+                            <>
+                                <BaseMapLayer baseMapType={previewBaseMapType} />
+                                {platform === 'cjhy' && (
+                                    <TilePreviewLayer
+                                        platform={platform}
+                                        mapType={mapType}
+                                        apiKey={apiKey}
+                                        minZoom={minZoom}
+                                        maxZoom={maxZoom}
+                                        zIndex={10}
+                                    />
+                                )}
+                            </>
                         ) : (
                             <>
                                 <TilePreviewLayer
                                     platform={platform}
                                     mapType={mapType}
                                     apiKey={apiKey}
+                                    minZoom={minZoom}
+                                    maxZoom={maxZoom}
                                     zIndex={1}
                                 />
                                 {/* 天地图三种底图都需要叠 cva 才能看到中文地名（mapType=annotation 时本身就是注记层，不再重复叠） */}
@@ -405,6 +439,8 @@ export function TileBoundsMap({
                                             platform="tianditu"
                                             mapType="annotation"
                                             apiKey={apiKey}
+                                            minZoom={minZoom}
+                                            maxZoom={maxZoom}
                                             zIndex={10}
                                         />
                                     )}
@@ -412,6 +448,7 @@ export function TileBoundsMap({
                         )}
 
                         <ResizeHandler />
+                        <ZoomBoundsSync minZoom={minZoom} maxZoom={maxZoom} />
                         <ZoomLevelDisplay />
 
                         {/* 地图内搜索框 */}
@@ -480,6 +517,8 @@ export function TileBoundsMap({
                 selectedRegionCode={selectedRegionCode}
                 selectionMode={selectionMode}
                 onSelectionModeChange={onSelectionModeChange}
+                minZoom={minZoom}
+                maxZoom={maxZoom}
                 baseMapType={baseMapType}
                 onBaseMapTypeChange={setBaseMapType}
             />

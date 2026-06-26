@@ -2,17 +2,19 @@ import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { invoke } from '@tauri-apps/api/core'
+import { save } from '@tauri-apps/plugin-dialog'
 import { revealItemInDir } from '@tauri-apps/plugin-opener'
 import { useToast } from '@/components/ui/toast'
 import { POIForm } from './new-collection/POIForm'
 import { AtonForm } from './new-collection/AtonForm'
+import { ChartFeatureForm } from './new-collection/ChartFeatureForm'
 import { TileForm } from './new-collection/TileForm'
 import { GcIcon, StatusBadge, TypeBadge, PlatformBadge } from '@/components/shell'
 import { useTasksContext } from '@/lib/tasksContext'
 import type { ShellTask, TaskStatus, TaskType } from '@/lib/shellData'
 
 type SubTab = 'create' | 'active' | 'history'
-type CreateType = 'poi' | 'aton' | 'tile'
+type CreateType = 'poi' | 'aton' | 'feature' | 'tile'
 
 const SUB_TABS: { key: SubTab; icon: string; label: string }[] = [
     { key: 'create', icon: 'plus', label: '创建新任务' },
@@ -57,6 +59,13 @@ function rawTaskId(id: string): string {
     return i >= 0 ? id.slice(i + 1) : id
 }
 
+function taskIcon(type: TaskType | string) {
+    if (type === 'tile') return 'map'
+    if (type === 'aton') return 'navigation'
+    if (type === 'feature') return 'layers'
+    return 'mapPin'
+}
+
 function BigTaskRow({ t, last, onPause, onResume, onStop }: {
     t: ShellTask
     last: boolean
@@ -67,10 +76,7 @@ function BigTaskRow({ t, last, onPause, onResume, onStop }: {
     return (
         <div className="big-task-row" style={{ borderBottom: last ? 'none' : '1px solid var(--hairline)' }}>
             <div className={`task-row-icon t-${t.type}`} style={{ width: 36, height: 36 }}>
-                <GcIcon
-                    name={t.type === 'tile' ? 'map' : t.type === 'aton' ? 'navigation' : 'mapPin'}
-                    size={16}
-                />
+                <GcIcon name={taskIcon(t.type)} size={16} />
             </div>
             <div className="big-task-main">
                 <div className="big-task-title">
@@ -168,7 +174,7 @@ function ActiveTasksView() {
     const onResume = async (t: ShellTask) => {
         try {
             if (t.type === 'tile') { await invoke('start_tile_download', { taskId: rawTaskId(t.id) }); success('已继续', t.name) }
-            else errorToast('无法继续', 'POI / 航标任务请到「任务历史」右键继续采集')
+            else errorToast('无法继续', 'POI / 航标 / 航道图任务请到「任务历史」右键继续采集')
         } catch (e) { errorToast('操作失败', String(e)) }
     }
     const onStop = async (t: ShellTask) => {
@@ -231,7 +237,8 @@ const STATUS_NORMALIZE: Record<string, TaskStatus> = {
 function inferType(t: string): TaskType {
     const s = t.toLowerCase()
     if (s.includes('tile')) return 'tile'
-    if (s.includes('buoy') || s.includes('aton') || s.includes('feature')) return 'aton'
+    if (s.includes('feature')) return 'feature'
+    if (s.includes('buoy') || s.includes('aton')) return 'aton'
     return 'poi'
 }
 
@@ -249,6 +256,47 @@ function poiCollected(h: UnifiedTask): number {
 function parseExtra(extra: string | null): Record<string, unknown> {
     if (!extra) return {}
     try { return JSON.parse(extra) } catch { return {} }
+}
+
+function parseTaskLayers(extra: Record<string, unknown>): string[] {
+    const raw = extra.layers
+    if (Array.isArray(raw)) return raw.filter((item): item is string => typeof item === 'string')
+    if (typeof raw !== 'string' || !raw.trim()) return []
+    try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+    } catch {
+        return raw.split(/[,，\s]+/).filter(Boolean)
+    }
+}
+
+function parseNumberList(raw: unknown): number[] {
+    if (Array.isArray(raw)) return raw.map(Number).filter(Number.isFinite)
+    if (typeof raw !== 'string' || !raw.trim()) return []
+    try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : []
+    } catch {
+        return raw.split(/[,，\s]+/).map(Number).filter(Number.isFinite)
+    }
+}
+
+function taskBoundsParams(extra: Record<string, unknown>) {
+    const west = Number(extra.bounds_west)
+    const south = Number(extra.bounds_south)
+    const east = Number(extra.bounds_east)
+    const north = Number(extra.bounds_north)
+    if ([west, south, east, north].every(Number.isFinite) && east > west && north > south) {
+        return { west, south, east, north }
+    }
+    return null
+}
+
+function vectorLayersForHistoryTask(h: UnifiedTask, extra: Record<string, unknown>): string[] {
+    if (inferType(h.task_type) !== 'feature') return []
+    const layers = parseTaskLayers(extra)
+    if (layers.length === 0) return ['HYDRO_A', 'electronic_fence']
+    return layers.filter(layer => layer === 'HYDRO_A' || layer === 'electronic_fence')
 }
 
 interface CtxAction { label: string; icon: string; onClick: () => void }
@@ -297,7 +345,7 @@ function TaskCtxMenu({ x, y, actions, onClose }: { x: number; y: number; actions
 function HistoryView({ refreshTick }: { refreshTick: number }) {
     const navigate = useNavigate()
     const { success, error: errorToast, warning } = useToast()
-    const [filter, setFilter] = useState<'all' | 'poi' | 'aton' | 'tile'>('all')
+    const [filter, setFilter] = useState<'all' | 'poi' | 'aton' | 'feature' | 'tile'>('all')
     const [items, setItems] = useState<UnifiedTask[]>([])
     const [loading, setLoading] = useState(true)
     const [menu, setMenu] = useState<{ x: number; y: number; actions: CtxAction[] } | null>(null)
@@ -306,27 +354,35 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
         const kind = inferType(h.task_type)
         const extra = parseExtra(h.extra)
         try {
-            if (kind === 'aton') {
-                const w = extra.bounds_west as number, s = extra.bounds_south as number
-                const e = extra.bounds_east as number, n = extra.bounds_north as number
-                if (!w && !s && !e && !n) { warning('无法继续', '该任务未记录边界范围'); return }
-                if (h.task_type === 'feature' || extra.chart_task_type === 'feature') {
+            if (kind === 'aton' || kind === 'feature') {
+                const bounds = taskBoundsParams(extra)
+                if (!bounds) { warning('无法继续', '该任务未记录边界范围'); return }
+                if (kind === 'feature' || h.task_type === 'feature' || extra.chart_task_type === 'feature') {
+                    const taskLayers = parseTaskLayers(extra)
+                    const hasLayerRecord = taskLayers.length > 0
+                    const rasterLayers = taskLayers.filter(layer => ['yizhangtu', 'cjshoudong', 'soundg'].includes(layer))
+                    const zoomLevels = parseNumberList(extra.zoom_levels)
                     await invoke('chart_start_feature_collection', {
-                        west: w, south: s, east: e, north: n,
+                        ...bounds,
                         gridStep: (extra.grid_step as number) || 0.2,
-                        includeFences: (extra.include_fences as boolean | undefined) ?? true,
-                        includeHydro: (extra.include_hydro as boolean | undefined) ?? true,
+                        includeFences: hasLayerRecord ? taskLayers.includes('electronic_fence') : ((extra.include_fences as boolean | undefined) ?? true),
+                        includeHydro: hasLayerRecord ? taskLayers.includes('HYDRO_A') : ((extra.include_hydro as boolean | undefined) ?? true),
+                        layers: rasterLayers,
+                        zoomLevels: zoomLevels.length > 0 ? zoomLevels : undefined,
+                        outputPath: rasterLayers.length > 0 ? h.output_path : null,
+                        taskName: h.name,
                     })
                 } else {
                     await invoke('chart_start_buoy_collection', {
-                        west: w, south: s, east: e, north: n,
+                        ...bounds,
                         gridStep: (extra.grid_step as number) || 0.1,
+                        taskName: h.name,
                     })
                 }
             } else if (kind === 'poi') {
                 const regionCode = extra.region_code as string
                 if (!h.platform || !regionCode) { warning('无法继续', '该任务缺少平台或区域信息'); return }
-                await invoke('start_collector', { platform: h.platform, categories: null, regions: [regionCode] })
+                await invoke('start_collector', { platform: h.platform, categories: null, regions: [regionCode], taskName: h.name })
             } else {
                 warning('暂不支持', '瓦片任务请在「离线地图」中重新下载'); return
             }
@@ -336,20 +392,99 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
         }
     }
 
+    const canQuickExport = (h: UnifiedTask, extra: Record<string, unknown>) => {
+        const kind = inferType(h.task_type)
+        if (kind === 'feature') return vectorLayersForHistoryTask(h, extra).length > 0
+        return kind === 'poi' || kind === 'aton'
+    }
+
+    const quickExport = async (h: UnifiedTask) => {
+        const kind = inferType(h.task_type)
+        const extra = parseExtra(h.extra)
+        const date = new Date().toISOString().slice(0, 10)
+        const safeId = h.id.replace(/[^a-zA-Z0-9_-]/g, '_')
+        try {
+            if (kind === 'feature') {
+                const sourceLayers = vectorLayersForHistoryTask(h, extra)
+                if (sourceLayers.length === 0) {
+                    warning('无法导出', '该航道图任务只包含瓦片覆盖层，没有水域面或航道要素')
+                    return
+                }
+                const path = await save({
+                    defaultPath: `chart_features_${safeId}_${date}.geojson`,
+                    filters: [{ name: 'GeoJSON', extensions: ['geojson'] }],
+                })
+                if (!path) return
+                await invoke<string>('chart_export_features', {
+                    format: 'geojson',
+                    outputPath: path,
+                    sourceLayers,
+                    ...(taskBoundsParams(extra) ?? {}),
+                })
+                success('导出成功', '已导出水域面 / 航道要素')
+                return
+            }
+
+            if (kind === 'aton') {
+                const path = await save({
+                    defaultPath: `buoys_${safeId}_${date}.csv`,
+                    filters: [{ name: 'CSV', extensions: ['csv'] }],
+                })
+                if (!path) return
+                await invoke<string>('chart_export_buoys', {
+                    format: 'csv',
+                    outputPath: path,
+                    ...(taskBoundsParams(extra) ?? {}),
+                })
+                success('导出成功', '已导出航标数据')
+                return
+            }
+
+            if (kind === 'poi') {
+                const path = await save({
+                    defaultPath: `poi_${safeId}_${date}.csv`,
+                    filters: [{ name: 'CSV', extensions: ['csv'] }],
+                })
+                if (!path) return
+                await invoke<number>('export_poi_to_file', {
+                    path,
+                    format: 'csv',
+                    filters: {
+                        query: null,
+                        platforms: h.platform ? [h.platform] : [],
+                        bounds: null,
+                        region_codes: typeof extra.region_code === 'string' ? [extra.region_code] : [],
+                    },
+                })
+                success('导出成功', '已导出 POI 数据')
+            }
+        } catch (err) {
+            errorToast('导出失败', String(err))
+        }
+    }
+
     const openMenu = (e: ReactMouseEvent, h: UnifiedTask) => {
         e.preventDefault()
         e.stopPropagation()
         const kind = inferType(h.task_type)
         const s = STATUS_NORMALIZE[h.status.toLowerCase()] ?? 'idle'
+        const extra = parseExtra(h.extra)
         const actions: CtxAction[] = []
-        if (kind === 'poi' || kind === 'aton') {
+        if (kind === 'poi' || kind === 'aton' || kind === 'feature') {
             actions.push({
                 label: s === 'done' ? '重新采集' : '继续采集',
                 icon: 'play',
                 onClick: () => resumeTask(h),
             })
         }
-        if (kind === 'poi' || kind === 'aton') {
+        if (canQuickExport(h, extra)) {
+            actions.push({
+                label: kind === 'feature' ? '导出水域面/航道要素' : '导出数据',
+                icon: 'download',
+                onClick: () => quickExport(h),
+            })
+        }
+        if (kind === 'poi' || kind === 'aton' || kind === 'feature') {
             actions.push({ label: '在数据中心查看', icon: 'database', onClick: () => navigate('/data') })
         }
         if (h.output_path) {
@@ -397,14 +532,14 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                 }}
             >
                 <div className="seg">
-                    {(['all', 'poi', 'aton', 'tile'] as const).map(k => (
+                    {(['all', 'poi', 'aton', 'feature', 'tile'] as const).map(k => (
                         <button
                             key={k}
                             type="button"
                             className={filter === k ? 'active' : ''}
                             onClick={() => setFilter(k)}
                         >
-                            {k === 'all' ? '全部' : k === 'poi' ? 'POI' : k === 'aton' ? '航标' : '瓦片'}
+                            {k === 'all' ? '全部' : k === 'poi' ? 'POI' : k === 'aton' ? '航标' : k === 'feature' ? '航道图' : '瓦片'}
                         </button>
                     ))}
                 </div>
@@ -423,13 +558,15 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                             <th style={{ width: 130, textAlign: 'right' }}>进度</th>
                             <th style={{ width: 100 }}>平台</th>
                             <th style={{ width: 160 }}>完成时间</th>
-                            <th style={{ width: 80 }}></th>
+                            <th style={{ width: 112, textAlign: 'right' }}>操作</th>
                         </tr>
                     </thead>
                     <tbody>
                         {filtered.map(h => {
                             const t = inferType(h.task_type)
                             const s = STATUS_NORMALIZE[h.status.toLowerCase()] ?? 'idle'
+                            const extra = parseExtra(h.extra)
+                            const showExport = canQuickExport(h, extra)
                             return (
                                 <tr
                                     key={h.id}
@@ -439,7 +576,7 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                                     <td>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                             <GcIcon
-                                                name={t === 'tile' ? 'map' : t === 'aton' ? 'navigation' : 'mapPin'}
+                                                name={taskIcon(t)}
                                                 size={13}
                                                 style={{ color: 'var(--text-3)' }}
                                             />
@@ -461,7 +598,17 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                                     <td className="mono">{h.platform ?? '—'}</td>
                                     <td className="mono">{h.completed_at ?? h.created_at ?? '—'}</td>
                                     <td>
-                                        <div className="row-actions">
+                                        <div className="row-actions" style={{ opacity: 1, justifyContent: 'flex-end' }}>
+                                            {showExport && (
+                                                <button
+                                                    className="iconbtn"
+                                                    type="button"
+                                                    title={t === 'feature' ? '导出水域面/航道要素' : '导出数据'}
+                                                    onClick={() => quickExport(h)}
+                                                >
+                                                    <GcIcon name="download" size={13} />
+                                                </button>
+                                            )}
                                             {h.output_path && (
                                                 <button
                                                     className="iconbtn"
@@ -599,6 +746,14 @@ export default function NewCollection() {
                             platformsLabel="长江航道图"
                         />
                         <TypeChooser
+                            active={createType === 'feature'}
+                            onClick={() => setType('feature')}
+                            icon="layers"
+                            title="航道图专题采集"
+                            sub="航道图 / 水域 / 水深 · 水域面 / 航道要素"
+                            platformsLabel="长江航道图"
+                        />
+                        <TypeChooser
                             active={createType === 'tile'}
                             onClick={() => setType('tile')}
                             icon="map"
@@ -609,6 +764,7 @@ export default function NewCollection() {
                     </div>
                     {createType === 'poi' && <POIForm />}
                     {createType === 'aton' && <AtonForm />}
+                    {createType === 'feature' && <ChartFeatureForm />}
                     {createType === 'tile' && <TileForm />}
                 </div>
             )}

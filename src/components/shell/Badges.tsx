@@ -26,7 +26,7 @@ export function PlatformBadge({ name }: { name: PlatformKey | string }) {
     )
 }
 
-const TYPE_LABEL: Record<TaskType, string> = { poi: 'POI', aton: '航标', tile: '瓦片' }
+const TYPE_LABEL: Record<TaskType, string> = { poi: 'POI', aton: '航标', feature: '航道图', tile: '瓦片' }
 export function TypeBadge({ type }: { type: TaskType | string }) {
     return (
         <span className={`type-badge t-${type}`}>
