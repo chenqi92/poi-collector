@@ -65,6 +65,8 @@ export interface CleanResult {
     trips: AisPoint[][]
     /** 去掉的重复/孤立跳点/碎片点数 */
     dropped: number
+    /** 数据无可用时间戳（所有点时间相同/缺失）：未做时间清洗，按报文顺序展示 */
+    noTime: boolean
 }
 
 function impliedKn(a: AisPoint, b: AisPoint): number {
@@ -84,9 +86,37 @@ function impliedKn(a: AisPoint, b: AisPoint): number {
  * 解决内河 AIS 的 GPS 跳点与 MMSI 串号拼接问题。
  */
 export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN): CleanResult {
-    const sorted = points
-        .filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat))
-        .sort((a, b) => a.ts - b.ts)
+    const finite = points.filter((p) => Number.isFinite(p.lon) && Number.isFinite(p.lat))
+
+    // 无可用时间戳（所有点时间相同/缺失，如某些索引没有时间字段）：时间去重与
+    // GNN 拆分全部失去意义，会把整条航迹当成「重复时间戳」清空。这里直接按报文
+    // 原始顺序整条返回，至少能把船的点连成线展示。
+    let tsMin = Infinity
+    let tsMax = -Infinity
+    for (const p of finite) {
+        if (p.ts < tsMin) tsMin = p.ts
+        if (p.ts > tsMax) tsMax = p.ts
+    }
+    if (finite.length >= 2 && tsMax === tsMin) {
+        // 无时间戳无法算速度，改按「相邻点距离」切分：单船相邻报文一般只差几百米，
+        // 超过阈值视为跳变 / 串号 / 坏点边界，断开成新段，避免拉出跨图的长直连线
+        // （例如纬度被冻结、经度乱跳的坏数据）。
+        const maxGapM = 3000
+        const trips: AisPoint[][] = []
+        let cur: AisPoint[] = [finite[0]]
+        for (let k = 1; k < finite.length; k++) {
+            if (haversineM(finite[k - 1].lon, finite[k - 1].lat, finite[k].lon, finite[k].lat) > maxGapM) {
+                trips.push(cur)
+                cur = [finite[k]]
+            } else {
+                cur.push(finite[k])
+            }
+        }
+        trips.push(cur)
+        return { points: finite, trips, dropped: points.length - finite.length, noTime: true }
+    }
+
+    const sorted = finite.sort((a, b) => a.ts - b.ts)
     let dropped = points.length - sorted.length
 
     // 1) 去重复时间戳
@@ -139,7 +169,7 @@ export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN):
     }
     trips.sort((a, b) => a[0].ts - b[0].ts)
 
-    return { points: trips.flat(), trips, dropped }
+    return { points: trips.flat(), trips, dropped, noTime: false }
 }
 
 /** 逐点判定是否静止：导航状态优先，其次 SOG，再次相邻点推算速度兜底。 */

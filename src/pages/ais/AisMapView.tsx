@@ -125,6 +125,9 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [pullError, setPullError] = useState('')
     const [pullStats, setPullStats] = useState<PullStats | null>(null)
     const [maxPoints, setMaxPoints] = useState(50000)
+    // 跨索引拉单船完整航迹（扫描全部所选索引、只保留这艘船）
+    const [shipPull, setShipPull] = useState<{ mmsi: string; points: AisPoint[]; scanned: number; truncated: boolean } | null>(null)
+    const [shipPulling, setShipPulling] = useState(false)
 
     // 水域过滤
     const [waterLayer, setWaterLayer] = useState<WaterLayerKey>('none')
@@ -150,6 +153,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         setPulled([])
         setPullStats(null)
         setPullError('')
+        setShipPull(null)
         const tp = conn?.trajectoryParams
         setTraj({ ...DEFAULT_TRAJ, ...(tp && typeof tp === 'object' ? tp : {}) })
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -342,6 +346,29 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         }
     }
 
+    // —— raw 模式：跨所选索引拉「当前所选船」的完整航迹 ——
+    const doShipPull = async () => {
+        if (!connId || !selectedMmsi || selectedIndices.length === 0 || !mappingReady) return
+        setShipPulling(true)
+        setPullError('')
+        try {
+            const r = await aisPullWindow({
+                connId,
+                indices: selectedIndices,
+                mapping: queryMapping,
+                mmsi: selectedMmsi,
+                timeFrom: toMs(timeFrom),
+                timeTo: toMs(timeTo),
+                maxPoints: 200000,
+            })
+            setShipPull({ mmsi: selectedMmsi, points: r.points, scanned: r.scanned, truncated: r.truncated })
+        } catch (e) {
+            setPullError(String(e))
+        } finally {
+            setShipPulling(false)
+        }
+    }
+
     // raw 模式：按 MMSI 分组成船列表
     const rawShips: ShipSummary[] = useMemo(() => {
         if (mode !== 'raw') return []
@@ -365,16 +392,18 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         return arr
     }, [mode, pulled])
 
-    // raw 模式：所选船的点（归一化到 WGS-84）
+    // raw 模式：所选船的点（归一化到 WGS-84）。若刚跨索引拉过这艘船的完整航迹，
+    // 用完整结果，否则从窗口拉取里按 MMSI 过滤。
     const rawPoints: AisPoint[] = useMemo(() => {
         if (mode !== 'raw' || !selectedMmsi) return []
-        return pulled
-            .filter((p) => p.mmsi === selectedMmsi)
-            .map((p) => {
-                const [lon, lat] = normalizeToWgs84(sourceCrs, p.lon, p.lat)
-                return { ...p, lon, lat }
-            })
-    }, [mode, pulled, selectedMmsi, sourceCrs])
+        const src = shipPull && shipPull.mmsi === selectedMmsi
+            ? shipPull.points
+            : pulled.filter((p) => p.mmsi === selectedMmsi)
+        return src.map((p) => {
+            const [lon, lat] = normalizeToWgs84(sourceCrs, p.lon, p.lat)
+            return { ...p, lon, lat }
+        })
+    }, [mode, pulled, shipPull, selectedMmsi, sourceCrs])
 
     const ships = mode === 'raw' ? rawShips : fetchedShips
     const rawWgsPoints = mode === 'raw' ? rawPoints : routePoints
@@ -447,25 +476,26 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         [onlyOutermost, waterPolys],
     )
 
-    // 水域内外划分
+    // 水域内外划分：用「原始水域面」做点在多边形判断（精确，不受合并外框的栅格化误差影响）。
+    // effectiveWaterPolys 只用于地图显示；这里始终用 waterPolys 避免边缘点被误判为外点。
     const partition = useMemo(() => {
-        if (!effectiveWaterPolys.length) return { inside: wgsPoints, outside: [] as AisPoint[] }
+        if (!waterPolys.length) return { inside: wgsPoints, outside: [] as AisPoint[] }
         const inside: AisPoint[] = []
         const outside: AisPoint[] = []
         for (const p of wgsPoints) {
-            if (pointInWater(p.lon, p.lat, effectiveWaterPolys)) inside.push(p)
+            if (pointInWater(p.lon, p.lat, waterPolys)) inside.push(p)
             else outside.push(p)
         }
         return { inside, outside }
-    }, [wgsPoints, effectiveWaterPolys])
+    }, [wgsPoints, waterPolys])
 
     const anomalies = useMemo(() => (filterOn ? partition.outside : []), [filterOn, partition])
 
-    // 水域过滤按航次逐个剔除外点，保持航次结构再分段
+    // 水域过滤按航次逐个剔除外点，保持航次结构再分段（同样用原始水域面精确判断）
     const segTrips = useMemo(() => {
-        if (!filterOn || !effectiveWaterPolys.length) return cleaned.trips
-        return cleaned.trips.map((t) => t.filter((p) => pointInWater(p.lon, p.lat, effectiveWaterPolys)))
-    }, [filterOn, effectiveWaterPolys, cleaned.trips])
+        if (!filterOn || !waterPolys.length) return cleaned.trips
+        return cleaned.trips.map((t) => t.filter((p) => pointInWater(p.lon, p.lat, waterPolys)))
+    }, [filterOn, waterPolys, cleaned.trips])
 
     const segments: Segment[] = useMemo(
         () => segmentTrips(segTrips, traj, anchoredValues),
@@ -594,6 +624,12 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                                 )}
                                 <button type="button" className="ais-mini-btn" onClick={() => setShowAdvMapping((v) => !v)}>字段映射</button>
                             </div>
+                            {mappingReady && !queryMapping.timestamp.trim() && (
+                                <div className="ais-hint warn" style={{ marginTop: 4 }}>
+                                    ⚠ 未识别到时间字段：航迹只能按报文顺序展示，停泊 / 航次 / 速度分析与时间筛选都不可用。
+                                    该索引确无时间字段则正常；若有，可在「字段映射」里手填。
+                                </div>
+                            )}
                             {showAdvMapping && (
                                 <div style={{ marginTop: 6 }}>
                                     <div className="seg ais-seg" style={{ marginBottom: 6 }}>
@@ -696,6 +732,26 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                             <div className="ais-hint">仅显示前 500 艘，请用搜索缩小。</div>
                         )}
                     </div>
+                    {mode === 'raw' && selectedMmsi && (
+                        <>
+                            <button
+                                type="button"
+                                className="btn"
+                                onClick={doShipPull}
+                                disabled={shipPulling}
+                                style={{ marginTop: 6, width: '100%' }}
+                                title="扫描全部所选索引、只保留这艘船，取它跨索引的完整航迹（索引大时较慢）"
+                            >
+                                <GcIcon name="ship" size={13} /> {shipPulling ? '扫描中…' : '拉取该船全部点（跨索引）'}
+                            </button>
+                            {shipPull && shipPull.mmsi === selectedMmsi && (
+                                <div className="ais-hint">
+                                    完整航迹：扫描 {shipPull.scanned.toLocaleString()} 报文 · {shipPull.points.length.toLocaleString()} 点
+                                    {shipPull.truncated ? ' · 已达 20 万上限' : ''}
+                                </div>
+                            )}
+                        </>
+                    )}
                 </div>
 
                 <div className="ais-field">
@@ -726,8 +782,11 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     )}
                     {waterLayer !== 'none' && (
                         <div className="ais-row-between">
-                            <span className="ais-toggle-text">
-                                只取最外层水域面（范围粗判）
+                            <span
+                                className="ais-toggle-text"
+                                title="只影响地图上水域面怎么画（合并外框 vs 全部多边形）；判定 AIS 在不在水域内始终用精确的原始水域面"
+                            >
+                                水域面只显示合并外框
                                 {waterLoading
                                     ? ' · 载入中'
                                     : onlyOutermost && waterPolys.length
@@ -864,6 +923,9 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                             {selectedMmsi} · {wgsPoints.length}
                             {mode === 'fields' ? `/${routeTotal}` : ''} 点
                         </span>
+                    )}
+                    {selectedMmsi && cleaned.noTime && (
+                        <span className="ais-chip warn">无时间字段 · 按报文顺序展示（停泊/航次分析不可用）</span>
                     )}
                     {selectedMmsi && cleaned.dropped > 0 && (
                         <span className="ais-chip">清洗掉 {cleaned.dropped} 个跳点/重复</span>

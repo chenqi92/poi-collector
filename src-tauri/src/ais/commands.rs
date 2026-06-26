@@ -437,6 +437,7 @@ pub async fn ais_pull_window(
     time_from: Option<i64>,
     time_to: Option<i64>,
     max_points: Option<u32>,
+    mmsi: Option<String>,
 ) -> Result<PullResult, String> {
     let db = get_ais_db(&app)?;
     let conn = db
@@ -461,6 +462,13 @@ pub async fn ais_pull_window(
 
     let cap = max_points.unwrap_or(50000).min(300000) as usize;
     let batch = 2000usize;
+    // 指定 MMSI 时：扫描全部所选索引、只保留这艘船的点（cap 作用于该船），
+    // 用来跨多索引拉一艘船的完整航迹。
+    let mmsi_filter: Option<String> = mmsi
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
 
     let mut filters: Vec<Value> = Vec::new();
     if let Some(tf) = time_filter(&ts_field, &m.timestamp_format, time_from, time_to) {
@@ -512,6 +520,12 @@ pub async fn ais_pull_window(
                 } => {
                     if let Some(n) = name {
                         names.entry(mmsi).or_insert(n);
+                    }
+                    // 指定了 MMSI 就只收这艘船的点（不计入上限、继续扫描）
+                    if let Some(ref want) = mmsi_filter {
+                        if mmsi.to_string() != *want {
+                            continue;
+                        }
                     }
                     points.push(AisPoint {
                         mmsi: mmsi.to_string(),

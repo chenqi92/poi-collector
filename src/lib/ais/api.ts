@@ -62,6 +62,8 @@ export function aisPullWindow(params: {
     timeFrom?: number
     timeTo?: number
     maxPoints?: number
+    /** 指定后只拉这艘船的点（扫描全部所选索引），用于跨索引取一艘船完整航迹 */
+    mmsi?: string
 }): Promise<PullResult> {
     return invoke<PullResult>('ais_pull_window', params)
 }
