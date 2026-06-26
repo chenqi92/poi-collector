@@ -666,7 +666,8 @@
 
 /* Region picker dialog */
 .rp-overlay {
-  position: fixed; inset: 0; z-index: 200;
+  /* 对话框档：地图在其后时必须高于 Leaflet 控件（z 1000）。 */
+  position: fixed; inset: 0; z-index: 9000;
   background: rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
@@ -879,6 +880,13 @@
   color: var(--text-3);
   line-height: 1.5;
 }
+
+/* 把 Leaflet 自身的 pane（z 200-700）和控件（.leaflet-control=800、
+   .leaflet-top/.leaflet-bottom=1000）关进同一个层叠上下文。Leaflet 的 JS 只把
+   .leaflet-container 设为 position:relative;z-index:auto，这并不形成层叠上下文，
+   于是这些 z 值会冒泡到根上下文、盖住应用自身的浮层（顶栏弹层、自定义弹窗遮罩）。
+   isolation:isolate 让容器保持在它原本的层级（~0）且不改变自身定位。 */
+.leaflet-container { isolation: isolate; }
 
 /* Leaflet dark theme tweaks */
 .leaflet-tile { opacity: 1 !important; }

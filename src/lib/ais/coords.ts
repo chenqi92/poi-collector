@@ -77,3 +77,29 @@ export function normalizeToWgs84(crs: SourceCrs, lon: number, lat: number): [num
 export function toBase(base: BaseCrs, lon: number, lat: number): [number, number] {
     return base === 'gcj02' ? wgs84ToGcj02(lon, lat) : [lon, lat]
 }
+
+/**
+ * 深度转换一个 GeoJSON geometry 的所有坐标（[lon,lat] 叶子），返回新对象，不改原始。
+ * 用于把 WGS-84 矢量图层渲染到 GCJ-02 底图时整体纠偏。
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function transformGeometry(geom: any, fn: (lon: number, lat: number) => [number, number]): any {
+    if (!geom || typeof geom !== 'object') return geom
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mapCoords = (c: any): any => {
+        if (!Array.isArray(c)) return c
+        if (c.length >= 2 && typeof c[0] === 'number' && typeof c[1] === 'number') {
+            const [x, y] = fn(c[0], c[1])
+            return c.length > 2 ? [x, y, ...c.slice(2)] : [x, y]
+        }
+        return c.map(mapCoords)
+    }
+    if (geom.type === 'GeometryCollection' && Array.isArray(geom.geometries)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return { ...geom, geometries: geom.geometries.map((g: any) => transformGeometry(g, fn)) }
+    }
+    if ('coordinates' in geom) {
+        return { ...geom, coordinates: mapCoords(geom.coordinates) }
+    }
+    return geom
+}

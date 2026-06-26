@@ -7,6 +7,7 @@ import { MapContainer, TileLayer, Rectangle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import { useToast } from '@/components/ui/toast'
+import { formatBackendTime } from '@/lib/datetime'
 import 'leaflet/dist/leaflet.css'
 
 interface Bounds {
@@ -284,7 +285,7 @@ function PackagesList({
                                                     <b style={{ color: 'var(--text)' }}>{pkg.tiles.toLocaleString()}</b> 瓦片
                                                 </span>
                                                 <span style={{ marginLeft: 'auto', color: 'var(--text-4)' }}>
-                                                    {pkg.created.slice(0, 16).replace('T', ' ')}
+                                                    {formatBackendTime(pkg.created)}
                                                 </span>
                                             </div>
                                         </div>
@@ -482,7 +483,7 @@ function PackagePreview({
                         <div><span>缩放</span><b className="mono">z{pkg.zoom[0]}–z{pkg.zoom[1]}</b></div>
                         <div><span>瓦片</span><b className="mono">{pkg.tiles.toLocaleString()}</b></div>
                         <div><span>格式</span><b className="mono">{pkg.outputFormat}</b></div>
-                        <div><span>创建</span><b style={{ whiteSpace: 'nowrap' }}>{pkg.created.slice(0, 16).replace('T', ' ')}</b></div>
+                        <div><span>创建</span><b style={{ whiteSpace: 'nowrap' }}>{formatBackendTime(pkg.created)}</b></div>
                     </div>
                     <div
                         className="mono"

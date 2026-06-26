@@ -804,11 +804,12 @@ pub fn export_poi_to_file(
     path: String,
     format: String,
     filters: Option<PoiSearchFilters>,
+    output_crs: Option<String>,
 ) -> Result<usize, String> {
     let db = DB.lock().map_err(|e| e.to_string())?;
 
     // 用过滤条件直接在 SQLite 内 SELECT 出符合的所有行，避免前端把 23k 全拉到 JS。
-    let data: Vec<ExportPOI> = if let Some(f) = filters {
+    let mut data: Vec<ExportPOI> = if let Some(f) = filters {
         let bounds_tuple = f
             .bounds
             .as_ref()
@@ -823,6 +824,17 @@ pub fn export_poi_to_file(
     } else {
         db.get_all_poi(None).map_err(|e| e.to_string())?
     };
+
+    // POI 入库即为 WGS-84；按需转到导出坐标系（gcj02 / bd09）
+    if let Some(crs) = output_crs.as_deref() {
+        if crs != "wgs84" && !crs.is_empty() {
+            for poi in data.iter_mut() {
+                let (x, y) = crate::coords::wgs84_to_crs(crs, poi.lon, poi.lat);
+                poi.lon = x;
+                poi.lat = y;
+            }
+        }
+    }
 
     let count = data.len();
 

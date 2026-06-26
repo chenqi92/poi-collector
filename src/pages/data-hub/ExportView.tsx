@@ -243,6 +243,8 @@ export function ExportView() {
     const [poiFields, setPoiFields] = useState<Set<string>>(new Set(DEFAULT_POI_FIELDS))
     const [buoyFields, setBuoyFields] = useState<Set<string>>(new Set(DEFAULT_BUOY_FIELDS))
     const [format, setFormat] = useState<Format>('csv')
+    // 导出坐标系：wgs84(库内原值) / gcj02(高德火星) / bd09(百度)
+    const [outputCrs, setOutputCrs] = useState<string>('wgs84')
     const [exporting, setExporting] = useState(false)
     const [chartFeatureLayers, setChartFeatureLayers] = useState<Set<string>>(
         () => new Set(CHART_FEATURE_LAYERS.map(layer => layer.id))
@@ -633,6 +635,7 @@ export function ExportView() {
                     outputPath: path,
                     sourceLayers: selectedChartFeatureLayers,
                     outlineOnly: wantOutline,
+                    outputCrs,
                 }
                 if (bounds) {
                     params.west = bounds.west
@@ -667,6 +670,7 @@ export function ExportView() {
                     path,
                     format,
                     filters: poiFilters,
+                    outputCrs,
                 })
                 success('导出成功', `已导出 ${n.toLocaleString()} 条 POI`)
             } else {
@@ -674,6 +678,7 @@ export function ExportView() {
                 const msg = await invoke<string>('chart_export_buoys', {
                     format: backendFormat,
                     outputPath: path,
+                    outputCrs,
                 })
                 success('导出成功', msg)
             }
@@ -1289,6 +1294,22 @@ export function ExportView() {
                                     </button>
                                 ))}
                         </div>
+                        {dataType !== 'boundary' && (
+                            <>
+                                <span style={{ marginLeft: 14 }}>坐标:</span>
+                                <select
+                                    className="select"
+                                    value={outputCrs}
+                                    onChange={e => setOutputCrs(e.target.value)}
+                                    style={{ width: 130 }}
+                                    title="导出坐标系。数据库内为 WGS-84；选 GCJ-02/BD-09 会在导出时转换"
+                                >
+                                    <option value="wgs84">WGS-84</option>
+                                    <option value="gcj02">GCJ-02 (高德/火星)</option>
+                                    <option value="bd09">BD-09 (百度)</option>
+                                </select>
+                            </>
+                        )}
                         <span style={{ marginLeft: 14 }} className="mono">
                             {dataType === 'boundary'
                                 ? boundaryPreviewReady

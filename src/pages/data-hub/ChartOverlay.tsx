@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { invoke } from '@tauri-apps/api/core'
-import { geometryToPolygons, outermostPolygons, type WaterPolygon } from '@/lib/ais/geo'
+import { geometryToPolygons, dissolveOutline, type WaterPolygon } from '@/lib/ais/geo'
+import { wgs84ToGcj02, transformGeometry } from '@/lib/ais/coords'
+import type { BaseCrs } from '@/lib/ais/types'
 
 /* 航道图（cjhy）使用 ArcGIS EPSG:4326 自定义切片方案：
    原点 (-400, 400)，每级分辨率减半。
@@ -184,6 +186,7 @@ export function ChartFeatureOverlay({
     viewportLoad = false,
     queryBounds,
     outlineOnly = false,
+    baseCrs = 'gcj02',
 }: {
     visible: boolean
     sourceLayer: ChartFeatureSourceLayer
@@ -195,6 +198,8 @@ export function ChartFeatureOverlay({
     queryBounds?: ChartFeatureBounds
     /** 仅水域面有效：只画最外层外环边框（去洞、去嵌套内层） */
     outlineOnly?: boolean
+    /** 当前底图坐标系；WGS-84 数据渲染时纠偏到此坐标系（gcj02 底图=高德/天地图） */
+    baseCrs?: BaseCrs
 }) {
     const map = useMap()
     const layerRef = useRef<L.GeoJSON | null>(null)
@@ -254,14 +259,17 @@ export function ChartFeatureOverlay({
                             /* 跳过坏几何 */
                         }
                     }
-                    const outer = outermostPolygons(polys)
-                    geoFeatures = outer.map((p, i) => ({
+                    const fence = dissolveOutline(polys)
+                    geoFeatures = fence.map((p, i) => ({
                         type: 'Feature',
                         id: `outline-${i}`,
-                        geometry: { type: 'Polygon', coordinates: [p.rings[0]] },
+                        // rings = [外环, ...岛洞]，把中间的陆地挖空
+                        geometry: { type: 'Polygon', coordinates: p.rings },
                         properties: {},
                     }))
-                    setCount(outer.length)
+                    // 合并后围栏环通常只有 1~数条；角标直接显示围栏环数量，
+                    // 一眼确认「一堆内框已并成 N 圈岸线」。
+                    setCount(fence.length)
                 } else {
                     geoFeatures = features
                         .map((feature) => {
@@ -280,6 +288,14 @@ export function ChartFeatureOverlay({
                         })
                         .filter(Boolean)
                     setCount(features.length)
+                }
+
+                // WGS-84 数据 → 当前底图坐标系（高德 GCJ-02 时整体纠偏对齐）
+                if (baseCrs === 'gcj02') {
+                    geoFeatures = (geoFeatures as Array<{ geometry: unknown }>).map((f) => ({
+                        ...f,
+                        geometry: transformGeometry(f.geometry, wgs84ToGcj02),
+                    }))
                 }
 
                 if (geoFeatures.length === 0) return
@@ -385,7 +401,7 @@ export function ChartFeatureOverlay({
             map.off('moveend zoomend', scheduleViewportLoad)
             clearLayer()
         }
-    }, [fitBounds, kind, label, map, outlineOnly, queryBounds, sourceLayer, styleConfig, viewportLoad, visible])
+    }, [baseCrs, fitBounds, kind, label, map, outlineOnly, queryBounds, sourceLayer, styleConfig, viewportLoad, visible])
 
     if (!visible || count === null) return null
 
@@ -404,11 +420,14 @@ export function ChartOverlayLayer({
     visible,
     layer,
     tileMode = 'legacy',
+    baseCrs = 'gcj02',
 }: {
     basePath: string
     visible: boolean
     layer?: string
     tileMode?: 'legacy' | 'chart' | string | null
+    /** 当前底图坐标系；航道图瓦片为 WGS-84，gcj02 底图时纠偏对齐 */
+    baseCrs?: BaseCrs
 }) {
     const map = useMap()
     const tilesRef = useRef<Record<string, L.ImageOverlay>>({})
@@ -479,7 +498,10 @@ export function ChartOverlayLayer({
                     const nwLat = CJ_ORIGIN[1] - y * res * TILE_SIZE
                     const seLng = nwLng + res * TILE_SIZE
                     const seLat = nwLat - res * TILE_SIZE
-                    const tileBounds: L.LatLngBoundsExpression = [[seLat, nwLng], [nwLat, seLng]]
+                    // 瓦片角点 WGS-84 → 底图坐标系（高德 GCJ-02 时纠偏对齐）
+                    const sw = baseCrs === 'gcj02' ? wgs84ToGcj02(nwLng, seLat) : [nwLng, seLat]
+                    const ne = baseCrs === 'gcj02' ? wgs84ToGcj02(seLng, nwLat) : [seLng, nwLat]
+                    const tileBounds: L.LatLngBoundsExpression = [[sw[1], sw[0]], [ne[1], ne[0]]]
 
                     const job = tileMode === 'chart' && layer
                         ? invoke<string>('chart_serve_layer_tile', { basePath, layer, z: customZ, x, y })
@@ -516,7 +538,7 @@ export function ChartOverlayLayer({
             map.off('zoomend', update)
             clearTiles()
         }
-    }, [map, basePath, layer, tileMode])
+    }, [map, basePath, layer, tileMode, baseCrs])
 
     return null
 }

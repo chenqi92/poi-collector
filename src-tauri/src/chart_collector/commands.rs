@@ -788,10 +788,11 @@ pub fn chart_export_buoys(
     south: Option<f64>,
     east: Option<f64>,
     north: Option<f64>,
+    output_crs: Option<String>,
 ) -> Result<String, String> {
     let db = ChartDatabase::new(&get_db_path())?;
 
-    let buoys = if let (Some(w), Some(s), Some(e), Some(n)) = (west, south, east, north) {
+    let mut buoys = if let (Some(w), Some(s), Some(e), Some(n)) = (west, south, east, north) {
         let bounds = ChartBounds::new(w, s, e, n);
         db.get_buoys_in_bounds(&bounds)?
     } else {
@@ -800,6 +801,19 @@ pub fn chart_export_buoys(
 
     if buoys.is_empty() {
         return Err("没有可导出的航标数据".to_string());
+    }
+
+    // 航标 lon_84/lat_84 为 WGS-84；按需转到导出坐标系（gcj02 / bd09）
+    if let Some(crs) = output_crs.as_deref() {
+        if crs != "wgs84" && !crs.is_empty() {
+            for b in buoys.iter_mut() {
+                if let (Some(lon), Some(lat)) = (b.lon_84, b.lat_84) {
+                    let (x, y) = crate::coords::wgs84_to_crs(crs, lon, lat);
+                    b.lon_84 = Some(x);
+                    b.lat_84 = Some(y);
+                }
+            }
+        }
     }
 
     let content_bytes: Vec<u8> = match format.as_str() {
@@ -948,36 +962,6 @@ fn parse_outline_ring(v: &serde_json::Value) -> OutlineRing {
         .unwrap_or_default()
 }
 
-/// 取一个 GeoJSON geometry 的所有外环（Polygon 取 coordinates[0]，MultiPolygon 取每个 polygon 的 [0]）
-fn outer_rings_of(geom: &serde_json::Value) -> Vec<OutlineRing> {
-    match geom.get("type").and_then(|v| v.as_str()).unwrap_or("") {
-        "Polygon" => geom
-            .get("coordinates")
-            .and_then(|c| c.as_array())
-            .and_then(|rings| rings.first())
-            .map(parse_outline_ring)
-            .filter(|r| r.len() >= 3)
-            .into_iter()
-            .collect(),
-        "MultiPolygon" => geom
-            .get("coordinates")
-            .and_then(|c| c.as_array())
-            .map(|polys| {
-                polys
-                    .iter()
-                    .filter_map(|poly| {
-                        poly.as_array()
-                            .and_then(|rings| rings.first())
-                            .map(parse_outline_ring)
-                    })
-                    .filter(|r| r.len() >= 3)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        _ => vec![],
-    }
-}
-
 fn outline_ring_bbox(ring: &OutlineRing) -> OutlineBbox {
     let mut b = OutlineBbox::empty();
     for c in ring {
@@ -997,27 +981,49 @@ fn outline_ring_bbox(ring: &OutlineRing) -> OutlineBbox {
     b
 }
 
-fn outline_ring_area(ring: &OutlineRing) -> f64 {
-    let n = ring.len();
-    if n < 3 {
-        return 0.0;
-    }
-    let mut a = 0.0;
-    let mut j = n - 1;
-    for i in 0..n {
-        a += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
-        j = i;
-    }
-    a.abs() / 2.0
+/// 解析一个 GeoJSON 多边形的全部环（外环 + 洞），过滤掉点数 < 3 的环。
+fn parse_one_polygon(rings_val: &serde_json::Value) -> Vec<OutlineRing> {
+    rings_val
+        .as_array()
+        .map(|rs| {
+            rs.iter()
+                .map(parse_outline_ring)
+                .filter(|r| r.len() >= 3)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-fn outline_bbox_inside(inner: &OutlineBbox, outer: &OutlineBbox) -> bool {
-    inner.min_lon >= outer.min_lon
-        && inner.max_lon <= outer.max_lon
-        && inner.min_lat >= outer.min_lat
-        && inner.max_lat <= outer.max_lat
+/// 取 GeoJSON geometry 的所有多边形，每个多边形含全部环（外环 + 洞）。
+fn polygons_all_rings(geom: &serde_json::Value) -> Vec<Vec<OutlineRing>> {
+    match geom.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+        "Polygon" => {
+            let p = geom
+                .get("coordinates")
+                .map(parse_one_polygon)
+                .unwrap_or_default();
+            if p.is_empty() {
+                vec![]
+            } else {
+                vec![p]
+            }
+        }
+        "MultiPolygon" => geom
+            .get("coordinates")
+            .and_then(|c| c.as_array())
+            .map(|polys| {
+                polys
+                    .iter()
+                    .map(parse_one_polygon)
+                    .filter(|p| !p.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => vec![],
+    }
 }
 
+/// 射线法：点是否在环内
 fn outline_point_in_ring(lon: f64, lat: f64, ring: &OutlineRing) -> bool {
     let n = ring.len();
     if n < 3 {
@@ -1036,46 +1042,111 @@ fn outline_point_in_ring(lon: f64, lat: f64, ring: &OutlineRing) -> bool {
     inside
 }
 
-/// inner 外环是否基本落在 outer 外环内：bbox 包含 + 抽样顶点多数在内
-fn outline_ring_contains(
-    outer: &OutlineRing,
-    outer_bbox: &OutlineBbox,
-    inner: &OutlineRing,
-    inner_bbox: &OutlineBbox,
-) -> bool {
-    if !outline_bbox_inside(inner_bbox, outer_bbox) {
-        return false;
+/// 外环有符号面积（lon=x, lat=y；CCW 为正）
+fn signed_ring_area(ring: &OutlineRing) -> f64 {
+    let n = ring.len();
+    if n < 3 {
+        return 0.0;
     }
-    if inner.is_empty() || outer.len() < 3 {
-        return false;
+    let mut a = 0.0;
+    let mut j = n - 1;
+    for i in 0..n {
+        a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+        j = i;
     }
-    let stride = (inner.len() / 40).max(1);
-    let mut tested = 0usize;
-    let mut hit = 0usize;
-    let mut i = 0usize;
-    while i < inner.len() {
-        tested += 1;
-        if outline_point_in_ring(inner[i][0], inner[i][1], outer) {
-            hit += 1;
-        }
-        i += stride;
-    }
-    tested > 0 && (hit as f64) / (tested as f64) >= 0.9
+    a / 2.0
 }
 
-/// 把 HYDRO_A 水域面收敛为最外层边框（只外环、去洞、去嵌套内层）。
-/// 非 HYDRO_A 要素、以及 HYDRO_A 中非多边形几何，原样保留。
-fn collapse_water_outlines(features: Vec<ChartFeatureInfo>) -> Vec<ChartFeatureInfo> {
-    struct Cand {
-        feat: usize,
-        ring: OutlineRing,
-        bbox: OutlineBbox,
-        area: f64,
+/// 开线 Douglas–Peucker 简化（保留首末点）
+fn douglas_peucker(pts: &[[f64; 2]], eps: f64) -> Vec<[f64; 2]> {
+    let n = pts.len();
+    if n <= 2 || eps <= 0.0 {
+        return pts.to_vec();
     }
+    let mut keep = vec![false; n];
+    keep[0] = true;
+    keep[n - 1] = true;
+    let mut stack: Vec<(usize, usize)> = vec![(0, n - 1)];
+    while let Some((s, e)) = stack.pop() {
+        let (ax, ay) = (pts[s][0], pts[s][1]);
+        let (bx, by) = (pts[e][0], pts[e][1]);
+        let dx = bx - ax;
+        let dy = by - ay;
+        let len = (dx * dx + dy * dy).sqrt().max(1e-12);
+        let mut max_d = -1.0;
+        let mut idx = 0usize;
+        for i in (s + 1)..e {
+            let (px, py) = (pts[i][0], pts[i][1]);
+            let d = ((px - ax) * dy - (py - ay) * dx).abs() / len;
+            if d > max_d {
+                max_d = d;
+                idx = i;
+            }
+        }
+        if max_d > eps && idx > 0 {
+            keep[idx] = true;
+            stack.push((s, idx));
+            stack.push((idx, e));
+        }
+    }
+    let mut out = Vec::new();
+    for i in 0..n {
+        if keep[i] {
+            out.push(pts[i]);
+        }
+    }
+    out
+}
 
-    // 1) 收集所有水域面外环候选
-    let mut cands: Vec<Cand> = Vec::new();
-    let mut feat_had_polygon: std::collections::HashSet<usize> = std::collections::HashSet::new();
+/// 闭合环 DP 简化：闭合环首尾同点，直接套用开线 DP 会因基线长度为 0 把中间点全删掉。
+/// 在离起点最远顶点处把环切成两段开线分别简化，再拼回闭合环，避免退化。
+/// 与前端 geo.ts 的 simplifyClosedRing 同一套算法。
+fn simplify_closed_ring(ring: &OutlineRing, eps: f64) -> OutlineRing {
+    let n = ring.len();
+    if n <= 5 {
+        return ring.clone();
+    }
+    let pts = &ring[..n - 1]; // 去掉闭合重复末点
+    let m = pts.len();
+    let mut far = 0usize;
+    let mut far_d = -1.0;
+    for i in 1..m {
+        let dx = pts[i][0] - pts[0][0];
+        let dy = pts[i][1] - pts[0][1];
+        let d = dx * dx + dy * dy;
+        if d > far_d {
+            far_d = d;
+            far = i;
+        }
+    }
+    let arc1: Vec<[f64; 2]> = pts[..=far].to_vec();
+    let mut arc2: Vec<[f64; 2]> = pts[far..].to_vec();
+    arc2.push(pts[0]);
+    let s1 = douglas_peucker(&arc1, eps);
+    let s2 = douglas_peucker(&arc2, eps);
+    let mut merged = s1;
+    merged.extend_from_slice(&s2[1..]);
+    if merged.len() >= 4 {
+        merged
+    } else {
+        ring.clone()
+    }
+}
+
+/// 把 HYDRO_A 水域面真正并集（dissolve）成岸线围栏：栅格化（单元中心点落在任一
+/// 水域外环内即为水）+ 单元边界有向边追踪，输出合并后的外环（CCW），消掉内部
+/// 共享边与洞。跨要素合并，结果是若干条「围栏」要素，替换掉原始 HYDRO_A 多边形
+/// 要素；非 HYDRO_A 要素、HYDRO_A 中的非多边形要素，原样保留。
+/// 与前端 geo.ts 的 dissolveOutlineGrid 同一套算法。
+fn dissolve_water_outlines(features: Vec<ChartFeatureInfo>) -> Vec<ChartFeatureInfo> {
+    const TARGET_CELLS: f64 = 4096.0;
+
+    // 1) 收集所有水域面多边形（含全部环：外环 + 洞）+ 总 bbox；记录哪些要素是水域多边形
+    let mut polygons: Vec<Vec<OutlineRing>> = Vec::new();
+    let mut poly_bboxes: Vec<OutlineBbox> = Vec::new();
+    let mut bbox = OutlineBbox::empty();
+    let mut had_polygon: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut template: Option<ChartFeatureInfo> = None;
     for (idx, f) in features.iter().enumerate() {
         if f.source_layer != "HYDRO_A" {
             continue;
@@ -1084,97 +1155,321 @@ fn collapse_water_outlines(features: Vec<ChartFeatureInfo>) -> Vec<ChartFeatureI
             Ok(v) => v,
             Err(_) => continue,
         };
-        for ring in outer_rings_of(&geom) {
-            feat_had_polygon.insert(idx);
-            let bbox = outline_ring_bbox(&ring);
-            let area = outline_ring_area(&ring);
-            cands.push(Cand {
-                feat: idx,
-                ring,
-                bbox,
-                area,
-            });
+        for poly in polygons_all_rings(&geom) {
+            had_polygon.insert(idx);
+            let bb = outline_ring_bbox(&poly[0]); // 外环 bbox
+            bbox.extend(&bb);
+            poly_bboxes.push(bb);
+            polygons.push(poly);
+            if template.is_none() {
+                template = Some(f.clone());
+            }
         }
     }
-
-    if cands.is_empty() {
+    if polygons.is_empty() {
         return features; // 没有水域多边形，原样返回
     }
 
-    // 2) 面积从大到小，保留外环不被任何更大外环包含的那些
-    let mut order: Vec<usize> = (0..cands.len()).collect();
-    order.sort_by(|&a, &b| {
-        cands[b]
-            .area
-            .partial_cmp(&cands[a].area)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let mut kept: Vec<usize> = Vec::new();
-    for &ci in &order {
-        let contained = kept.iter().any(|&ki| {
-            outline_ring_contains(&cands[ki].ring, &cands[ki].bbox, &cands[ci].ring, &cands[ci].bbox)
-        });
-        if !contained {
-            kept.push(ci);
+    let lon_span = bbox.max_lon - bbox.min_lon;
+    let lat_span = bbox.max_lat - bbox.min_lat;
+    if !(lon_span > 0.0) || !(lat_span > 0.0) {
+        return features;
+    }
+    let cell = lon_span.max(lat_span) / TARGET_CELLS;
+    let origin_lon = bbox.min_lon - cell;
+    let origin_lat = bbox.min_lat - cell;
+    let cols = (lon_span / cell).ceil() as usize + 2;
+    let rows = (lat_span / cell).ceil() as usize + 2;
+
+    // 2) 扫描线栅格化：每个多边形按其全部环 even-odd 填进占据网格 occ（自动挖掉洞），
+    //    多边形相互覆盖即得并集占据。采样取每格中心；水平边按半开区间规则跳过。
+    let mut occ = vec![0u8; cols * rows];
+    let mut xs: Vec<f64> = Vec::new();
+    for (pi, poly) in polygons.iter().enumerate() {
+        let pb = &poly_bboxes[pi];
+        let mut j0 = ((pb.min_lat - origin_lat) / cell - 0.5).floor() as isize;
+        let mut j1 = ((pb.max_lat - origin_lat) / cell - 0.5).ceil() as isize;
+        if j0 < 0 {
+            j0 = 0;
+        }
+        if j1 > rows as isize - 1 {
+            j1 = rows as isize - 1;
+        }
+        for j in j0..=j1 {
+            let jj = j as usize;
+            let lat = origin_lat + (jj as f64 + 0.5) * cell;
+            xs.clear();
+            for ring in poly {
+                let n = ring.len();
+                if n < 3 {
+                    continue;
+                }
+                let mut l = n - 1;
+                for k in 0..n {
+                    let ay = ring[l][1];
+                    let by = ring[k][1];
+                    if (ay <= lat && by > lat) || (by <= lat && ay > lat) {
+                        let ax = ring[l][0];
+                        let bx = ring[k][0];
+                        xs.push(ax + (lat - ay) / (by - ay) * (bx - ax));
+                    }
+                    l = k;
+                }
+            }
+            if xs.len() < 2 {
+                continue;
+            }
+            xs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mut k = 0;
+            while k + 1 < xs.len() {
+                let mut i0 = ((xs[k] - origin_lon) / cell - 0.5).ceil() as isize;
+                let mut i1 = ((xs[k + 1] - origin_lon) / cell - 0.5).floor() as isize;
+                if i0 < 0 {
+                    i0 = 0;
+                }
+                if i1 > cols as isize - 1 {
+                    i1 = cols as isize - 1;
+                }
+                if i1 >= i0 {
+                    let base = jj * cols;
+                    let mut i = i0;
+                    while i <= i1 {
+                        occ[base + i as usize] = 1;
+                        i += 1;
+                    }
+                }
+                k += 2;
+            }
+        }
+    }
+    let filled = |i: isize, j: isize| -> bool {
+        i >= 0
+            && j >= 0
+            && (i as usize) < cols
+            && (j as usize) < rows
+            && occ[(j as usize) * cols + (i as usize)] == 1
+    };
+
+    // 3) 边界有向边：水域单元在左 → 外环 CCW、洞 CW。key = i*(rows+2)+j
+    let rstride = rows + 2;
+    let mut next: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+    for j in 0..rows {
+        for i in 0..cols {
+            if occ[j * cols + i] != 1 {
+                continue;
+            }
+            let (ii, jj) = (i as isize, j as isize);
+            if !filled(ii, jj - 1) {
+                next.entry(i * rstride + j).or_default().push((i + 1) * rstride + j);
+            }
+            if !filled(ii + 1, jj) {
+                next.entry((i + 1) * rstride + j).or_default().push((i + 1) * rstride + (j + 1));
+            }
+            if !filled(ii, jj + 1) {
+                next.entry((i + 1) * rstride + (j + 1)).or_default().push(i * rstride + (j + 1));
+            }
+            if !filled(ii - 1, jj) {
+                next.entry(i * rstride + (j + 1)).or_default().push(i * rstride + j);
+            }
         }
     }
 
-    // 3) 按要素归并保留的外环
-    let mut by_feat: std::collections::HashMap<usize, Vec<usize>> =
-        std::collections::HashMap::new();
-    for &ci in &kept {
-        by_feat.entry(cands[ci].feat).or_default().push(ci);
+    // 4) 有向边串成闭环
+    let corner_lon = |i: usize| origin_lon + (i as f64) * cell;
+    let corner_lat = |j: usize| origin_lat + (j as f64) * cell;
+    let guard_max = cols * rows * 4 + 8;
+    let min_area = (4.0 * cell) * (4.0 * cell); // 丢掉小于约 4 格见方的噪点环（小水体 / 小岛）
+    let start_keys: Vec<usize> = next.keys().cloned().collect();
+    struct Outer {
+        ring: OutlineRing,
+        area: f64,
+        bbox: OutlineBbox,
+    }
+    let mut outers: Vec<Outer> = Vec::new();
+    let mut holes: Vec<OutlineRing> = Vec::new();
+    for &start in &start_keys {
+        loop {
+            let has = next.get(&start).map(|v| !v.is_empty()).unwrap_or(false);
+            if !has {
+                break;
+            }
+            let mut ring: OutlineRing = Vec::new();
+            let mut cur = start;
+            let mut guard = guard_max;
+            while guard > 0 {
+                guard -= 1;
+                let nk = match next.get_mut(&cur).and_then(|v| v.pop()) {
+                    Some(k) => k,
+                    None => break,
+                };
+                ring.push([corner_lon(cur / rstride), corner_lat(cur % rstride)]);
+                cur = nk;
+                if cur == start {
+                    ring.push([corner_lon(cur / rstride), corner_lat(cur % rstride)]);
+                    break;
+                }
+            }
+            if ring.len() < 4 {
+                continue;
+            }
+            let first = ring[0];
+            let last = ring[ring.len() - 1];
+            if (first[0] - last[0]).abs() > f64::EPSILON || (first[1] - last[1]).abs() > f64::EPSILON {
+                ring.push(first);
+            }
+            let area = signed_ring_area(&ring);
+            if area.abs() <= min_area {
+                continue; // 太小的水体 / 小岛，丢掉
+            }
+            let simplified = simplify_closed_ring(&ring, cell * 0.7);
+            if simplified.len() < 4 {
+                continue;
+            }
+            if area > 0.0 {
+                let bb = outline_ring_bbox(&simplified);
+                outers.push(Outer {
+                    ring: simplified,
+                    area,
+                    bbox: bb,
+                });
+            } else {
+                holes.push(simplified); // CW 环 = 中间的陆地 / 岛，作为洞挖掉
+            }
+        }
     }
 
-    // 4) 重建要素
-    let mut out: Vec<ChartFeatureInfo> = Vec::new();
-    for (idx, mut f) in features.into_iter().enumerate() {
-        if f.source_layer != "HYDRO_A" || !feat_had_polygon.contains(&idx) {
-            out.push(f); // 非水域面或非多边形几何，原样保留
+    // 把每个洞（岛）分配给包含它的最小外环 → 中间陆地被挖空
+    outers.sort_by(|a, b| a.area.partial_cmp(&b.area).unwrap_or(std::cmp::Ordering::Equal));
+    let mut hole_lists: Vec<Vec<OutlineRing>> = outers.iter().map(|_| Vec::new()).collect();
+    for h in holes {
+        if h.is_empty() {
             continue;
         }
-        let rings = match by_feat.get(&idx) {
-            Some(r) if !r.is_empty() => r,
-            _ => continue, // 整个要素都是内层，丢弃
-        };
-        let ring_vals: Vec<serde_json::Value> = rings
-            .iter()
-            .map(|&ci| {
-                serde_json::Value::Array(
-                    cands[ci]
-                        .ring
-                        .iter()
-                        .map(|c| serde_json::json!([c[0], c[1]]))
-                        .collect(),
-                )
-            })
-            .collect();
-        let (geom_val, gtype) = if ring_vals.len() == 1 {
-            (
-                serde_json::json!({ "type": "Polygon", "coordinates": [ring_vals[0]] }),
-                "Polygon",
-            )
-        } else {
-            let polys: Vec<serde_json::Value> =
-                ring_vals.into_iter().map(|r| serde_json::json!([r])).collect();
-            (
-                serde_json::json!({ "type": "MultiPolygon", "coordinates": polys }),
-                "MultiPolygon",
-            )
-        };
-        let mut bb = OutlineBbox::empty();
-        for &ci in rings {
-            bb.extend(&cands[ci].bbox);
+        let px = h[0][0];
+        let py = h[0][1];
+        for (oi, o) in outers.iter().enumerate() {
+            let b = &o.bbox;
+            if px < b.min_lon || px > b.max_lon || py < b.min_lat || py > b.max_lat {
+                continue;
+            }
+            if outline_point_in_ring(px, py, &o.ring) {
+                hole_lists[oi].push(h);
+                break;
+            }
         }
-        f.geometry_json = serde_json::to_string(&geom_val).unwrap_or(f.geometry_json);
-        f.geometry_type = Some(gtype.to_string());
-        f.min_lon = Some(bb.min_lon);
-        f.min_lat = Some(bb.min_lat);
-        f.max_lon = Some(bb.max_lon);
-        f.max_lat = Some(bb.max_lat);
-        out.push(f);
+    }
+
+    // 5) 重建要素：保留所有非水域多边形要素，追加合并后的带洞围栏要素（每个水域一个）
+    let mut out: Vec<ChartFeatureInfo> = Vec::new();
+    for (idx, f) in features.into_iter().enumerate() {
+        if !had_polygon.contains(&idx) {
+            out.push(f);
+        }
+    }
+    if let Some(tmpl) = template {
+        for (k, o) in outers.iter().enumerate() {
+            let mut rings_json: Vec<serde_json::Value> = Vec::new();
+            rings_json.push(serde_json::Value::Array(
+                o.ring.iter().map(|c| serde_json::json!([c[0], c[1]])).collect(),
+            ));
+            for hole in &hole_lists[k] {
+                rings_json.push(serde_json::Value::Array(
+                    hole.iter().map(|c| serde_json::json!([c[0], c[1]])).collect(),
+                ));
+            }
+            let geom = serde_json::json!({ "type": "Polygon", "coordinates": rings_json });
+            let bb = &o.bbox;
+            let mut f = tmpl.clone();
+            f.id = format!("hydro-outline-{}", k);
+            f.source_feature_id = Some(format!("hydro-outline-{}", k));
+            f.geometry_type = Some("Polygon".to_string());
+            f.geometry_json = serde_json::to_string(&geom).unwrap_or_default();
+            f.raw_json = f.geometry_json.clone();
+            f.min_lon = Some(bb.min_lon);
+            f.min_lat = Some(bb.min_lat);
+            f.max_lon = Some(bb.max_lon);
+            f.max_lat = Some(bb.max_lat);
+            out.push(f);
+        }
     }
     out
+}
+
+/// 递归把 GeoJSON coordinates 里每个 [lon,lat] 做坐标转换（就地修改）
+fn transform_coords_in_place(v: &mut serde_json::Value, f: &dyn Fn(f64, f64) -> (f64, f64)) {
+    if let Some(arr) = v.as_array_mut() {
+        if arr.len() >= 2 && arr[0].is_number() && arr[1].is_number() {
+            if let (Some(lon), Some(lat)) = (arr[0].as_f64(), arr[1].as_f64()) {
+                let (nl, na) = f(lon, lat);
+                arr[0] = serde_json::json!(nl);
+                arr[1] = serde_json::json!(na);
+            }
+        } else {
+            for item in arr.iter_mut() {
+                transform_coords_in_place(item, f);
+            }
+        }
+    }
+}
+
+/// 递归从 GeoJSON coordinates 收集 bbox
+fn collect_bbox_from_coords(v: &serde_json::Value, bb: &mut OutlineBbox) {
+    if let Some(arr) = v.as_array() {
+        if arr.len() >= 2 && arr[0].is_number() && arr[1].is_number() {
+            if let (Some(lon), Some(lat)) = (arr[0].as_f64(), arr[1].as_f64()) {
+                if lon < bb.min_lon {
+                    bb.min_lon = lon;
+                }
+                if lon > bb.max_lon {
+                    bb.max_lon = lon;
+                }
+                if lat < bb.min_lat {
+                    bb.min_lat = lat;
+                }
+                if lat > bb.max_lat {
+                    bb.max_lat = lat;
+                }
+            }
+        } else {
+            for item in arr {
+                collect_bbox_from_coords(item, bb);
+            }
+        }
+    }
+}
+
+/// 把航道要素几何从 WGS-84 转到目标坐标系（gcj02 / bd09），并更新 bbox。
+/// crs 为 wgs84 / 空时不动。
+fn apply_crs_to_chart_features(features: &mut [ChartFeatureInfo], crs: &str) {
+    if crs.is_empty() || crs == "wgs84" {
+        return;
+    }
+    let conv = |lon: f64, lat: f64| crate::coords::wgs84_to_crs(crs, lon, lat);
+    for feat in features.iter_mut() {
+        if let Ok(mut geom) = serde_json::from_str::<serde_json::Value>(&feat.geometry_json) {
+            if let Some(coords) = geom.get_mut("coordinates") {
+                transform_coords_in_place(coords, &conv);
+                let mut bb = OutlineBbox::empty();
+                collect_bbox_from_coords(coords, &mut bb);
+                if bb.min_lon.is_finite() && bb.max_lon.is_finite() {
+                    feat.min_lon = Some(bb.min_lon);
+                    feat.min_lat = Some(bb.min_lat);
+                    feat.max_lon = Some(bb.max_lon);
+                    feat.max_lat = Some(bb.max_lat);
+                }
+                feat.geometry_json =
+                    serde_json::to_string(&geom).unwrap_or_else(|_| feat.geometry_json.clone());
+            }
+        }
+        // raw_json 仅当本身是带 coordinates 的几何时才转换（如水域并集围栏要素）
+        if let Ok(mut raw) = serde_json::from_str::<serde_json::Value>(&feat.raw_json) {
+            if let Some(coords) = raw.get_mut("coordinates") {
+                transform_coords_in_place(coords, &conv);
+                feat.raw_json =
+                    serde_json::to_string(&raw).unwrap_or_else(|_| feat.raw_json.clone());
+            }
+        }
+    }
 }
 
 /// 导出航道专题要素（JSON、GeoJSON、CSV 或 SQL）
@@ -1188,6 +1483,7 @@ pub fn chart_export_features(
     north: Option<f64>,
     source_layers: Option<Vec<String>>,
     outline_only: Option<bool>,
+    output_crs: Option<String>,
 ) -> Result<String, String> {
     let db = ChartDatabase::new(&get_db_path())?;
 
@@ -1210,12 +1506,15 @@ pub fn chart_export_features(
     }
 
     if outline_only.unwrap_or(false) {
-        features = collapse_water_outlines(features);
+        features = dissolve_water_outlines(features);
     }
 
     if features.is_empty() {
         return Err("没有可导出的航道要素数据".to_string());
     }
+
+    // 数据为 WGS-84；按需转到导出坐标系（gcj02 / bd09）
+    apply_crs_to_chart_features(&mut features, output_crs.as_deref().unwrap_or("wgs84"));
 
     let content_bytes: Vec<u8> = match format.as_str() {
         "json" => {

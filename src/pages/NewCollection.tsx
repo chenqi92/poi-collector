@@ -12,6 +12,7 @@ import { TileForm } from './new-collection/TileForm'
 import { GcIcon, StatusBadge, TypeBadge, PlatformBadge } from '@/components/shell'
 import { useTasksContext } from '@/lib/tasksContext'
 import type { ShellTask, TaskStatus, TaskType } from '@/lib/shellData'
+import { formatBackendTime } from '@/lib/datetime'
 
 type SubTab = 'create' | 'active' | 'history'
 type CreateType = 'poi' | 'aton' | 'feature' | 'tile'
@@ -85,7 +86,7 @@ function BigTaskRow({ t, last, onPause, onResume, onStop }: {
                     <StatusBadge status={t.status} />
                 </div>
                 <div className="big-task-meta mono">
-                    {t.started && <><span>开始 {t.started}</span><span className="sep">·</span></>}
+                    {t.started && <><span>开始 {formatBackendTime(t.started, { seconds: true })}</span><span className="sep">·</span></>}
                     {t.type === 'poi' && t.collected != null ? (
                         <span>已采集 {t.collected.toLocaleString()} 条 · {(t.done || 0)}/{(t.total || 0)} 类</span>
                     ) : (
@@ -596,7 +597,7 @@ function HistoryView({ refreshTick }: { refreshTick: number }) {
                                         )}
                                     </td>
                                     <td className="mono">{h.platform ?? '—'}</td>
-                                    <td className="mono">{h.completed_at ?? h.created_at ?? '—'}</td>
+                                    <td className="mono">{formatBackendTime(h.completed_at ?? h.created_at, { seconds: true })}</td>
                                     <td>
                                         <div className="row-actions" style={{ opacity: 1, justifyContent: 'flex-end' }}>
                                             {showExport && (

@@ -433,7 +433,9 @@
   border:1px solid var(--border);
   border-radius:10px;
   box-shadow: var(--shadow-pop);
-  z-index:50;
+  /* 浮层档：高于任何 Leaflet 地图内容（pane/控件 <=1000），低于对话框/命令面板
+     （9000+），这样模态弹窗仍能盖住它。 */
+  z-index: 4000;
   overflow:hidden;
 }
 .tray-pop-head {

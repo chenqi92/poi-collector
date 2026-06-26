@@ -46,6 +46,44 @@ pub fn amap_to_wgs84(gcj_lon: f64, gcj_lat: f64) -> (f64, f64) {
     gcj02_to_wgs84(gcj_lon, gcj_lat)
 }
 
+/// WGS84 坐标转 GCJ02（gcj02_to_wgs84 的反向，delta 加法）
+pub fn wgs84_to_gcj02(lon: f64, lat: f64) -> (f64, f64) {
+    if out_of_china(lon, lat) {
+        return (lon, lat);
+    }
+    let dlat = transform_lat(lon - 105.0, lat - 35.0);
+    let dlon = transform_lon(lon - 105.0, lat - 35.0);
+    let radlat = lat / 180.0 * PI;
+    let magic = radlat.sin();
+    let magic = 1.0 - EE * magic * magic;
+    let sqrtmagic = magic.sqrt();
+    let dlat = (dlat * 180.0) / ((A * (1.0 - EE)) / (magic * sqrtmagic) * PI);
+    let dlon = (dlon * 180.0) / (A / sqrtmagic * radlat.cos() * PI);
+    (lon + dlon, lat + dlat)
+}
+
+/// GCJ02 坐标转 BD09
+pub fn gcj02_to_bd09(gcj_lon: f64, gcj_lat: f64) -> (f64, f64) {
+    let z = (gcj_lon * gcj_lon + gcj_lat * gcj_lat).sqrt() + 0.00002 * (gcj_lat * X_PI).sin();
+    let theta = gcj_lat.atan2(gcj_lon) + 0.000003 * (gcj_lon * X_PI).cos();
+    (z * theta.cos() + 0.0065, z * theta.sin() + 0.006)
+}
+
+/// WGS84 坐标转 BD09
+pub fn wgs84_to_bd09(lon: f64, lat: f64) -> (f64, f64) {
+    let (g_lon, g_lat) = wgs84_to_gcj02(lon, lat);
+    gcj02_to_bd09(g_lon, g_lat)
+}
+
+/// 把 WGS84 坐标转到目标坐标系（"wgs84" | "gcj02" | "bd09"），未知按 wgs84 原样返回
+pub fn wgs84_to_crs(crs: &str, lon: f64, lat: f64) -> (f64, f64) {
+    match crs {
+        "gcj02" => wgs84_to_gcj02(lon, lat),
+        "bd09" => wgs84_to_bd09(lon, lat),
+        _ => (lon, lat),
+    }
+}
+
 fn out_of_china(lon: f64, lat: f64) -> bool {
     !(72.004..=137.8347).contains(&lon) || !(0.8293..=55.8271).contains(&lat)
 }

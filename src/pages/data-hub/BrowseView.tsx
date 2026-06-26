@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { CachedOsmTileLayer } from '@/components/CachedOsmTileLayer'
 import { GcIcon, PlatformBadge } from '@/components/shell'
 import type { PlatformKey } from '@/lib/shellData'
+import type { BaseCrs } from '@/lib/ais/types'
 import {
     useSearchPois,
     useAllBuoys,
@@ -32,6 +33,8 @@ const PAGE_SIZE = 50
 
 // 水域面「仅边框 / 全部」偏好的持久化键
 const HYDRO_OUTLINE_KEY = 'dh-hydro-outline-only'
+// 航道图视图底图（amap=高德 GCJ-02 / osm=WGS-84）偏好持久化键
+const CHART_BASEMAP_KEY = 'dh-chart-basemap'
 
 function BoundsTracker({ onChange }: { onChange: (b: Bounds) => void }) {
     const map = useMap()
@@ -304,6 +307,14 @@ export function BrowseView() {
     useEffect(() => {
         localStorage.setItem(HYDRO_OUTLINE_KEY, hydroOutlineOnly ? '1' : '0')
     }, [hydroOutlineOnly])
+    // 航道图视图底图：高德(GCJ-02) / OSM(WGS-84)。WGS-84 矢量/栅格在高德底图上渲染时纠偏对齐。
+    const [chartBasemap, setChartBasemap] = useState<'amap' | 'osm'>(
+        () => (localStorage.getItem(CHART_BASEMAP_KEY) === 'osm' ? 'osm' : 'amap'),
+    )
+    useEffect(() => {
+        localStorage.setItem(CHART_BASEMAP_KEY, chartBasemap)
+    }, [chartBasemap])
+    const chartBaseCrs: BaseCrs = chartBasemap === 'amap' ? 'gcj02' : 'wgs84'
     useEffect(() => {
         if (dataType !== 'chart' || chartLoaded) return
         fetchCjhyTasks().then(list => {
@@ -648,6 +659,26 @@ export function BrowseView() {
                                 </div>
                             </>
                         )}
+                        <span style={{ width: 1, height: 18, background: 'var(--hairline)', margin: '0 4px' }} />
+                        <div
+                            className="seg"
+                            title="航道图底图：高德为 GCJ-02，WGS-84 数据会自动纠偏对齐；OSM 为 WGS-84，数据原生对齐"
+                        >
+                            <button
+                                type="button"
+                                className={chartBasemap === 'amap' ? 'active' : ''}
+                                onClick={() => setChartBasemap('amap')}
+                            >
+                                高德
+                            </button>
+                            <button
+                                type="button"
+                                className={chartBasemap === 'osm' ? 'active' : ''}
+                                onClick={() => setChartBasemap('osm')}
+                            >
+                                OSM
+                            </button>
+                        </div>
                     </div>
                 )}
 
@@ -719,7 +750,7 @@ export function BrowseView() {
                         attributionControl
                         style={{ position: 'absolute', inset: 0 }}
                     >
-                        {dataType === 'chart' ? (
+                        {dataType === 'chart' && chartBasemap === 'amap' ? (
                             <TileLayer
                                 url={AMAP_STREET_URL}
                                 subdomains={AMAP_SUBDOMAINS}
@@ -758,6 +789,7 @@ export function BrowseView() {
                                                 layer={layer}
                                                 tileMode={selectedChartTask.tile_mode}
                                                 visible={visibleChartLayers.has(layer)}
+                                                baseCrs={chartBaseCrs}
                                             />
                                         ))}
                                         <FitChartBounds bounds={chartBounds} />
@@ -771,8 +803,9 @@ export function BrowseView() {
                                     fitBounds={false}
                                     controlOffsetTop={visibleChartLayers.has('electronic_fence') ? 38 : 0}
                                     queryBounds={chartQueryBounds}
-                                    viewportLoad
+                                    viewportLoad={!hydroOutlineOnly}
                                     outlineOnly={hydroOutlineOnly}
+                                    baseCrs={chartBaseCrs}
                                 />
                                 <ChartFeatureOverlay
                                     visible={Boolean(selectedChartTask && visibleChartLayers.has('electronic_fence'))}
@@ -781,6 +814,7 @@ export function BrowseView() {
                                     kind="fence"
                                     fitBounds={false}
                                     queryBounds={chartQueryBounds}
+                                    baseCrs={chartBaseCrs}
                                 />
                                 <ChartZoomIndicator />
                             </>
