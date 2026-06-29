@@ -10,7 +10,7 @@ import { useMap } from 'react-leaflet'
 import L from 'leaflet'
 import type { AisPoint, BaseCrs } from '@/lib/ais/types'
 import type { WaterPolygon } from '@/lib/ais/geo'
-import { type Segment, douglasPeucker, segmentsBounds } from '@/lib/ais/trajectory'
+import { type Segment, douglasPeucker, segmentsBounds, tripColor } from '@/lib/ais/trajectory'
 import { toBase } from '@/lib/ais/coords'
 
 interface Props {
@@ -21,6 +21,10 @@ interface Props {
     baseCrs: BaseCrs
     showRawAnchored: boolean
     simplifyToleranceM: number
+    /** 被清洗掉的跳点/重复点（开启「查看」时传入，灰色叉号展示，不参与连线） */
+    droppedPoints?: AisPoint[]
+    /** 被隐藏的航次序号集合（勾选/单看用） */
+    hiddenTrips?: Set<number>
     /** 变化时自动定位到航迹范围（如切换船只） */
     fitKey: string
 }
@@ -44,6 +48,8 @@ export function AisRouteLayer({
     baseCrs,
     showRawAnchored,
     simplifyToleranceM,
+    droppedPoints,
+    hiddenTrips,
     fitKey,
 }: Props) {
     const map = useMap()
@@ -55,6 +61,8 @@ export function AisRouteLayer({
         const routePane = map.getPane('aisRoutePane') ?? map.createPane('aisRoutePane')
         routePane.style.zIndex = '460'
         const waterRenderer = L.canvas({ padding: 0.5, pane: 'aisWaterPane' })
+        // 清洗点可能成百上千，用 canvas 渲染避免卡顿
+        const droppedRenderer = L.canvas({ padding: 0.5, pane: 'aisRoutePane' })
 
         const group = L.layerGroup().addTo(map)
 
@@ -85,6 +93,9 @@ export function AisRouteLayer({
         for (const seg of segments) {
             // 新航次：断开与上一航次的连线
             if (seg.newTrip) prevEnd = null
+            // 隐藏的航次：整段跳过（prevEnd 不前进，下一可见航次会以 newTrip 重置）
+            if (hiddenTrips && seg.tripIndex != null && hiddenTrips.has(seg.tripIndex)) continue
+            const color = tripColor(seg.tripIndex ?? 0)
             if (seg.kind === 'sailing') {
                 const pts =
                     simplifyToleranceM > 0 ? douglasPeucker(seg.points, simplifyToleranceM) : seg.points
@@ -93,16 +104,16 @@ export function AisRouteLayer({
                 if (prevEnd && latlngs.length) {
                     L.polyline([prevEnd, latlngs[0]], {
                         pane: 'aisRoutePane',
-                        color: '#38bdf8',
+                        color,
                         weight: 1.5,
-                        opacity: 0.7,
+                        opacity: 0.55,
                         dashArray: '4 4',
                     }).addTo(group)
                 }
                 if (latlngs.length >= 2) {
                     L.polyline(latlngs, {
                         pane: 'aisRoutePane',
-                        color: '#2563eb',
+                        color,
                         weight: 2.6,
                         opacity: 0.95,
                         lineCap: 'round',
@@ -112,9 +123,9 @@ export function AisRouteLayer({
                     L.circleMarker(latlngs[0], {
                         pane: 'aisRoutePane',
                         radius: 4,
-                        color: '#2563eb',
+                        color,
                         weight: 1.5,
-                        fillColor: '#2563eb',
+                        fillColor: color,
                         fillOpacity: 1,
                         className: 'ais-pulse-point',
                     }).addTo(group)
@@ -126,9 +137,9 @@ export function AisRouteLayer({
                 if (prevEnd) {
                     L.polyline([prevEnd, c], {
                         pane: 'aisRoutePane',
-                        color: '#38bdf8',
+                        color,
                         weight: 1.5,
-                        opacity: 0.7,
+                        opacity: 0.55,
                         dashArray: '4 4',
                     }).addTo(group)
                 }
@@ -188,6 +199,21 @@ export function AisRouteLayer({
             ringMarker(prevEnd, '#dc2626')
         }
 
+        // 清洗掉的跳点/重复点（灰色，证明清洗确实生效；不连线）
+        if (droppedPoints && droppedPoints.length) {
+            for (const p of droppedPoints) {
+                L.circleMarker(disp(p.lon, p.lat), {
+                    renderer: droppedRenderer,
+                    radius: 2.6,
+                    color: '#64748b',
+                    weight: 1,
+                    fillColor: '#cbd5e1',
+                    fillOpacity: 0.5,
+                    interactive: false,
+                }).addTo(group)
+            }
+        }
+
         // 3) 异常点（水域外）
         for (const p of anomalies) {
             L.circleMarker(disp(p.lon, p.lat), {
@@ -203,9 +229,13 @@ export function AisRouteLayer({
                 .addTo(group)
         }
 
-        // 自动定位（仅当 fitKey 变化时）
+        // 自动定位（仅当 fitKey 变化时）：按可见航次取范围（单看某航次时直接定位过去）
         if (fitKey !== lastFitKey.current) {
-            const wb = segmentsBounds(segments)
+            const visible =
+                hiddenTrips && hiddenTrips.size
+                    ? segments.filter((s) => s.tripIndex == null || !hiddenTrips.has(s.tripIndex))
+                    : segments
+            const wb = segmentsBounds(visible.length ? visible : segments)
             if (wb) {
                 const [w, s, e, n] = wb
                 const sw = toBase(baseCrs, w, s)
@@ -224,6 +254,7 @@ export function AisRouteLayer({
         return () => {
             group.remove()
             waterRenderer.remove()
+            droppedRenderer.remove()
         }
     }, [
         map,
@@ -234,6 +265,8 @@ export function AisRouteLayer({
         baseCrs,
         showRawAnchored,
         simplifyToleranceM,
+        droppedPoints,
+        hiddenTrips,
         fitKey,
     ])
 

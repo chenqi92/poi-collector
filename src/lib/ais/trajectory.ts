@@ -19,6 +19,8 @@ export interface SailingSegment {
     points: AisPoint[]
     /** 为某航次的首段时为真，渲染时不与上一航次连线 */
     newTrip?: boolean
+    /** 所属航次序号（与 trips 下标一致），用于按航次着色/显隐 */
+    tripIndex?: number
 }
 
 export interface AnchorSegment {
@@ -29,9 +31,22 @@ export interface AnchorSegment {
     endTs: number
     points: AisPoint[]
     newTrip?: boolean
+    tripIndex?: number
 }
 
 export type Segment = SailingSegment | AnchorSegment
+
+/** 航次配色（与航次列表的色块一致）。 */
+export const TRIP_PALETTE = [
+    '#2563eb', '#dc2626', '#16a34a', '#d97706', '#9333ea',
+    '#0891b2', '#db2777', '#65a30d', '#e11d48', '#7c3aed',
+    '#0d9488', '#c2410c', '#4f46e5', '#ca8a04', '#be123c',
+]
+
+export function tripColor(i: number): string {
+    const n = TRIP_PALETTE.length
+    return TRIP_PALETTE[(((i ?? 0) % n) + n) % n]
+}
 
 const KN_PER_MS = 1 / 0.514444 // m/s -> 节
 
@@ -65,6 +80,8 @@ export interface CleanResult {
     trips: AisPoint[][]
     /** 去掉的重复/孤立跳点/碎片点数 */
     dropped: number
+    /** 被清洗掉的点（坐标有效、可在地图上展示的那些：重复时间戳点 + 孤立跳点碎片） */
+    droppedPoints: AisPoint[]
     /** 数据无可用时间戳（所有点时间相同/缺失）：未做时间清洗，按报文顺序展示 */
     noTime: boolean
 }
@@ -113,11 +130,12 @@ export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN):
             }
         }
         trips.push(cur)
-        return { points: finite, trips, dropped: points.length - finite.length, noTime: true }
+        return { points: finite, trips, dropped: points.length - finite.length, droppedPoints: [], noTime: true }
     }
 
     const sorted = finite.sort((a, b) => a.ts - b.ts)
     let dropped = points.length - sorted.length
+    const droppedPoints: AisPoint[] = []
 
     // 1) 去重复时间戳
     const dedup: AisPoint[] = []
@@ -125,6 +143,7 @@ export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN):
         const prev = dedup[dedup.length - 1]
         if (prev && p.ts - prev.ts <= 0) {
             dropped++
+            droppedPoints.push(p)
             continue
         }
         dedup.push(p)
@@ -161,15 +180,18 @@ export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN):
     }
     for (const t of open) finished.push(t.points)
 
-    // 3) 丢碎片，按起始时间排序
+    // 3) 丢碎片（只有 1 个点的孤立航迹 = 接不上任何航迹的跳点），按起始时间排序
     const trips: AisPoint[][] = []
     for (const t of finished) {
         if (t.length >= 2) trips.push(t)
-        else dropped += t.length
+        else {
+            dropped += t.length
+            for (const p of t) droppedPoints.push(p)
+        }
     }
     trips.sort((a, b) => a[0].ts - b[0].ts)
 
-    return { points: trips.flat(), trips, dropped, noTime: false }
+    return { points: trips.flat(), trips, dropped, droppedPoints, noTime: false }
 }
 
 /** 逐点判定是否静止：导航状态优先，其次 SOG，再次相邻点推算速度兜底。 */
@@ -281,9 +303,10 @@ export function segmentTrips(
     const out: Segment[] = []
     trips.forEach((trip, ti) => {
         const segs = segmentTrack(trip, params, anchoredValues)
-        if (ti > 0 && segs.length > 0) {
-            segs[0] = { ...segs[0], newTrip: true }
-        }
+        segs.forEach((s, si) => {
+            s.tripIndex = ti
+            if (ti > 0 && si === 0) s.newTrip = true
+        })
         for (const s of segs) out.push(s)
     })
     return out

@@ -17,7 +17,7 @@ import type { AisPoint, BaseCrs, DataMode, EsConnection, FieldMapping, IndexInfo
 import { emptyMapping } from '@/lib/ais/types'
 import { autoDetect, mappingSummary } from '@/lib/ais/autodetect'
 import { IndexPickerDialog, indicesSummary } from './IndexPickerDialog'
-import { cleanTrack, DEFAULT_TRAJ, type Segment, segmentTrips } from '@/lib/ais/trajectory'
+import { cleanTrack, DEFAULT_TRAJ, haversineM, type Segment, segmentTrips, tripColor } from '@/lib/ais/trajectory'
 import { geometryToPolygons, dissolveOutline, pointInWater, type WaterPolygon } from '@/lib/ais/geo'
 import { normalizeToWgs84 } from '@/lib/ais/coords'
 
@@ -83,6 +83,25 @@ function toMs(local: string): number | undefined {
     return Number.isFinite(t) ? t : undefined
 }
 
+/** 稳定的空数组引用，避免不必要的图层重渲染 */
+const EMPTY_POINTS: AisPoint[] = []
+
+function fmtDist(m: number): string {
+    return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`
+}
+
+/** 同一天只显示「日 时:分~时:分」，跨天显示完整起讫，给航次行用 */
+function fmtSpan(a?: number, b?: number): string {
+    if (!a) return '-'
+    const da = new Date(a)
+    const hm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    const md = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`
+    if (!b || a === b) return `${md(da)} ${hm(da)}`
+    const db = new Date(b)
+    if (da.toDateString() === db.toDateString()) return `${md(da)} ${hm(da)}~${hm(db)}`
+    return `${md(da)} ${hm(da)} ~ ${md(db)} ${hm(db)}`
+}
+
 /** 索引「家族」：去掉日期后缀（aismessage_2023_04_06 → aismessage）。不同家族 schema 可能不同。 */
 function familyOf(name: string): string {
     return name.replace(/[._-]?\d{4}.*$/, '') || name
@@ -125,6 +144,9 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [routeTruncated, setRouteTruncated] = useState(false)
     // fields 单船航迹最多加载点数（默认很大，尽量加载完整；脏数据/超大可调小）
     const [routeMax, setRouteMax] = useState(500000)
+    // 航次显隐：被隐藏的航次序号集合 + 列表展开
+    const [hiddenTrips, setHiddenTrips] = useState<Set<number>>(new Set())
+    const [tripsOpen, setTripsOpen] = useState(true)
 
     // raw 模式：拉取并解码一个时间窗
     const [pulled, setPulled] = useState<AisPoint[]>([])
@@ -150,6 +172,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     // 底图 / 渲染
     const [baseCrs, setBaseCrs] = useState<BaseCrs>('wgs84')
     const [showRawAnchored, setShowRawAnchored] = useState(false)
+    // 是否在地图上展示被清洗掉的跳点/重复点（默认隐藏，可点击切换以验证清洗确实生效）
+    const [showDropped, setShowDropped] = useState(false)
     const [traj, setTraj] = useState<TrajParams>(DEFAULT_TRAJ)
 
     // 连接切换时重置
@@ -552,6 +576,43 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         return spanM < 400 ? { spanM, count: pts.length } : null
     }, [wgsPoints])
 
+    // 各航次概要（序号与 segTrips 下标一致，与地图分段着色对应），按航程降序展示，空航次跳过
+    const tripSummaries = useMemo(() => {
+        const out = segTrips.map((trip, i) => {
+            let distM = 0
+            for (let k = 1; k < trip.length; k++) {
+                distM += haversineM(trip[k - 1].lon, trip[k - 1].lat, trip[k].lon, trip[k].lat)
+            }
+            return {
+                i,
+                count: trip.length,
+                startTs: trip.length ? trip[0].ts : 0,
+                endTs: trip.length ? trip[trip.length - 1].ts : 0,
+                distM,
+            }
+        })
+        return out.filter((t) => t.count > 0).sort((a, b) => b.distM - a.distM)
+    }, [segTrips])
+
+    // 切换船只时重置航次显隐
+    useEffect(() => {
+        setHiddenTrips(new Set())
+    }, [selectedMmsi, connId])
+
+    const visibleTripCount = tripSummaries.filter((t) => !hiddenTrips.has(t.i)).length
+    const toggleTrip = (i: number) =>
+        setHiddenTrips((prev) => {
+            const next = new Set(prev)
+            if (next.has(i)) next.delete(i)
+            else next.add(i)
+            return next
+        })
+    const soloTrip = (i: number) =>
+        setHiddenTrips(new Set(tripSummaries.map((t) => t.i).filter((x) => x !== i)))
+    const showAllTrips = () => setHiddenTrips(new Set())
+    const invertTrips = () =>
+        setHiddenTrips(new Set(tripSummaries.filter((t) => !hiddenTrips.has(t.i)).map((t) => t.i)))
+
     const filteredShips = useMemo(() => {
         const q = shipSearch.trim().toLowerCase()
         if (!q) return ships
@@ -781,6 +842,60 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     )}
                 </div>
 
+                {/* 航次列表：按航次着色 + 勾选/单看显隐 */}
+                {selectedMmsi && tripSummaries.length > 1 && (
+                    <div className="ais-field">
+                        <div className="ais-row-between">
+                            <button
+                                type="button"
+                                className="ais-trips-head"
+                                onClick={() => setTripsOpen((v) => !v)}
+                                title="展开/收起航次列表"
+                            >
+                                <span className="ais-tri">{tripsOpen ? '▾' : '▸'}</span>
+                                航次（{visibleTripCount}/{tripSummaries.length}）
+                            </button>
+                            <div className="ais-trips-actions">
+                                <button type="button" className="ais-mini-btn" onClick={showAllTrips}>全选</button>
+                                <button type="button" className="ais-mini-btn" onClick={invertTrips}>反选</button>
+                            </div>
+                        </div>
+                        {tripsOpen && (
+                            <div className="ais-trip-list">
+                                {tripSummaries.map((t, rank) => {
+                                    const hidden = hiddenTrips.has(t.i)
+                                    return (
+                                        <div key={t.i} className={`ais-trip-row${hidden ? ' off' : ''}`}>
+                                            <label className="ais-trip-pick" title="显示/隐藏该航次">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!hidden}
+                                                    onChange={() => toggleTrip(t.i)}
+                                                />
+                                                <span className="ais-trip-dot" style={{ background: tripColor(t.i) }} />
+                                            </label>
+                                            <div className="ais-trip-info">
+                                                <div className="ais-trip-title">
+                                                    航次 {rank + 1} · {t.count} 点 · {fmtDist(t.distM)}
+                                                </div>
+                                                <div className="ais-trip-time">{fmtSpan(t.startTs, t.endTs)}</div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="ais-mini-btn"
+                                                onClick={() => soloTrip(t.i)}
+                                                title="只看该航次（隐藏其它并定位过去）"
+                                            >
+                                                单看
+                                            </button>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div className="ais-field">
                     <label className="ais-label">水域图过滤</label>
                     <select
@@ -936,7 +1051,9 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         baseCrs={baseCrs}
                         showRawAnchored={showRawAnchored}
                         simplifyToleranceM={traj.simplifyToleranceM}
-                        fitKey={`${connId}|${selectedMmsi}|${baseCrs}`}
+                        droppedPoints={showDropped ? cleaned.droppedPoints : EMPTY_POINTS}
+                        hiddenTrips={hiddenTrips}
+                        fitKey={`${connId}|${selectedMmsi}|${baseCrs}|${[...hiddenTrips].sort((a, b) => a - b).join(',')}`}
                     />
                 </MapContainer>
 
@@ -969,7 +1086,14 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         <span className="ais-chip warn">无时间字段 · 按报文顺序展示（停泊/航次分析不可用）</span>
                     )}
                     {selectedMmsi && cleaned.dropped > 0 && (
-                        <span className="ais-chip">清洗掉 {cleaned.dropped} 个跳点/重复</span>
+                        <button
+                            type="button"
+                            className={`ais-chip ais-chip-btn${showDropped ? ' on' : ''}`}
+                            onClick={() => setShowDropped((v) => !v)}
+                            title={showDropped ? '点击隐藏被清洗掉的点' : '点击在地图上显示被清洗掉的跳点/重复点'}
+                        >
+                            清洗掉 {cleaned.dropped} 个跳点/重复 · {showDropped ? '隐藏' : '查看'}
+                        </button>
                     )}
                     {selectedMmsi && cleaned.trips.length > 1 && (
                         <span className="ais-chip">{cleaned.trips.length} 个航次</span>
@@ -991,6 +1115,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     <div className="ais-legend-row"><i className="lg-line conn" /> 停泊跨段</div>
                     <div className="ais-legend-row"><i className="lg-anchor"><GcIcon name="anchor" size={11} /></i> 停泊点 + 摆动圈</div>
                     {filterOn && <div className="ais-legend-row"><i className="lg-dot anomaly" /> 水域外异常点</div>}
+                    {showDropped && <div className="ais-legend-row"><i className="lg-dot dropped" /> 清洗掉的跳点</div>}
                     {waterLayer !== 'none' && <div className="ais-legend-row"><i className={`lg-water ${waterKind}`} /> 水域面</div>}
                 </div>
             </div>
