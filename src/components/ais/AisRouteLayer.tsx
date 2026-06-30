@@ -23,11 +23,87 @@ interface Props {
     simplifyToleranceM: number
     /** 被清洗掉的跳点/重复点（开启「查看」时传入，灰色叉号展示，不参与连线） */
     droppedPoints?: AisPoint[]
+    /** 显示全部轨迹点（canvas 小点），点击地图弹出最近点的经纬度/航速/航向等 */
+    showPoints?: boolean
     /** 被隐藏的航次序号集合（勾选/单看用） */
     hiddenTrips?: Set<number>
     /** 变化时自动定位到航迹范围（如切换船只） */
     fitKey: string
 }
+
+function pointPopupHtml(p: AisPoint): string {
+    const t = p.ts ? new Date(p.ts).toLocaleString('zh-CN', { hour12: false }) : '-'
+    const rows: Array<[string, string] | null> = [
+        ['MMSI', p.mmsi],
+        p.name ? ['船名', p.name] : null,
+        ['时间', t],
+        ['经度', p.lon.toFixed(6)],
+        ['纬度', p.lat.toFixed(6)],
+        p.sog != null ? ['航速 SOG', `${p.sog} kn`] : null,
+        p.cog != null ? ['航向 COG', `${p.cog}°`] : null,
+        p.heading != null ? ['船首向', `${p.heading}°`] : null,
+        p.navStatus != null && String(p.navStatus) !== '' ? ['导航状态', String(p.navStatus)] : null,
+    ]
+    const body = (rows.filter(Boolean) as Array<[string, string]>)
+        .map(([k, v]) => `<div class="ais-pt-row"><span>${k}</span><b>${v}</b></div>`)
+        .join('')
+    return `<div class="ais-pt-popup">${body}</div>`
+}
+
+interface DispPoint {
+    lat: number
+    lng: number
+    color: string
+    p: AisPoint
+}
+
+/**
+ * 自定义点云图层：所有轨迹点画在「一张」canvas 上，只在 moveend/zoomend 重绘，
+ * 不为每个点建图层、不绑交互——几万点也不卡。点击查询交给地图 click 就近查找。
+ */
+const PointCloudLayer = L.Layer.extend({
+    initialize(this: any, pts: DispPoint[]) {
+        this._pts = pts
+    },
+    onAdd(this: any, map: L.Map) {
+        this._map = map
+        const pane = map.getPane('aisRoutePane') ?? map.getPanes().overlayPane
+        const canvas: HTMLCanvasElement = L.DomUtil.create('canvas', 'ais-points-canvas')
+        canvas.style.position = 'absolute'
+        canvas.style.pointerEvents = 'none'
+        this._canvas = canvas
+        pane.appendChild(canvas)
+        map.on('moveend zoomend resize viewreset', this._reset, this)
+        this._reset()
+        return this
+    },
+    onRemove(this: any, map: L.Map) {
+        map.off('moveend zoomend resize viewreset', this._reset, this)
+        if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas)
+        this._canvas = null
+        return this
+    },
+    _reset(this: any) {
+        const map: L.Map = this._map
+        const canvas: HTMLCanvasElement = this._canvas
+        if (!canvas) return
+        const size = map.getSize()
+        if (canvas.width !== size.x) canvas.width = size.x
+        if (canvas.height !== size.y) canvas.height = size.y
+        L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]))
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        ctx.clearRect(0, 0, size.x, size.y)
+        for (const pt of this._pts as DispPoint[]) {
+            const cp = map.latLngToContainerPoint([pt.lat, pt.lng])
+            if (cp.x < -4 || cp.y < -4 || cp.x > size.x + 4 || cp.y > size.y + 4) continue
+            ctx.beginPath()
+            ctx.arc(cp.x, cp.y, 2, 0, 6.283185)
+            ctx.fillStyle = pt.color
+            ctx.fill()
+        }
+    },
+})
 
 function fmtDuration(ms: number): string {
     const m = Math.round(ms / 60000)
@@ -49,6 +125,7 @@ export function AisRouteLayer({
     showRawAnchored,
     simplifyToleranceM,
     droppedPoints,
+    showPoints,
     hiddenTrips,
     fitKey,
 }: Props) {
@@ -229,6 +306,50 @@ export function AisRouteLayer({
                 .addTo(group)
         }
 
+        // 4) 显示全部轨迹点（单张 canvas 点云）+ 地图点击就近弹出详情
+        // 用「画点 + 单个地图点击就近查找」而非给每个点绑交互，几万点也不卡。
+        let onPointClick: ((e: L.LeafletMouseEvent) => void) | null = null
+        let pointLayer: L.Layer | null = null
+        if (showPoints) {
+            const disps: DispPoint[] = []
+            for (const seg of segments) {
+                if (hiddenTrips && seg.tripIndex != null && hiddenTrips.has(seg.tripIndex)) continue
+                const color = tripColor(seg.tripIndex ?? 0)
+                for (const p of seg.points) {
+                    const d = disp(p.lon, p.lat)
+                    disps.push({ lat: d[0], lng: d[1], color, p })
+                }
+            }
+            pointLayer = new (PointCloudLayer as any)(disps) as L.Layer
+            pointLayer.addTo(map)
+            onPointClick = (e: L.LeafletMouseEvent) => {
+                if (!disps.length) return
+                const clat = e.latlng.lat
+                const clng = e.latlng.lng
+                let best = -1
+                let bestD = Infinity
+                for (let k = 0; k < disps.length; k++) {
+                    const dl = disps[k].lat - clat
+                    const dn = disps[k].lng - clng
+                    const d = dl * dl + dn * dn
+                    if (d < bestD) {
+                        bestD = d
+                        best = k
+                    }
+                }
+                if (best < 0) return
+                const cp = map.latLngToContainerPoint(e.latlng)
+                const q = map.latLngToContainerPoint([disps[best].lat, disps[best].lng])
+                if ((q.x - cp.x) ** 2 + (q.y - cp.y) ** 2 <= 14 * 14) {
+                    L.popup({ offset: [0, -2], className: 'ais-pt-popup-wrap' })
+                        .setLatLng([disps[best].lat, disps[best].lng])
+                        .setContent(pointPopupHtml(disps[best].p))
+                        .openOn(map)
+                }
+            }
+            map.on('click', onPointClick)
+        }
+
         // 自动定位（仅当 fitKey 变化时）：按可见航次取范围（单看某航次时直接定位过去）
         if (fitKey !== lastFitKey.current) {
             const visible =
@@ -252,9 +373,11 @@ export function AisRouteLayer({
         }
 
         return () => {
+            if (onPointClick) map.off('click', onPointClick)
             group.remove()
             waterRenderer.remove()
             droppedRenderer.remove()
+            if (pointLayer) pointLayer.remove()
         }
     }, [
         map,
@@ -266,6 +389,7 @@ export function AisRouteLayer({
         showRawAnchored,
         simplifyToleranceM,
         droppedPoints,
+        showPoints,
         hiddenTrips,
         fitKey,
     ])

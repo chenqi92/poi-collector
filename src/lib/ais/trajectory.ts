@@ -11,6 +11,7 @@ export const DEFAULT_TRAJ: TrajParams = {
     simplifyToleranceM: 8,
     anchorMaxDriftKn: 0.2,
     maxJumpKn: 30,
+    maxJumpKm: 8,
     tripGapMinutes: 30,
 }
 
@@ -64,12 +65,15 @@ export function haversineM(aLon: number, aLat: number, bLon: number, bLat: numbe
 export interface CleanOpts {
     /** 相邻对地速度超过此值(节)视为跳点/串号边界 */
     maxJumpKn: number
+    /** 相邻两点直线距离超过此值(公里)即断开（避免跨水道长直线） */
+    maxJumpKm: number
     /** 静默超过此分钟数视为新航次 */
     tripGapMinutes: number
 }
 
 export const DEFAULT_CLEAN: CleanOpts = {
     maxJumpKn: DEFAULT_TRAJ.maxJumpKn,
+    maxJumpKm: DEFAULT_TRAJ.maxJumpKm,
     tripGapMinutes: DEFAULT_TRAJ.tripGapMinutes,
 }
 
@@ -86,19 +90,14 @@ export interface CleanResult {
     noTime: boolean
 }
 
-function impliedKn(a: AisPoint, b: AisPoint): number {
-    const dt = (b.ts - a.ts) / 1000
-    if (dt <= 0) return Infinity
-    return (haversineM(a.lon, a.lat, b.lon, b.lat) / dt) * KN_PER_MS
-}
-
 /**
  * 单 MMSI 航迹清洗 + 多目标拆分（按位置把多船共号/多航次还原成各自的连贯航迹）：
  *  1) 按时间排序，去非法坐标与重复时间戳；
- *  2) 全局最近邻多目标跟踪：逐点选「对地速度最小且 ≤ maxJumpKn」的已有航迹接上，
- *     接不上的另起一条新航迹；静默超过 tripGapMinutes 的航迹关闭。
+ *  2) 全局最近邻多目标跟踪：逐点选「对地速度最小、且速度 ≤ maxJumpKn 且单跳距离 ≤ maxJumpKm」
+ *     的已有航迹接上，接不上的另起一条新航迹；静默超过 tripGapMinutes 的航迹关闭。
  *     —— 这样逐点交替的串号(多船共用一个 MMSI)会被分到各自航迹，
- *        孤立跳点会落入只有 1 个点的航迹被丢弃，长静默自然切成新航次。
+ *        孤立跳点会落入只有 1 个点的航迹被丢弃，长静默自然切成新航次，
+ *        距离上限避免低速但单跳很远(稀疏/接收空档)被连成跨水道长直线。
  *  3) 丢掉只剩 1 个点的碎片航迹，按起始时间排序输出。
  * 解决内河 AIS 的 GPS 跳点与 MMSI 串号拼接问题。
  */
@@ -151,6 +150,7 @@ export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN):
 
     // 2) 全局最近邻多目标跟踪
     const gapS = opts.tripGapMinutes * 60
+    const maxJumpM = Math.max(0, opts.maxJumpKm) * 1000
     const open: { points: AisPoint[]; last: AisPoint }[] = []
     const finished: AisPoint[][] = []
     for (const p of dedup) {
@@ -161,11 +161,16 @@ export function cleanTrack(points: AisPoint[], opts: CleanOpts = DEFAULT_CLEAN):
                 open.splice(k, 1)
             }
         }
-        // 选对地速度最小且在阈值内的航迹接上
+        // 选对地速度最小、且速度与单跳距离都在阈值内的航迹接上
+        // 距离上限避免：低速但单跳很远(稀疏/串号/接收空档)被连成跨水道长直线
         let best = -1
         let bestKn = Infinity
         for (let k = 0; k < open.length; k++) {
-            const kn = impliedKn(open[k].last, p)
+            const last = open[k].last
+            const distM = haversineM(last.lon, last.lat, p.lon, p.lat)
+            if (maxJumpM > 0 && distM > maxJumpM) continue
+            const dt = (p.ts - last.ts) / 1000
+            const kn = dt <= 0 ? Infinity : (distM / dt) * KN_PER_MS
             if (kn <= opts.maxJumpKn && kn < bestKn) {
                 bestKn = kn
                 best = k
@@ -288,7 +293,75 @@ export function segmentTrack(
         i = j
     }
     flush()
-    return segs
+    return coalesceAnchors(segs, params)
+}
+
+/**
+ * 合并「同一处停泊」被短暂漂移切碎的多个锚点：相邻锚点（中间至多夹一段短行驶）
+ * 若连同中间点合到一起后仍落在一个合理摆动圈内（≤ anchorRadiusM×6），视为一次停泊，
+ * 重算质心/半径/时间。解决 GPS 在原地飘导致的一处停泊被切成一堆重叠锚点。
+ */
+export function coalesceAnchors(segs: Segment[], params: TrajParams): Segment[] {
+    const cap = (params.anchorRadiusM || DEFAULT_TRAJ.anchorRadiusM) * 6
+    const mk = (pts: AisPoint[]): AnchorSegment => {
+        pts.sort((a, b) => a.ts - b.ts)
+        let lo = 0
+        let la = 0
+        for (const p of pts) {
+            lo += p.lon
+            la += p.lat
+        }
+        lo /= pts.length
+        la /= pts.length
+        let rad = 0
+        for (const p of pts) rad = Math.max(rad, haversineM(lo, la, p.lon, p.lat))
+        return {
+            kind: 'anchored',
+            centroid: [lo, la],
+            radiusM: Math.min(Math.max(rad, 8), cap),
+            startTs: pts[0].ts,
+            endTs: pts[pts.length - 1].ts,
+            points: pts,
+        }
+    }
+    const out: Segment[] = []
+    let i = 0
+    while (i < segs.length) {
+        const s = segs[i]
+        if (s.kind !== 'anchored') {
+            out.push(s)
+            i++
+            continue
+        }
+        let pts: AisPoint[] = [...s.points]
+        let j = i + 1
+        for (;;) {
+            let k = j
+            let bridge: AisPoint[] = []
+            if (k < segs.length && segs[k].kind === 'sailing') {
+                bridge = (segs[k] as SailingSegment).points
+                k++
+            }
+            if (k >= segs.length || segs[k].kind !== 'anchored') break
+            const cand = [...pts, ...bridge, ...(segs[k] as AnchorSegment).points]
+            let lo = 0
+            let la = 0
+            for (const p of cand) {
+                lo += p.lon
+                la += p.lat
+            }
+            lo /= cand.length
+            la /= cand.length
+            let rad = 0
+            for (const p of cand) rad = Math.max(rad, haversineM(lo, la, p.lon, p.lat))
+            if (rad > cap) break // 合并后超出摆动圈 = 不是同一处停泊（真实往返），停止
+            pts = cand
+            j = k + 1
+        }
+        out.push(mk(pts))
+        i = j
+    }
+    return out
 }
 
 /**

@@ -174,6 +174,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [showRawAnchored, setShowRawAnchored] = useState(false)
     // 是否在地图上展示被清洗掉的跳点/重复点（默认隐藏，可点击切换以验证清洗确实生效）
     const [showDropped, setShowDropped] = useState(false)
+    // 是否显示全部轨迹点（canvas 小点，点击地图弹出最近点详情）
+    const [showPoints, setShowPoints] = useState(false)
     const [traj, setTraj] = useState<TrajParams>(DEFAULT_TRAJ)
 
     // 连接切换时重置
@@ -463,8 +465,13 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
 
     // 数据清洗：去重复/跳点 + 按大跳变/长静默切航次（解决 GPS 跳点与 MMSI 串号拼接）
     const cleaned = useMemo(
-        () => cleanTrack(rawWgsPoints, { maxJumpKn: traj.maxJumpKn, tripGapMinutes: traj.tripGapMinutes }),
-        [rawWgsPoints, traj.maxJumpKn, traj.tripGapMinutes],
+        () =>
+            cleanTrack(rawWgsPoints, {
+                maxJumpKn: traj.maxJumpKn,
+                maxJumpKm: traj.maxJumpKm,
+                tripGapMinutes: traj.tripGapMinutes,
+            }),
+        [rawWgsPoints, traj.maxJumpKn, traj.maxJumpKm, traj.tripGapMinutes],
     )
     const wgsPoints = cleaned.points
 
@@ -842,60 +849,6 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     )}
                 </div>
 
-                {/* 航次列表：按航次着色 + 勾选/单看显隐 */}
-                {selectedMmsi && tripSummaries.length > 1 && (
-                    <div className="ais-field">
-                        <div className="ais-row-between">
-                            <button
-                                type="button"
-                                className="ais-trips-head"
-                                onClick={() => setTripsOpen((v) => !v)}
-                                title="展开/收起航次列表"
-                            >
-                                <span className="ais-tri">{tripsOpen ? '▾' : '▸'}</span>
-                                航次（{visibleTripCount}/{tripSummaries.length}）
-                            </button>
-                            <div className="ais-trips-actions">
-                                <button type="button" className="ais-mini-btn" onClick={showAllTrips}>全选</button>
-                                <button type="button" className="ais-mini-btn" onClick={invertTrips}>反选</button>
-                            </div>
-                        </div>
-                        {tripsOpen && (
-                            <div className="ais-trip-list">
-                                {tripSummaries.map((t, rank) => {
-                                    const hidden = hiddenTrips.has(t.i)
-                                    return (
-                                        <div key={t.i} className={`ais-trip-row${hidden ? ' off' : ''}`}>
-                                            <label className="ais-trip-pick" title="显示/隐藏该航次">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={!hidden}
-                                                    onChange={() => toggleTrip(t.i)}
-                                                />
-                                                <span className="ais-trip-dot" style={{ background: tripColor(t.i) }} />
-                                            </label>
-                                            <div className="ais-trip-info">
-                                                <div className="ais-trip-title">
-                                                    航次 {rank + 1} · {t.count} 点 · {fmtDist(t.distM)}
-                                                </div>
-                                                <div className="ais-trip-time">{fmtSpan(t.startTs, t.endTs)}</div>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                className="ais-mini-btn"
-                                                onClick={() => soloTrip(t.i)}
-                                                title="只看该航次（隐藏其它并定位过去）"
-                                            >
-                                                单看
-                                            </button>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        )}
-                    </div>
-                )}
-
                 <div className="ais-field">
                     <label className="ais-label">水域图过滤</label>
                     <select
@@ -986,6 +939,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         <span className="ais-badge">{cleaned.trips.length} 航次</span>
                     </div>
                     <NumberRow label="跳点速度阈值 (节)" value={traj.maxJumpKn} step={5} onChange={(v) => setTraj((t) => ({ ...t, maxJumpKn: Math.max(5, v) }))} />
+                    <NumberRow label="跳点最大距离 (公里)" value={traj.maxJumpKm} step={1} onChange={(v) => setTraj((t) => ({ ...t, maxJumpKm: Math.max(0, v) }))} />
                     <NumberRow label="航次切分静默 (分钟)" value={traj.tripGapMinutes} step={5} onChange={(v) => setTraj((t) => ({ ...t, tripGapMinutes: Math.max(1, v) }))} />
                     {selectedMmsi && (
                         <div className="ais-hint">
@@ -1017,6 +971,21 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                             <span className="ais-toggle-knob" />
                         </button>
                     </div>
+                    <div className="ais-row-between">
+                        <span className="ais-toggle-text">显示全部轨迹点（点击看详情）</span>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={showPoints}
+                            className={`ais-toggle${showPoints ? ' on' : ''}`}
+                            onClick={() => setShowPoints((v) => !v)}
+                        >
+                            <span className="ais-toggle-knob" />
+                        </button>
+                    </div>
+                    {showPoints && (
+                        <div className="ais-hint">点击地图上任意轨迹点查看 MMSI / 经纬度 / 航速 / 航向 / 时间。点多时已用 canvas 渲染，仅在拖动地图时可能略有延迟。</div>
+                    )}
                 </div>
             </div>
 
@@ -1052,6 +1021,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         showRawAnchored={showRawAnchored}
                         simplifyToleranceM={traj.simplifyToleranceM}
                         droppedPoints={showDropped ? cleaned.droppedPoints : EMPTY_POINTS}
+                        showPoints={showPoints}
                         hiddenTrips={hiddenTrips}
                         fitKey={`${connId}|${selectedMmsi}|${baseCrs}|${[...hiddenTrips].sort((a, b) => a - b).join(',')}`}
                     />
@@ -1108,6 +1078,62 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         <span className="ais-chip danger">过滤掉 {anomalies.length} 个水域外点</span>
                     )}
                 </div>
+
+                {/* 浮动航次面板（可收起/展开，按航次着色 + 勾选/单看显隐） */}
+                {selectedMmsi && tripSummaries.length > 1 && (
+                    <div className={`ais-trips-float${tripsOpen ? '' : ' collapsed'}`}>
+                        <div className="ais-trips-float-head">
+                            <button
+                                type="button"
+                                className="ais-trips-head"
+                                onClick={() => setTripsOpen((v) => !v)}
+                                title="展开/收起航次列表"
+                            >
+                                <span className="ais-tri">{tripsOpen ? '▾' : '▸'}</span>
+                                航次 {visibleTripCount}/{tripSummaries.length}
+                            </button>
+                            {tripsOpen && (
+                                <div className="ais-trips-actions">
+                                    <button type="button" className="ais-mini-btn" onClick={showAllTrips}>全选</button>
+                                    <button type="button" className="ais-mini-btn" onClick={invertTrips}>反选</button>
+                                </div>
+                            )}
+                        </div>
+                        {tripsOpen && (
+                            <div className="ais-trip-list">
+                                {tripSummaries.map((t, rank) => {
+                                    const hidden = hiddenTrips.has(t.i)
+                                    return (
+                                        <div key={t.i} className={`ais-trip-row${hidden ? ' off' : ''}`}>
+                                            <label className="ais-trip-pick" title="显示/隐藏该航次">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!hidden}
+                                                    onChange={() => toggleTrip(t.i)}
+                                                />
+                                                <span className="ais-trip-dot" style={{ background: tripColor(t.i) }} />
+                                            </label>
+                                            <div className="ais-trip-info">
+                                                <div className="ais-trip-title">
+                                                    航次 {rank + 1} · {t.count} 点 · {fmtDist(t.distM)}
+                                                </div>
+                                                <div className="ais-trip-time">{fmtSpan(t.startTs, t.endTs)}</div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="ais-mini-btn"
+                                                onClick={() => soloTrip(t.i)}
+                                                title="只看该航次（隐藏其它并定位过去）"
+                                            >
+                                                单看
+                                            </button>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* 图例 */}
                 <div className="ais-legend">

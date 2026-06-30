@@ -17,6 +17,8 @@ export interface TrajParams {
     anchorMaxDriftKn: number
     /** 清洗：相邻对地速度超过此值(节)视为 GPS 跳点/串号边界（内河默认 30） */
     maxJumpKn: number
+    /** 清洗：相邻两点直线距离超过此值(公里)即断开，避免跨水道拉出长直线（内河默认 8） */
+    maxJumpKm: number
     /** 清洗：静默超过此分钟数视为新航次，切分多船共号/多航次拼接 */
     tripGapMinutes: number
 }
