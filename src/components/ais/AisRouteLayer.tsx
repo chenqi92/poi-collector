@@ -1,8 +1,9 @@
 // 命令式 Leaflet 图层：渲染单船航迹。
 // - 水域面：低层半透明填充
-// - 行驶段：亮蓝 polyline（可 DP 抽稀）
+// - 行驶段：亮蓝 polyline（可 DP 抽稀）+ canvas 方向箭头
 // - 停泊段：锚点 marker + 摆动半径圈，航线用虚线跨过（不画抖动碎线）
 // - 异常点（水域外）：红色点
+// - AIS 点：单张 canvas 按屏幕网格聚合，分散点单独显示
 // 坐标：传入为 WGS-84，按 baseCrs 转到底图坐标系后再画。
 
 import { useEffect, useRef } from 'react'
@@ -55,15 +56,95 @@ interface DispPoint {
     lng: number
     color: string
     p: AisPoint
+    tripIndex: number
+}
+
+interface DispPath {
+    color: string
+    tripIndex: number
+    points: DispPoint[]
+}
+
+interface ArrowPoint {
+    lat: number
+    lng: number
+}
+
+interface ArrowPath {
+    color: string
+    points: ArrowPoint[]
+}
+
+interface DrawCluster {
+    x: number
+    y: number
+    lat: number
+    lng: number
+    centerLon: number
+    centerLat: number
+    color: string
+    count: number
+    radius: number
+    minTs: number
+    maxTs: number
+    sample: AisPoint
+}
+
+const TAU = Math.PI * 2
+
+function fmtPointTime(ms?: number): string {
+    if (!ms) return '-'
+    try {
+        return new Date(ms).toLocaleString('zh-CN', { hour12: false })
+    } catch {
+        return String(ms)
+    }
+}
+
+function clusterPopupHtml(c: DrawCluster): string {
+    const time =
+        c.minTs === c.maxTs
+            ? fmtPointTime(c.minTs)
+            : `${fmtPointTime(c.minTs)} ~ ${fmtPointTime(c.maxTs)}`
+    const rows: Array<[string, string] | null> = [
+        ['聚合 AIS 点', `${c.count.toLocaleString()} 个`],
+        ['MMSI', c.sample.mmsi],
+        c.sample.name ? ['船名', c.sample.name] : null,
+        ['时间', time],
+        ['中心经度', c.centerLon.toFixed(6)],
+        ['中心纬度', c.centerLat.toFixed(6)],
+    ]
+    const body = (rows.filter(Boolean) as Array<[string, string]>)
+        .map(([k, v]) => `<div class="ais-pt-row"><span>${k}</span><b>${v}</b></div>`)
+        .join('')
+    return `<div class="ais-pt-popup">${body}</div>`
+}
+
+function clusterHoverHtml(c: DrawCluster): string {
+    const time =
+        c.count === 1
+            ? fmtPointTime(c.sample.ts)
+            : c.minTs === c.maxTs
+              ? fmtPointTime(c.minTs)
+              : `${fmtPointTime(c.minTs)} ~ ${fmtPointTime(c.maxTs)}`
+    return `<div class="ais-pt-hover"><b>${c.count.toLocaleString()}</b> 个 AIS 点<span>${time}</span></div>`
 }
 
 /**
- * 自定义点云图层：所有轨迹点画在「一张」canvas 上，只在 moveend/zoomend 重绘，
- * 不为每个点建图层、不绑交互——几万点也不卡。点击查询交给地图 click 就近查找。
+ * 自定义 AIS canvas 图层：
+ * - 方向箭头按屏幕距离抽样绘制，避免给折线塞 marker。
+ * - AIS 点按「航次 + 屏幕网格」聚合，密集点合成计数圆，分散点单独画。
+ * - 点击只命中已绘制的聚合/单点，不为每个点建立 Leaflet 图层。
  */
-const PointCloudLayer = L.Layer.extend({
-    initialize(this: any, pts: DispPoint[]) {
-        this._pts = pts
+const AisCanvasLayer = L.Layer.extend({
+    initialize(this: any, pointPaths: DispPath[], arrowPaths: ArrowPath[], showPoints: boolean) {
+        this._pointPaths = pointPaths
+        this._arrowPaths = arrowPaths
+        this._showPoints = showPoints
+        this._clusters = []
+        this._hovered = null
+        this._tooltip = null
+        this._raf = 0
     },
     onAdd(this: any, map: L.Map) {
         this._map = map
@@ -74,36 +155,279 @@ const PointCloudLayer = L.Layer.extend({
         this._canvas = canvas
         pane.appendChild(canvas)
         map.on('moveend zoomend resize viewreset', this._reset, this)
+        map.on('mousemove', this._onMouseMove, this)
+        map.on('mouseout', this._clearHover, this)
+        map.on('click', this._onClick, this)
         this._reset()
         return this
     },
     onRemove(this: any, map: L.Map) {
         map.off('moveend zoomend resize viewreset', this._reset, this)
+        map.off('mousemove', this._onMouseMove, this)
+        map.off('mouseout', this._clearHover, this)
+        map.off('click', this._onClick, this)
+        if (this._raf) cancelAnimationFrame(this._raf)
+        this._clearHover()
         if (this._canvas?.parentNode) this._canvas.parentNode.removeChild(this._canvas)
         this._canvas = null
+        this._clusters = []
         return this
     },
     _reset(this: any) {
+        if (this._raf) cancelAnimationFrame(this._raf)
+        this._raf = requestAnimationFrame(() => {
+            this._raf = 0
+            this._draw()
+        })
+    },
+    _draw(this: any) {
         const map: L.Map = this._map
         const canvas: HTMLCanvasElement = this._canvas
         if (!canvas) return
         const size = map.getSize()
-        if (canvas.width !== size.x) canvas.width = size.x
-        if (canvas.height !== size.y) canvas.height = size.y
+        const dpr = Math.min(window.devicePixelRatio || 1, 2)
+        const width = Math.max(1, Math.round(size.x * dpr))
+        const height = Math.max(1, Math.round(size.y * dpr))
+        if (canvas.width !== width) canvas.width = width
+        if (canvas.height !== height) canvas.height = height
+        canvas.style.width = `${size.x}px`
+        canvas.style.height = `${size.y}px`
         L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]))
         const ctx = canvas.getContext('2d')
         if (!ctx) return
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
         ctx.clearRect(0, 0, size.x, size.y)
-        for (const pt of this._pts as DispPoint[]) {
-            const cp = map.latLngToContainerPoint([pt.lat, pt.lng])
-            if (cp.x < -4 || cp.y < -4 || cp.x > size.x + 4 || cp.y > size.y + 4) continue
-            ctx.beginPath()
-            ctx.arc(cp.x, cp.y, 2, 0, 6.283185)
-            ctx.fillStyle = pt.color
-            ctx.fill()
+        this._drawPoints(ctx, map, size)
+        this._drawArrows(ctx, map, size)
+    },
+    _drawPoints(this: any, ctx: CanvasRenderingContext2D, map: L.Map, size: L.Point) {
+        this._clusters = []
+        if (!this._showPoints) return
+
+        const zoom = map.getZoom()
+        const cell = zoom >= 16 ? 8 : zoom >= 14 ? 10 : zoom >= 12 ? 14 : 20
+        const pad = cell + 8
+        const clusters = new Map<string, {
+            sx: number
+            sy: number
+            slat: number
+            slng: number
+            swLon: number
+            swLat: number
+            count: number
+            color: string
+            minTs: number
+            maxTs: number
+            sample: AisPoint
+        }>()
+
+        for (const path of this._pointPaths as DispPath[]) {
+            for (const pt of path.points) {
+                const cp = map.latLngToContainerPoint([pt.lat, pt.lng])
+                if (cp.x < -pad || cp.y < -pad || cp.x > size.x + pad || cp.y > size.y + pad) continue
+                const gx = Math.floor(cp.x / cell)
+                const gy = Math.floor(cp.y / cell)
+                const key = `${pt.tripIndex}:${gx}:${gy}`
+                let c = clusters.get(key)
+                if (!c) {
+                    c = {
+                        sx: 0,
+                        sy: 0,
+                        slat: 0,
+                        slng: 0,
+                        swLon: 0,
+                        swLat: 0,
+                        count: 0,
+                        color: pt.color,
+                        minTs: pt.p.ts || 0,
+                        maxTs: pt.p.ts || 0,
+                        sample: pt.p,
+                    }
+                    clusters.set(key, c)
+                }
+                c.sx += cp.x
+                c.sy += cp.y
+                c.slat += pt.lat
+                c.slng += pt.lng
+                c.swLon += pt.p.lon
+                c.swLat += pt.p.lat
+                c.count++
+                if (pt.p.ts && (!c.minTs || pt.p.ts < c.minTs)) c.minTs = pt.p.ts
+                if (pt.p.ts && pt.p.ts > c.maxTs) c.maxTs = pt.p.ts
+            }
         }
+
+        const list: DrawCluster[] = []
+        for (const c of clusters.values()) {
+            const radius = c.count === 1 ? 2.1 : c.count >= 100 ? 3.8 : 3.1
+            list.push({
+                x: c.sx / c.count,
+                y: c.sy / c.count,
+                lat: c.slat / c.count,
+                lng: c.slng / c.count,
+                centerLon: c.swLon / c.count,
+                centerLat: c.swLat / c.count,
+                color: c.color,
+                count: c.count,
+                radius,
+                minTs: c.minTs,
+                maxTs: c.maxTs,
+                sample: c.sample,
+            })
+        }
+        this._clusters = list
+
+        ctx.save()
+        for (const c of list) {
+            if (c.count <= 1) continue
+            ctx.beginPath()
+            ctx.arc(c.x, c.y, c.radius, 0, TAU)
+            ctx.fillStyle = c.color
+            ctx.fill()
+            ctx.lineWidth = 1.4
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)'
+            ctx.stroke()
+        }
+        ctx.restore()
+
+        ctx.save()
+        for (const c of list) {
+            if (c.count !== 1) continue
+            ctx.beginPath()
+            ctx.arc(c.x, c.y, c.radius, 0, TAU)
+            ctx.fillStyle = c.color
+            ctx.fill()
+            ctx.lineWidth = 1
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+            ctx.stroke()
+        }
+        ctx.restore()
+    },
+    _drawArrows(this: any, ctx: CanvasRenderingContext2D, map: L.Map, size: L.Point) {
+        const zoom = map.getZoom()
+        const every = zoom >= 16 ? 104 : zoom >= 13 ? 86 : 70
+        const pad = 18
+        let drawn = 0
+        const maxArrows = 900
+
+        ctx.save()
+        for (const path of this._arrowPaths as ArrowPath[]) {
+            if (path.points.length < 2 || drawn >= maxArrows) continue
+            let prev = map.latLngToContainerPoint([path.points[0].lat, path.points[0].lng])
+            let acc = 0
+            let nextAt = every * 0.65
+            for (let i = 1; i < path.points.length && drawn < maxArrows; i++) {
+                const cur = map.latLngToContainerPoint([path.points[i].lat, path.points[i].lng])
+                const dx = cur.x - prev.x
+                const dy = cur.y - prev.y
+                const len = Math.hypot(dx, dy)
+                if (len < 1) {
+                    prev = cur
+                    continue
+                }
+                while (acc + len >= nextAt && drawn < maxArrows) {
+                    const r = (nextAt - acc) / len
+                    const x = prev.x + dx * r
+                    const y = prev.y + dy * r
+                    if (x >= -pad && y >= -pad && x <= size.x + pad && y <= size.y + pad) {
+                        drawDirectionArrow(ctx, x, y, Math.atan2(dy, dx), path.color)
+                        drawn++
+                    }
+                    nextAt += every
+                }
+                acc += len
+                prev = cur
+            }
+        }
+        ctx.restore()
+    },
+    _hitCluster(this: any, e: L.LeafletMouseEvent): DrawCluster | null {
+        if (!this._showPoints || !this._clusters?.length) return null
+        const map: L.Map = this._map
+        const cp = map.latLngToContainerPoint(e.latlng)
+        let best: DrawCluster | null = null
+        let bestD = Infinity
+        for (const c of this._clusters as DrawCluster[]) {
+            const dx = c.x - cp.x
+            const dy = c.y - cp.y
+            const d = dx * dx + dy * dy
+            if (d < bestD) {
+                bestD = d
+                best = c
+            }
+        }
+        if (!best) return null
+        const hit = Math.max(9, best.radius + 5)
+        if (bestD > hit * hit) return null
+        return best
+    },
+    _onMouseMove(this: any, e: L.LeafletMouseEvent) {
+        const map: L.Map = this._map
+        const hit = this._hitCluster(e)
+        if (!hit) {
+            this._clearHover()
+            return
+        }
+        const key = `${hit.x.toFixed(1)}:${hit.y.toFixed(1)}:${hit.count}:${hit.minTs}:${hit.maxTs}`
+        if (this._hovered === key && this._tooltip) {
+            this._tooltip.setLatLng([hit.lat, hit.lng])
+            return
+        }
+        this._hovered = key
+        if (!this._tooltip) {
+            this._tooltip = L.tooltip({
+                className: 'ais-pt-hover-wrap',
+                direction: 'top',
+                offset: [0, -8],
+                opacity: 0.96,
+            }).addTo(map)
+        }
+        this._tooltip
+            .setLatLng([hit.lat, hit.lng])
+            .setContent(clusterHoverHtml(hit))
+    },
+    _clearHover(this: any) {
+        if (this._tooltip) {
+            this._tooltip.remove()
+            this._tooltip = null
+        }
+        this._hovered = null
+    },
+    _onClick(this: any, e: L.LeafletMouseEvent) {
+        const best = this._hitCluster(e)
+        if (!best) return
+        const map: L.Map = this._map
+        L.popup({ offset: [0, -2], className: 'ais-pt-popup-wrap' })
+            .setLatLng([best.lat, best.lng])
+            .setContent(best.count === 1 ? pointPopupHtml(best.sample) : clusterPopupHtml(best))
+            .openOn(map)
     },
 })
+
+function drawDirectionArrow(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    angle: number,
+    color: string,
+) {
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(angle)
+    ctx.beginPath()
+    ctx.moveTo(7, 0)
+    ctx.lineTo(-5, -4.5)
+    ctx.lineTo(-3, 0)
+    ctx.lineTo(-5, 4.5)
+    ctx.closePath()
+    ctx.fillStyle = color
+    ctx.globalAlpha = 0.96
+    ctx.fill()
+    ctx.lineWidth = 1.15
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)'
+    ctx.stroke()
+    ctx.restore()
+}
 
 function fmtDuration(ms: number): string {
     const m = Math.round(ms / 60000)
@@ -165,6 +489,8 @@ export function AisRouteLayer({
         }
 
         // 2) 航迹分段
+        const pointPaths: DispPath[] = []
+        const arrowPaths: ArrowPath[] = []
         let prevEnd: [number, number] | null = null
         let firstDisp: [number, number] | null = null
         for (const seg of segments) {
@@ -177,6 +503,23 @@ export function AisRouteLayer({
                 const pts =
                     simplifyToleranceM > 0 ? douglasPeucker(seg.points, simplifyToleranceM) : seg.points
                 const latlngs = pts.map((p) => disp(p.lon, p.lat))
+                if (showPoints && seg.points.length) {
+                    const pointPath: DispPath = {
+                        color,
+                        tripIndex: seg.tripIndex ?? 0,
+                        points: seg.points.map((p) => {
+                            const d = disp(p.lon, p.lat)
+                            return { lat: d[0], lng: d[1], color, p, tripIndex: seg.tripIndex ?? 0 }
+                        }),
+                    }
+                    pointPaths.push(pointPath)
+                }
+                if (latlngs.length >= 2) {
+                    arrowPaths.push({
+                        color,
+                        points: latlngs.map((d) => ({ lat: d[0], lng: d[1] })),
+                    })
+                }
                 if (!firstDisp && latlngs.length) firstDisp = latlngs[0]
                 if (prevEnd && latlngs.length) {
                     L.polyline([prevEnd, latlngs[0]], {
@@ -210,6 +553,17 @@ export function AisRouteLayer({
                 if (latlngs.length) prevEnd = latlngs[latlngs.length - 1]
             } else {
                 const c = disp(seg.centroid[0], seg.centroid[1])
+                if (showPoints && seg.points.length) {
+                    const pointPath: DispPath = {
+                        color,
+                        tripIndex: seg.tripIndex ?? 0,
+                        points: seg.points.map((p) => {
+                            const d = disp(p.lon, p.lat)
+                            return { lat: d[0], lng: d[1], color, p, tripIndex: seg.tripIndex ?? 0 }
+                        }),
+                    }
+                    pointPaths.push(pointPath)
+                }
                 if (!firstDisp) firstDisp = c
                 if (prevEnd) {
                     L.polyline([prevEnd, c], {
@@ -306,49 +660,9 @@ export function AisRouteLayer({
                 .addTo(group)
         }
 
-        // 4) 显示全部轨迹点（单张 canvas 点云）+ 地图点击就近弹出详情
-        // 用「画点 + 单个地图点击就近查找」而非给每个点绑交互，几万点也不卡。
-        let onPointClick: ((e: L.LeafletMouseEvent) => void) | null = null
-        let pointLayer: L.Layer | null = null
-        if (showPoints) {
-            const disps: DispPoint[] = []
-            for (const seg of segments) {
-                if (hiddenTrips && seg.tripIndex != null && hiddenTrips.has(seg.tripIndex)) continue
-                const color = tripColor(seg.tripIndex ?? 0)
-                for (const p of seg.points) {
-                    const d = disp(p.lon, p.lat)
-                    disps.push({ lat: d[0], lng: d[1], color, p })
-                }
-            }
-            pointLayer = new (PointCloudLayer as any)(disps) as L.Layer
-            pointLayer.addTo(map)
-            onPointClick = (e: L.LeafletMouseEvent) => {
-                if (!disps.length) return
-                const clat = e.latlng.lat
-                const clng = e.latlng.lng
-                let best = -1
-                let bestD = Infinity
-                for (let k = 0; k < disps.length; k++) {
-                    const dl = disps[k].lat - clat
-                    const dn = disps[k].lng - clng
-                    const d = dl * dl + dn * dn
-                    if (d < bestD) {
-                        bestD = d
-                        best = k
-                    }
-                }
-                if (best < 0) return
-                const cp = map.latLngToContainerPoint(e.latlng)
-                const q = map.latLngToContainerPoint([disps[best].lat, disps[best].lng])
-                if ((q.x - cp.x) ** 2 + (q.y - cp.y) ** 2 <= 14 * 14) {
-                    L.popup({ offset: [0, -2], className: 'ais-pt-popup-wrap' })
-                        .setLatLng([disps[best].lat, disps[best].lng])
-                        .setContent(pointPopupHtml(disps[best].p))
-                        .openOn(map)
-                }
-            }
-            map.on('click', onPointClick)
-        }
+        // 4) 方向箭头 + AIS 点聚合：同一张 canvas，避免为海量点/箭头创建 Leaflet marker。
+        const canvasLayer = new (AisCanvasLayer as any)(pointPaths, arrowPaths, Boolean(showPoints)) as L.Layer
+        canvasLayer.addTo(map)
 
         // 自动定位（仅当 fitKey 变化时）：按可见航次取范围（单看某航次时直接定位过去）
         if (fitKey !== lastFitKey.current) {
@@ -373,11 +687,10 @@ export function AisRouteLayer({
         }
 
         return () => {
-            if (onPointClick) map.off('click', onPointClick)
             group.remove()
             waterRenderer.remove()
             droppedRenderer.remove()
-            if (pointLayer) pointLayer.remove()
+            canvasLayer.remove()
         }
     }, [
         map,

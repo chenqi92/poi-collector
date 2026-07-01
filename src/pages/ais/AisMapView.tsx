@@ -174,8 +174,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [showRawAnchored, setShowRawAnchored] = useState(false)
     // 是否在地图上展示被清洗掉的跳点/重复点（默认隐藏，可点击切换以验证清洗确实生效）
     const [showDropped, setShowDropped] = useState(false)
-    // 是否显示全部轨迹点（canvas 小点，点击地图弹出最近点详情）
-    const [showPoints, setShowPoints] = useState(false)
+    // 是否显示 AIS 点（canvas 聚合/单点，点击地图弹出详情）
+    const [showPoints, setShowPoints] = useState(true)
     const [traj, setTraj] = useState<TrajParams>(DEFAULT_TRAJ)
 
     // 连接切换时重置
@@ -972,7 +972,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         </button>
                     </div>
                     <div className="ais-row-between">
-                        <span className="ais-toggle-text">显示全部轨迹点（点击看详情）</span>
+                        <span className="ais-toggle-text">显示 AIS 点 / 聚合点</span>
                         <button
                             type="button"
                             role="switch"
@@ -984,7 +984,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         </button>
                     </div>
                     {showPoints && (
-                        <div className="ais-hint">点击地图上任意轨迹点查看 MMSI / 经纬度 / 航速 / 航向 / 时间。点多时已用 canvas 渲染，仅在拖动地图时可能略有延迟。</div>
+                        <div className="ais-hint">密集 AIS 点按航次和屏幕网格聚合成小点，分散点单独显示；鼠标悬停看数量，点击看详情。</div>
                     )}
                 </div>
             </div>
@@ -1138,6 +1138,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                 {/* 图例 */}
                 <div className="ais-legend">
                     <div className="ais-legend-row"><i className="lg-line sail" /> 行驶航线</div>
+                    <div className="ais-legend-row"><i className="lg-arrow" /> 航向箭头</div>
+                    {showPoints && <div className="ais-legend-row"><i className="lg-dot aispoint" /> AIS 点 / 聚合点</div>}
                     <div className="ais-legend-row"><i className="lg-line conn" /> 停泊跨段</div>
                     <div className="ais-legend-row"><i className="lg-anchor"><GcIcon name="anchor" size={11} /></i> 停泊点 + 摆动圈</div>
                     {filterOn && <div className="ais-legend-row"><i className="lg-dot anomaly" /> 水域外异常点</div>}

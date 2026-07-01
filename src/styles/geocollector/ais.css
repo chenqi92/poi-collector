@@ -533,6 +533,25 @@
     border-top-color: #38bdf8;
 }
 
+.lg-arrow {
+    width: 18px;
+    height: 12px;
+    position: relative;
+}
+
+.lg-arrow::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 12px solid #2563eb;
+    filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.8));
+}
+
 .lg-anchor {
     width: 16px;
     height: 16px;
@@ -555,6 +574,12 @@
 .lg-dot.dropped {
     background: #cbd5e1;
     border: 1px solid #64748b;
+}
+
+.lg-dot.aispoint {
+    background: #2563eb;
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 0 0 1px #2563eb;
 }
 
 /* 轨迹点详情弹窗 */
@@ -581,6 +606,39 @@
 .ais-pt-row b {
     color: var(--text);
     font-weight: 600;
+}
+
+.ais-pt-hover-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    color: var(--text);
+    padding: 0;
+}
+
+.ais-pt-hover-wrap::before {
+    display: none;
+}
+
+.ais-pt-hover {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ais-pt-hover b {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.ais-pt-hover span {
+    color: var(--text-3);
 }
 
 .lg-water {
