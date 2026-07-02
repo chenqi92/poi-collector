@@ -1004,6 +1004,10 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     zoom={9}
                     zoomControl={false}
                     attributionControl={false}
+                    // 停泊点等 DOM marker 的缩放动画走「直线平移」，与航迹（canvas/SVG 仿射缩放）
+                    // 在动画途中不同步，会让锚点图标短暂飞到错误位置。关掉后 marker 在缩放动画期间
+                    // 隐藏、动画结束按最终坐标落位，和 canvas 点/箭头「冻结后归位」一致。
+                    markerZoomAnimation={false}
                     style={{ position: 'absolute', inset: 0 }}
                 >
                     {baseCrs === 'gcj02' ? (

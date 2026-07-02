@@ -211,6 +211,30 @@ function simplifyClosedRing(ring: Ring, eps: number): Ring {
 }
 
 /**
+ * 闭合环 Chaikin 圆角：把栅格化外框的直角台阶磨成顺滑折线。每轮把每条边替换成
+ * 1/4、3/4 两个切角点（顶点数约翻倍），迭代 iters 轮。入参为闭合环（首尾同点），
+ * 返回同样闭合的环。Chaikin 结果落在原控制多边形内，简单环不会自交。
+ */
+function chaikinClosed(ring: Ring, iters: number): Ring {
+    if (ring.length <= 4 || iters <= 0) return ring
+    let pts = ring.slice(0, ring.length - 1) // 去掉闭合重复末点，按环处理
+    for (let it = 0; it < iters; it++) {
+        const n = pts.length
+        if (n < 3) break
+        const out: Ring = []
+        for (let i = 0; i < n; i++) {
+            const a = pts[i]
+            const b = pts[(i + 1) % n]
+            out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25])
+            out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75])
+        }
+        pts = out
+    }
+    pts.push([pts[0][0], pts[0][1]])
+    return pts
+}
+
+/**
  * 扫描线栅格化 + 单元边界追踪求并集外环（岸线围栏），零依赖、对脏数据稳健。
  * 把所有水域面用扫描线填进占据网格（相互覆盖即得并集），再沿占据边界串出外环，
  * 面积过滤掉小噪点环，最后 DP 抽稀变顺滑。targetCells 控制长轴方向的栅格数（越大
@@ -234,7 +258,12 @@ export function dissolveOutlineGrid(
     const latSpan = maxLat - minLat
     if (!(lonSpan > 0) || !(latSpan > 0)) return []
 
-    const cell = Math.max(lonSpan, latSpan) / Math.max(16, targetCells)
+    // 目标格边长：按长轴分成 targetCells 份；但对近方形的大区域再设总格数上限，
+    // 避免 occ（cols*rows 的 Uint8Array）占用爆内存。两者取较大（较粗）的格。
+    const maxCells = 32_000_000
+    const cellByAxis = Math.max(lonSpan, latSpan) / Math.max(16, targetCells)
+    const cellByArea = Math.sqrt((lonSpan * latSpan) / maxCells)
+    const cell = Math.max(cellByAxis, cellByArea)
     const originLon = minLon - cell
     const originLat = minLat - cell
     const cols = Math.ceil(lonSpan / cell) + 2 // 四周各留 1 格空白，保证边界闭合
@@ -353,9 +382,12 @@ export function dissolveOutlineGrid(
 }
 
 /**
- * 把一组水域面并成岸线围栏，只返回合并后的外环（每个 WaterPolygon 仅 rings[0]，
- * 无洞），可与现有外环渲染方式一致。纯函数，不修改入参。
+ * 把一组水域面并成岸线围栏（显示用）。在栅格并集的基础上：
+ *  - 用更细的栅格（8192 长轴）减小「格中心采样」造成的内缩，少把边缘水面排除在外；
+ *  - 对外环与岛洞做 Chaikin 圆角，磨掉栅格化的直角台阶，放大后不再是锯齿直角弯。
+ * 判定 AIS 是否在水域仍用原始水域面，不受此处平滑影响。纯函数，不修改入参。
  */
 export function dissolveOutline(polys: WaterPolygon[]): WaterPolygon[] {
-    return dissolveOutlineGrid(polys)
+    const merged = dissolveOutlineGrid(polys, 8192)
+    return merged.map((p) => makePoly(p.rings.map((r) => chaikinClosed(r, 2))))
 }
