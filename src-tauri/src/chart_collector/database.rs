@@ -115,6 +115,18 @@ impl ChartDatabase {
                 completed_at DATETIME
             );
 
+            -- 任务↔要素归属：要素在 chart_features 里是全局去重存储，这张表记录
+            -- 「哪个任务采到了哪条要素」，供数据中心按任务精确过滤（避免别的任务落在
+            -- 外接矩形里的要素被串显示）。同一要素可归属多个任务（多对多）。
+            CREATE TABLE IF NOT EXISTS chart_task_features (
+                task_id INTEGER NOT NULL,
+                feature_id TEXT NOT NULL,
+                PRIMARY KEY (task_id, feature_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_chart_task_features_task
+                ON chart_task_features(task_id);
+
             -- 迁移: 用 raw_json 中的 hbxz (航标形状) 回填 buoy_type
             UPDATE chart_buoys
             SET buoy_type = json_extract(raw_json, '$.hbxz'),
@@ -199,8 +211,13 @@ impl ChartDatabase {
         Ok(count)
     }
 
-    /// 批量 upsert 航道专题要素
-    pub fn upsert_features(&self, features: &[ChartFeatureInfo]) -> Result<usize, String> {
+    /// 批量 upsert 航道专题要素；task_id 为 Some 时同时记录「任务↔要素」归属，
+    /// 供数据中心按任务精确过滤。要素本身仍全局去重（ON CONFLICT(id) 更新）。
+    pub fn upsert_features(
+        &self,
+        features: &[ChartFeatureInfo],
+        task_id: Option<i64>,
+    ) -> Result<usize, String> {
         let conn = self
             .conn
             .lock()
@@ -253,6 +270,19 @@ impl ChartDatabase {
                 ])
                 .map_err(|e| format!("插入航道要素失败: {}", e))?;
                 count += 1;
+            }
+        }
+
+        // 记录本次任务采到的要素归属（多对多；同一 (task,feature) 重复则忽略）
+        if let Some(tid) = task_id {
+            let mut link = tx
+                .prepare(
+                    "INSERT OR IGNORE INTO chart_task_features (task_id, feature_id) VALUES (?1, ?2)",
+                )
+                .map_err(|e| format!("准备要素归属语句失败: {}", e))?;
+            for feature in features {
+                link.execute(params![tid, feature.id])
+                    .map_err(|e| format!("记录要素归属失败: {}", e))?;
             }
         }
 
@@ -565,6 +595,112 @@ impl ChartDatabase {
                 Self::row_to_feature,
             )
             .map_err(|e| format!("映射范围内航道要素图层失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(features)
+    }
+
+    /// 标记任务参与「按归属过滤」：写一条占位行（feature_id 为空，不匹配任何真实要素，
+    /// 真实要素 id 均带前缀如 "cjhy_fence:"）。这样即使任务一条要素都没采到（失败/空），
+    /// 数据中心也按它自己的空集显示（=不显示），而不是回退到按外接矩形把别的任务串进来。
+    pub fn mark_task_feature_scoped(&self, task_id: i64) -> Result<(), String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.execute(
+            "INSERT OR IGNORE INTO chart_task_features (task_id, feature_id) VALUES (?1, '')",
+            params![task_id],
+        )
+        .map_err(|e| format!("标记任务归属过滤失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 该任务是否参与「按归属过滤」（有任何归属/占位行）。老任务无记录时调用方回退到按范围显示。
+    pub fn task_has_feature_associations(&self, task_id: i64) -> Result<bool, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        let n: i64 = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM chart_task_features WHERE task_id = ?1)",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("查询要素归属失败: {}", e))?;
+        Ok(n != 0)
+    }
+
+    /// 获取「某任务采到的 + 指定图层」的航道要素（按归属表过滤）
+    pub fn get_features_by_layer_and_task(
+        &self,
+        source_layer: &str,
+        task_id: i64,
+    ) -> Result<Vec<ChartFeatureInfo>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT f.id, f.source, f.source_layer, f.source_feature_id, f.name, f.feature_type,
+                        f.geometry_type, f.geometry_json, f.min_lon, f.min_lat, f.max_lon, f.max_lat, f.raw_json
+                 FROM chart_features f
+                 JOIN chart_task_features tf ON tf.feature_id = f.id
+                 WHERE tf.task_id = ?1 AND f.source_layer = ?2
+                 ORDER BY f.name, f.id",
+            )
+            .map_err(|e| format!("查询任务航道要素失败: {}", e))?;
+
+        let features = stmt
+            .query_map(params![task_id, source_layer], Self::row_to_feature)
+            .map_err(|e| format!("映射任务航道要素失败: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(features)
+    }
+
+    /// 获取「某任务采到的 + 指定图层 + 与范围相交」的航道要素（归属表 + bbox 粗筛）
+    pub fn get_features_by_layer_and_task_in_bounds(
+        &self,
+        source_layer: &str,
+        task_id: i64,
+        bounds: &ChartBounds,
+    ) -> Result<Vec<ChartFeatureInfo>, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT f.id, f.source, f.source_layer, f.source_feature_id, f.name, f.feature_type,
+                        f.geometry_type, f.geometry_json, f.min_lon, f.min_lat, f.max_lon, f.max_lat, f.raw_json
+                 FROM chart_features f
+                 JOIN chart_task_features tf ON tf.feature_id = f.id
+                 WHERE tf.task_id = ?1 AND f.source_layer = ?2
+                   AND f.max_lon >= ?3 AND f.min_lon <= ?4 AND f.max_lat >= ?5 AND f.min_lat <= ?6
+                 ORDER BY f.name, f.id",
+            )
+            .map_err(|e| format!("查询范围内任务航道要素失败: {}", e))?;
+
+        let features = stmt
+            .query_map(
+                params![
+                    task_id,
+                    source_layer,
+                    bounds.west,
+                    bounds.east,
+                    bounds.south,
+                    bounds.north
+                ],
+                Self::row_to_feature,
+            )
+            .map_err(|e| format!("映射范围内任务航道要素失败: {}", e))?
             .filter_map(|r| r.ok())
             .collect();
 

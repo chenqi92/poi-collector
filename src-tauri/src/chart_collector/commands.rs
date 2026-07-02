@@ -418,6 +418,13 @@ pub async fn chart_start_feature_collection(
         let mut saved_tiles = 0u64;
 
         if fences || hydro {
+            // 先把任务标记为「按归属过滤」：即使这次采集失败/一条没采到，数据中心也只显示
+            // 它自己的（空），不回退到按范围把别的任务串进来。真实归属在 upsert_features 里写。
+            if task_id > 0 {
+                if let Ok(db) = ChartDatabase::new(&db_path) {
+                    let _ = db.mark_task_feature_scoped(task_id);
+                }
+            }
             let collector = FeatureCollector::new(step, fences, hydro);
             let result = collector
                 .collect(&bounds, stop_flag.clone(), progress_tx.clone(), log_tx.clone())
@@ -433,7 +440,11 @@ pub async fn chart_start_feature_collection(
                         .await;
 
                     match ChartDatabase::new(&db_path) {
-                        Ok(db) => match db.upsert_features(&features) {
+                        // task_id > 0 时记录「任务↔要素」归属，供数据中心按任务精确过滤
+                        Ok(db) => match db.upsert_features(
+                            &features,
+                            if task_id > 0 { Some(task_id) } else { None },
+                        ) {
                             Ok(count) => {
                                 saved_features = count as u64;
                                 let _ = log_tx
@@ -1888,18 +1899,29 @@ pub fn chart_get_fence_features() -> Result<Vec<ChartFeatureInfo>, String> {
     db.get_features_by_layer("electronic_fence")
 }
 
-/// 按来源图层获取航道专题要素（供航道图叠加展示）
+/// 按来源图层获取航道专题要素（供航道图叠加展示）。
+/// 传 task_id 且该任务有归属记录时，只返回该任务采到的要素；否则（老任务/未传）
+/// 回退到按图层返回全部，保持旧行为不破坏。
 #[tauri::command]
-pub fn chart_get_features_by_layer(source_layer: String) -> Result<Vec<ChartFeatureInfo>, String> {
+pub fn chart_get_features_by_layer(
+    source_layer: String,
+    task_id: Option<i64>,
+) -> Result<Vec<ChartFeatureInfo>, String> {
     if source_layer != "electronic_fence" && source_layer != "HYDRO_A" {
         return Err(format!("不支持的航道要素图层: {}", source_layer));
     }
 
     let db = ChartDatabase::new(&get_db_path())?;
-    db.get_features_by_layer(&source_layer)
+    match task_id {
+        Some(tid) if db.task_has_feature_associations(tid).unwrap_or(false) => {
+            db.get_features_by_layer_and_task(&source_layer, tid)
+        }
+        _ => db.get_features_by_layer(&source_layer),
+    }
 }
 
-/// 按来源图层和 bbox 获取航道专题要素（供视野内叠加展示）
+/// 按来源图层和 bbox 获取航道专题要素（供视野内叠加展示）。
+/// task_id 同上：有归属记录则按任务精确过滤，否则回退到纯 bbox。
 #[tauri::command]
 pub fn chart_get_features_by_layer_in_bounds(
     source_layer: String,
@@ -1907,6 +1929,7 @@ pub fn chart_get_features_by_layer_in_bounds(
     south: f64,
     east: f64,
     north: f64,
+    task_id: Option<i64>,
 ) -> Result<Vec<ChartFeatureInfo>, String> {
     if source_layer != "electronic_fence" && source_layer != "HYDRO_A" {
         return Err(format!("不支持的航道要素图层: {}", source_layer));
@@ -1918,7 +1941,12 @@ pub fn chart_get_features_by_layer_in_bounds(
     }
 
     let db = ChartDatabase::new(&get_db_path())?;
-    db.get_features_by_layer_in_bounds(&source_layer, &bounds)
+    match task_id {
+        Some(tid) if db.task_has_feature_associations(tid).unwrap_or(false) => {
+            db.get_features_by_layer_and_task_in_bounds(&source_layer, tid, &bounds)
+        }
+        _ => db.get_features_by_layer_in_bounds(&source_layer, &bounds),
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
