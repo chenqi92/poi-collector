@@ -332,11 +332,9 @@ export function BrowseView() {
             setVisibleChartLayers(new Set())
             return
         }
-        // 任务自带图层 + 默认开启矢量水域面/航道要素（这些要素全局存储、不一定记在任务的
-        // layers 里，但库里若有就应在任务区域内显示，避免"采过却看不到"）。
-        setVisibleChartLayers(
-            new Set([...selectedChartTask.available_layers, 'HYDRO_A', 'electronic_fence']),
-        )
+        // 只开启该任务实际配置/采集的图层。available_layers 由任务的 fences/hydro 落库，
+        // 准确反映采了哪些要素；不再强行叠加全部要素层，避免把别的任务的要素串进来。
+        setVisibleChartLayers(new Set(selectedChartTask.available_layers))
     }, [selectedChartTask])
     const chartBounds: [number, number, number, number] | undefined = selectedChartTask
         ? [
@@ -359,12 +357,17 @@ export function BrowseView() {
         () => selectedChartTask?.available_layers.filter(l => CHART_RASTER_LAYERS.has(l)) ?? [],
         [selectedChartTask]
     )
-    // 工具栏图层：任务自带图层 + 始终可切换的矢量水域面/航道要素（即使任务未列出，
-    // 库里若有这些要素也能在任务区域内显示）
-    const toolbarLayers = useMemo(() => {
-        const base = selectedChartTask?.available_layers ?? []
-        const extra = ['HYDRO_A', 'electronic_fence'].filter(l => !base.includes(l))
-        return [...base, ...extra]
+    // 工具栏图层：只列该任务自带的图层（含它配置的水域面/航道要素），
+    // 不再叠加任务未采的要素层。
+    const toolbarLayers = useMemo(
+        () => selectedChartTask?.available_layers ?? [],
+        [selectedChartTask],
+    )
+    // 选中任务的数字 id（"chart_123" → 123），用于按任务归属精确过滤要素；
+    // 老瓦片任务（"legacy_tile_*"）无矢量要素，解析不出则为 undefined（回退按范围显示）。
+    const chartTaskNumericId = useMemo(() => {
+        const m = /^chart_(\d+)$/.exec(selectedChartTask?.id ?? '')
+        return m ? Number(m[1]) : undefined
     }, [selectedChartTask])
     const toggleChartLayer = (layer: string) => {
         setVisibleChartLayers(prev => {
@@ -803,6 +806,7 @@ export function BrowseView() {
                                     fitBounds={false}
                                     controlOffsetTop={visibleChartLayers.has('electronic_fence') ? 38 : 0}
                                     queryBounds={chartQueryBounds}
+                                    taskId={chartTaskNumericId}
                                     viewportLoad={!hydroOutlineOnly}
                                     outlineOnly={hydroOutlineOnly}
                                     baseCrs={chartBaseCrs}
@@ -814,6 +818,7 @@ export function BrowseView() {
                                     kind="fence"
                                     fitBounds={false}
                                     queryBounds={chartQueryBounds}
+                                    taskId={chartTaskNumericId}
                                     baseCrs={chartBaseCrs}
                                 />
                                 <ChartZoomIndicator />

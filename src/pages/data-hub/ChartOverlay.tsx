@@ -69,13 +69,17 @@ interface ChartFeatureBounds {
     north: number
 }
 
-export function fetchChartFeaturesByLayer(sourceLayer: ChartFeatureSourceLayer): Promise<ChartFeature[]> {
-    return invoke<ChartFeature[]>('chart_get_features_by_layer', { sourceLayer })
+export function fetchChartFeaturesByLayer(
+    sourceLayer: ChartFeatureSourceLayer,
+    taskId?: number,
+): Promise<ChartFeature[]> {
+    return invoke<ChartFeature[]>('chart_get_features_by_layer', { sourceLayer, taskId })
 }
 
 export function fetchChartFeaturesByLayerInBounds(
     sourceLayer: ChartFeatureSourceLayer,
     bounds: ChartFeatureBounds,
+    taskId?: number,
 ): Promise<ChartFeature[]> {
     return invoke<ChartFeature[]>('chart_get_features_by_layer_in_bounds', {
         sourceLayer,
@@ -83,6 +87,7 @@ export function fetchChartFeaturesByLayerInBounds(
         south: bounds.south,
         east: bounds.east,
         north: bounds.north,
+        taskId,
     })
 }
 
@@ -185,6 +190,7 @@ export function ChartFeatureOverlay({
     controlOffsetTop = 0,
     viewportLoad = false,
     queryBounds,
+    taskId,
     outlineOnly = false,
     baseCrs = 'gcj02',
 }: {
@@ -196,6 +202,8 @@ export function ChartFeatureOverlay({
     controlOffsetTop?: number
     viewportLoad?: boolean
     queryBounds?: ChartFeatureBounds
+    /** 选中任务的数字 id：该任务有归属记录时只显示它采到的要素（否则回退按范围显示） */
+    taskId?: number
     /** 仅水域面有效：只画最外层外环边框（去洞、去嵌套内层） */
     outlineOnly?: boolean
     /** 当前底图坐标系；WGS-84 数据渲染时纠偏到此坐标系（gcj02 底图=高德/天地图） */
@@ -240,8 +248,8 @@ export function ChartFeatureOverlay({
         const loadFeatures = (bounds?: ChartFeatureBounds) => {
             const requestSeq = ++requestSeqRef.current
             const job = bounds
-                ? fetchChartFeaturesByLayerInBounds(sourceLayer, bounds)
-                : fetchChartFeaturesByLayer(sourceLayer)
+                ? fetchChartFeaturesByLayerInBounds(sourceLayer, bounds, taskId)
+                : fetchChartFeaturesByLayer(sourceLayer, taskId)
 
             job.then((features) => {
                 if (cancelled) return
@@ -401,7 +409,7 @@ export function ChartFeatureOverlay({
             map.off('moveend zoomend', scheduleViewportLoad)
             clearLayer()
         }
-    }, [baseCrs, fitBounds, kind, label, map, outlineOnly, queryBounds, sourceLayer, styleConfig, viewportLoad, visible])
+    }, [baseCrs, fitBounds, kind, label, map, outlineOnly, queryBounds, taskId, sourceLayer, styleConfig, viewportLoad, visible])
 
     if (!visible || count === null) return null
 
