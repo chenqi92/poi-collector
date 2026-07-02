@@ -7,7 +7,12 @@ use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde_json::{json, Value};
+use std::error::Error as StdError;
 use std::time::Duration;
+
+/// HTTP 客户端整体超时（秒）。跨很多索引的聚合较慢，30s 容易被客户端提前掐断，
+/// 调大到 60s；配合 ais_list_ships 分批查询，单次请求实际都远快于此。
+const REQUEST_TIMEOUT_SECS: u64 = 60;
 
 pub struct EsClient {
     client: reqwest::Client,
@@ -17,7 +22,8 @@ pub struct EsClient {
 
 impl EsClient {
     pub fn new(conn: &EsConnection) -> Result<Self, String> {
-        let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
+        let mut builder =
+            reqwest::Client::builder().timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS));
         if conn.accept_invalid_certs {
             builder = builder.danger_accept_invalid_certs(true);
         }
@@ -69,7 +75,7 @@ impl EsClient {
             .headers(self.headers.clone())
             .send()
             .await
-            .map_err(|e| format!("连接失败: {}", e))?;
+            .map_err(|e| format!("连接失败: {}", describe_send_error(&e)))?;
         let status = resp.status();
         let body = resp
             .text()
@@ -100,7 +106,7 @@ impl EsClient {
             .body(serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string()))
             .send()
             .await
-            .map_err(|e| format!("查询失败: {}", e))?;
+            .map_err(|e| format!("查询失败: {}", describe_send_error(&e)))?;
         let status = resp.status();
         let text = resp
             .text()
@@ -135,7 +141,7 @@ impl EsClient {
             .body(serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string()))
             .send()
             .await
-            .map_err(|e| format!("查询失败: {}", e))?;
+            .map_err(|e| format!("查询失败: {}", describe_send_error(&e)))?;
         let status = resp.status();
         let text = resp
             .text()
@@ -165,7 +171,7 @@ impl EsClient {
             .body(body.to_string())
             .send()
             .await
-            .map_err(|e| format!("查询失败: {}", e))?;
+            .map_err(|e| format!("查询失败: {}", describe_send_error(&e)))?;
         let status = resp.status();
         let text = resp
             .text()
@@ -212,6 +218,28 @@ pub fn total_from_hits(resp: &Value) -> (u64, bool) {
         }
         _ => (0, false),
     }
+}
+
+/// 把 reqwest 发送错误翻译成可读中文。reqwest 0.12 的 Display 只输出
+/// "error sending request for url (...)"，真正原因（超时 / 连接被拒 / 断连）在
+/// error 的 source 链里，这里取出来，避免只甩一句没信息量的原文。
+fn describe_send_error(e: &reqwest::Error) -> String {
+    if e.is_timeout() {
+        return format!(
+            "请求超时（客户端 {}s 内没收到响应；通常是所选索引过多 / 时间范围过大，请缩小时间范围或减少索引）",
+            REQUEST_TIMEOUT_SECS
+        );
+    }
+    if e.is_connect() {
+        return "连接失败（ES 拒绝连接或网络不通，请检查主机 / 端口 / ES 是否在线）".to_string();
+    }
+    let mut parts = vec![e.to_string()];
+    let mut src: Option<&(dyn StdError + 'static)> = e.source();
+    while let Some(s) = src {
+        parts.push(s.to_string());
+        src = s.source();
+    }
+    parts.join(" -> ")
 }
 
 fn truncate(s: &str, n: usize) -> String {

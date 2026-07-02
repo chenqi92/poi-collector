@@ -5,10 +5,16 @@ use super::decoder;
 use super::es_client::{total_from_hits, EsClient};
 use super::mapping::{collect_field_paths, extract_point, get_path, parse_timestamp};
 use super::types::*;
+use futures::stream::{self, StreamExt};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+
+/// 船只列表按索引分批查询：每批最多 SHIP_LIST_BATCH 个索引，最多 SHIP_LIST_CONCURRENCY
+/// 批并发。一次性对几十个索引做 terms+top_hits 聚合会超时/被 ES 断连，分批后每次都很轻。
+const SHIP_LIST_BATCH: usize = 10;
+const SHIP_LIST_CONCURRENCY: usize = 3;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
@@ -285,57 +291,107 @@ pub async fn ais_list_ships(
         );
     }
 
+    // 分批查询后按 MMSI 合并，末尾再截到 limit。每批多取一些（≥1000），减少某船在
+    // 各批都刚好排在名次外被漏掉导致的计数偏少；top_hits 只取 1 条，多取桶开销可控。
+    let final_limit = limit.unwrap_or(500) as usize;
+    let agg_size = final_limit.max(1000);
     let body = json!({
         "size": 0,
         "query": { "bool": { "filter": filters } },
         "aggs": {
             "ships": {
-                "terms": { "field": id_f, "size": limit.unwrap_or(500) },
+                "terms": { "field": id_f, "size": agg_size },
                 "aggs": Value::Object(ship_aggs)
             }
         }
     });
 
     let client = EsClient::new(&conn)?;
-    let resp = client.search(&idx, &body).await?;
-    let buckets = resp["aggregations"]["ships"]["buckets"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
 
-    let mut out = Vec::with_capacity(buckets.len());
-    for b in &buckets {
-        let mmsi = match val_to_string(&b["key"]) {
-            Some(s) => s,
-            None => continue,
+    // 索引可能有几十个（选了整月 × shipmixhistory/aismessage 两个家族）。一次性对全部索引
+    // 做 terms+top_hits 聚合很容易超过客户端超时 / 被 ES 断连。改成分批并发查询、按 MMSI 合并：
+    // doc_count 相加、first/last 取极值、船名取任一非空。索引互不重叠，计数不会重复。
+    let batches: Vec<String> = indices
+        .chunks(SHIP_LIST_BATCH)
+        .map(join_indices)
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let responses: Vec<Result<Value, String>> = stream::iter(batches)
+        .map(|bidx| {
+            let client = &client;
+            let body = &body;
+            async move { client.search(&bidx, body).await }
+        })
+        .buffer_unordered(SHIP_LIST_CONCURRENCY)
+        .collect()
+        .await;
+
+    let mut acc: HashMap<String, ShipSummary> = HashMap::new();
+    for resp in responses {
+        let resp = resp?; // 任一批失败即整体失败（错误已在 es_client 归类为超时/断连等可读信息）
+        let Some(buckets) = resp["aggregations"]["ships"]["buckets"].as_array() else {
+            continue;
         };
-        let count = b["doc_count"].as_u64().unwrap_or(0);
-        let first_ts = b["first"]["value"]
-            .as_f64()
-            .map(|v| norm_ts(v, &m.timestamp_format));
-        let last_ts = b["last"]["value"]
-            .as_f64()
-            .map(|v| norm_ts(v, &m.timestamp_format));
-        let name = if m.name.trim().is_empty() {
-            None
-        } else {
-            b["nm"]["hits"]["hits"]
-                .as_array()
-                .and_then(|h| h.first())
-                .and_then(|h| h.get("_source"))
-                .and_then(|src| get_path(src, m.name.trim()))
-                .and_then(val_to_string)
-        };
-        out.push(ShipSummary {
-            mmsi,
-            name,
-            count,
-            first_ts,
-            last_ts,
-        });
+        for b in buckets {
+            let Some(mmsi) = val_to_string(&b["key"]) else {
+                continue;
+            };
+            let count = b["doc_count"].as_u64().unwrap_or(0);
+            let first_ts = b["first"]["value"]
+                .as_f64()
+                .map(|v| norm_ts(v, &m.timestamp_format));
+            let last_ts = b["last"]["value"]
+                .as_f64()
+                .map(|v| norm_ts(v, &m.timestamp_format));
+            let name = if m.name.trim().is_empty() {
+                None
+            } else {
+                b["nm"]["hits"]["hits"]
+                    .as_array()
+                    .and_then(|h| h.first())
+                    .and_then(|h| h.get("_source"))
+                    .and_then(|src| get_path(src, m.name.trim()))
+                    .and_then(val_to_string)
+            };
+            let e = acc.entry(mmsi.clone()).or_insert_with(|| ShipSummary {
+                mmsi,
+                name: None,
+                count: 0,
+                first_ts: None,
+                last_ts: None,
+            });
+            e.count += count;
+            e.first_ts = min_opt(e.first_ts, first_ts);
+            e.last_ts = max_opt(e.last_ts, last_ts);
+            if e.name.is_none() {
+                e.name = name;
+            }
+        }
     }
+
+    let mut out: Vec<ShipSummary> = acc.into_values().collect();
     out.sort_by(|a, b| b.count.cmp(&a.count));
+    out.truncate(final_limit);
     Ok(out)
+}
+
+/// 合并两个可选时间戳，取较小（None 视为无值）
+fn min_opt(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.min(y)),
+        (Some(x), None) => Some(x),
+        (None, y) => y,
+    }
+}
+
+/// 合并两个可选时间戳，取较大（None 视为无值）
+fn max_opt(a: Option<i64>, b: Option<i64>) -> Option<i64> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(x.max(y)),
+        (Some(x), None) => Some(x),
+        (None, y) => y,
+    }
 }
 
 // ===== 单船航迹（from/size 分页，跨版本兼容）=====
