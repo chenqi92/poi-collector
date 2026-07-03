@@ -807,7 +807,7 @@ export function BrowseView() {
                                     controlOffsetTop={visibleChartLayers.has('electronic_fence') ? 38 : 0}
                                     queryBounds={chartQueryBounds}
                                     taskId={chartTaskNumericId}
-                                    viewportLoad={!hydroOutlineOnly}
+                                    viewportLoad
                                     outlineOnly={hydroOutlineOnly}
                                     baseCrs={chartBaseCrs}
                                 />

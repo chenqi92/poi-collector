@@ -18,7 +18,7 @@ import { emptyMapping } from '@/lib/ais/types'
 import { autoDetect, mappingSummary } from '@/lib/ais/autodetect'
 import { IndexPickerDialog, indicesSummary } from './IndexPickerDialog'
 import { cleanTrack, DEFAULT_TRAJ, haversineM, type Segment, segmentTrips, tripColor } from '@/lib/ais/trajectory'
-import { geometryToPolygons, dissolveOutline, pointInWater, type WaterPolygon } from '@/lib/ais/geo'
+import { geometryToPolygons, dissolveOutline, pointInWater, type WaterPolygon, type Bbox } from '@/lib/ais/geo'
 import { normalizeToWgs84 } from '@/lib/ais/coords'
 
 const AMAP_STREET_URL =
@@ -65,6 +65,48 @@ function MapAutosize() {
             clearTimeout(t)
         }
     }, [map])
+    return null
+}
+
+/** 两个 bbox 是否相交 */
+function bboxIntersects(a: Bbox, b: Bbox): boolean {
+    return a.minLon <= b.maxLon && a.maxLon >= b.minLon && a.minLat <= b.maxLat && a.maxLat >= b.minLat
+}
+
+/** 按视野跨度外扩 bbox（避免边缘围栏被裁断） */
+function padBbox(b: Bbox, ratio = 0.3): Bbox {
+    const dLon = (b.maxLon - b.minLon) * ratio
+    const dLat = (b.maxLat - b.minLat) * ratio
+    return { minLon: b.minLon - dLon, minLat: b.minLat - dLat, maxLon: b.maxLon + dLon, maxLat: b.maxLat + dLat }
+}
+
+/**
+ * 跟踪地图当前视野 bbox（防抖），上报给父组件。用于把水域面「只取边缘」的并集限定到
+ * 视野内，栅格分辨率随缩放自适应，避免按整个任务大范围算格子导致外框过粗、线段太直。
+ */
+function ViewBoundsTracker({ onChange }: { onChange: (b: Bbox) => void }) {
+    const map = useMap()
+    useEffect(() => {
+        let t: number | null = null
+        const report = () => {
+            if (t != null) window.clearTimeout(t)
+            t = window.setTimeout(() => {
+                const b = map.getBounds()
+                onChange({
+                    minLon: b.getWest(),
+                    minLat: b.getSouth(),
+                    maxLon: b.getEast(),
+                    maxLat: b.getNorth(),
+                })
+            }, 200)
+        }
+        report()
+        map.on('moveend zoomend', report)
+        return () => {
+            if (t != null) window.clearTimeout(t)
+            map.off('moveend zoomend', report)
+        }
+    }, [map, onChange])
     return null
 }
 
@@ -164,6 +206,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [waterLoading, setWaterLoading] = useState(false)
     const [filterOn, setFilterOn] = useState(false)
     const [onlyOutermost, setOnlyOutermost] = useState(true)
+    const [viewBbox, setViewBbox] = useState<Bbox | null>(null)
     const [panelOpen, setPanelOpen] = useState(true)
     const [indexPickerOpen, setIndexPickerOpen] = useState(false)
     const [waterTasks, setWaterTasks] = useState<ChartTaskLite[]>([])
@@ -529,12 +572,17 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         }
     }, [waterLayer, waterTaskId, waterTasks])
 
-    // 合并为水域范围（扫描线并集，消掉嵌套内框、挖掉中间岛屿），用于范围判断与渲染；
-    // 与数据中心同一套 dissolveOutline；原始 waterPolys 不变
-    const effectiveWaterPolys = useMemo(
-        () => (onlyOutermost ? dissolveOutline(waterPolys) : waterPolys),
-        [onlyOutermost, waterPolys],
-    )
+    // 合并为水域范围（扫描线并集，消掉嵌套内框、挖掉中间岛屿），只用于地图显示。
+    // 「只取边缘」时只对当前视野内（外扩一圈）的水域面做并集：栅格分辨率随缩放自适应，
+    // 避免按整个任务大范围算格子导致岸线外框过粗、线段太直（与数据中心同一套 dissolveOutline）。
+    // 原始 waterPolys 不变，水域内外判定仍用它。
+    const effectiveWaterPolys = useMemo(() => {
+        if (!onlyOutermost) return waterPolys
+        if (!viewBbox) return dissolveOutline(waterPolys)
+        const pv = padBbox(viewBbox)
+        const polys = waterPolys.filter((p) => bboxIntersects(p.bbox, pv))
+        return dissolveOutline(polys)
+    }, [onlyOutermost, waterPolys, viewBbox])
 
     // 水域内外划分：用「原始水域面」做点在多边形判断（精确，不受合并外框的栅格化误差影响）。
     // effectiveWaterPolys 只用于地图显示；这里始终用 waterPolys 避免边缘点被误判为外点。
@@ -1016,6 +1064,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         <CachedOsmTileLayer key="osm" />
                     )}
                     <MapAutosize />
+                    <ViewBoundsTracker onChange={setViewBbox} />
                     <AisRouteLayer
                         segments={segments}
                         anomalies={anomalies}

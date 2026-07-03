@@ -259,11 +259,15 @@ export function dissolveOutlineGrid(
     if (!(lonSpan > 0) || !(latSpan > 0)) return []
 
     // 目标格边长：按长轴分成 targetCells 份；但对近方形的大区域再设总格数上限，
-    // 避免 occ（cols*rows 的 Uint8Array）占用爆内存。两者取较大（较粗）的格。
+    // 避免 occ（cols*rows 的 Uint8Array）占用爆内存。三者取较大（较粗）的格。
     const maxCells = 32_000_000
+    // 最细格边长下限（约 2m）：水域面顶点本身就是米级精度，格子再细也不会更准。
+    // cellByArea 反算出的格恒好对应 ~maxCells 个格，视野很小时会退化成亚米格，导致每次
+    // 平移都在小视野里重算 32M 空网格、顶点数暴涨。用下限把小视野的格数压下来。
+    const minCell = 1.8e-5
     const cellByAxis = Math.max(lonSpan, latSpan) / Math.max(16, targetCells)
     const cellByArea = Math.sqrt((lonSpan * latSpan) / maxCells)
-    const cell = Math.max(cellByAxis, cellByArea)
+    const cell = Math.max(cellByAxis, cellByArea, minCell)
     const originLon = minLon - cell
     const originLat = minLat - cell
     const cols = Math.ceil(lonSpan / cell) + 2 // 四周各留 1 格空白，保证边界闭合

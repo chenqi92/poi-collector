@@ -1148,9 +1148,16 @@ fn simplify_closed_ring(ring: &OutlineRing, eps: f64) -> OutlineRing {
 /// 水域外环内即为水）+ 单元边界有向边追踪，输出合并后的外环（CCW），消掉内部
 /// 共享边与洞。跨要素合并，结果是若干条「围栏」要素，替换掉原始 HYDRO_A 多边形
 /// 要素；非 HYDRO_A 要素、HYDRO_A 中的非多边形要素，原样保留。
-/// 与前端 geo.ts 的 dissolveOutlineGrid 同一套算法。
+/// 栅格分辨率与前端 geo.ts 的 dissolveOutlineGrid 同一套算法（长轴份数 + 总格数上限 +
+/// 最细格下限三者取较粗的格）。导出是一次性、后台线程操作，可比前端显示用更细的网格
+/// （TARGET_CELLS / MAX_CELLS 更大），换取更贴合真实岸线的外框；不做 Chaikin 圆角（那是
+/// 显示美化，会引入合成顶点，导出保留栅格追踪 + DP 抽稀后的原始折线更准）。
 fn dissolve_water_outlines(features: Vec<ChartFeatureInfo>) -> Vec<ChartFeatureInfo> {
-    const TARGET_CELLS: f64 = 4096.0;
+    const TARGET_CELLS: f64 = 16384.0;
+    // 总格数上限：occ 为 cols*rows 的 Vec<u8>，128M ≈ 128MB 一次性占用（桌面可接受）。
+    const MAX_CELLS: f64 = 128_000_000.0;
+    // 最细格边长下限（约 2m）：水域面顶点本身就是米级精度，导出小范围时避免反算出亚米格。
+    const MIN_CELL: f64 = 1.8e-5;
 
     // 1) 收集所有水域面多边形（含全部环：外环 + 洞）+ 总 bbox；记录哪些要素是水域多边形
     let mut polygons: Vec<Vec<OutlineRing>> = Vec::new();
@@ -1186,7 +1193,9 @@ fn dissolve_water_outlines(features: Vec<ChartFeatureInfo>) -> Vec<ChartFeatureI
     if !(lon_span > 0.0) || !(lat_span > 0.0) {
         return features;
     }
-    let cell = lon_span.max(lat_span) / TARGET_CELLS;
+    let cell_by_axis = lon_span.max(lat_span) / TARGET_CELLS;
+    let cell_by_area = ((lon_span * lat_span) / MAX_CELLS).sqrt();
+    let cell = cell_by_axis.max(cell_by_area).max(MIN_CELL);
     let origin_lon = bbox.min_lon - cell;
     let origin_lat = bbox.min_lat - cell;
     let cols = (lon_span / cell).ceil() as usize + 2;
