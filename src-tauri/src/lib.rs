@@ -112,6 +112,7 @@ pub fn run() {
             chart_commands::chart_get_fence_features,
             chart_commands::chart_get_features_by_layer,
             chart_commands::chart_get_features_by_layer_in_bounds,
+            chart_commands::chart_count_features_by_layer_in_bounds,
             chart_commands::chart_get_buoy_extent,
             // OSM 瓦片本地缓存
             tile_cache::cached_osm_tile,

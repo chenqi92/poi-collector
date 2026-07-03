@@ -91,6 +91,25 @@ export function fetchChartFeaturesByLayerInBounds(
     })
 }
 
+/** 只统计范围内要素数量（走 bbox 索引、不读几何），用于拉几何前先判断是否过多 */
+export function fetchChartFeatureCountInBounds(
+    sourceLayer: ChartFeatureSourceLayer,
+    bounds: ChartFeatureBounds,
+    taskId?: number,
+): Promise<number> {
+    return invoke<number>('chart_count_features_by_layer_in_bounds', {
+        sourceLayer,
+        west: bounds.west,
+        south: bounds.south,
+        east: bounds.east,
+        north: bounds.north,
+        taskId,
+    })
+}
+
+/** 单个视野内水域面要素数量上限：超过就提示放大，不拉几何 / 不 dissolve，避免卡死界面 */
+const MAX_HYDRO_FEATURES = 3000
+
 const FEATURE_STYLES: Record<ChartFeatureOverlayKind, {
     pane: string
     zIndex: string
@@ -215,6 +234,8 @@ export function ChartFeatureOverlay({
     const requestSeqRef = useRef(0)
     const [count, setCount] = useState<number | null>(null)
     const [failed, setFailed] = useState(false)
+    // 范围内水域面过多时的数量（触发「放大查看」提示，且不拉几何）；null=正常
+    const [overflow, setOverflow] = useState<number | null>(null)
     const styleConfig = FEATURE_STYLES[kind]
 
     useEffect(() => {
@@ -231,6 +252,7 @@ export function ChartFeatureOverlay({
             clearLayer()
             setCount(null)
             setFailed(false)
+            setOverflow(null)
             return clearLayer
         }
 
@@ -247,6 +269,36 @@ export function ChartFeatureOverlay({
 
         const loadFeatures = (bounds?: ChartFeatureBounds) => {
             const requestSeq = ++requestSeqRef.current
+
+            // 水域面在视野模式下先探数量：范围内要素过多（缩太小把整条长江都框进来）就提示
+            // 放大，不拉几何、不 dissolve，避免一次性拉几百 MB 卡死界面。计数走 bbox 索引很快。
+            if (bounds && isHydro) {
+                fetchChartFeatureCountInBounds(sourceLayer, bounds, taskId)
+                    .then((n) => {
+                        if (cancelled || requestSeq !== requestSeqRef.current) return
+                        if (n > MAX_HYDRO_FEATURES) {
+                            clearLayer()
+                            setOverflow(n)
+                            setCount(null)
+                            setFailed(false)
+                            return
+                        }
+                        setOverflow(null)
+                        runFetch(bounds, requestSeq)
+                    })
+                    .catch(() => {
+                        // 计数失败不阻断：照常尝试拉取（由后续错误处理兜底）
+                        if (cancelled || requestSeq !== requestSeqRef.current) return
+                        setOverflow(null)
+                        runFetch(bounds, requestSeq)
+                    })
+                return
+            }
+            setOverflow(null)
+            runFetch(bounds, requestSeq)
+        }
+
+        const runFetch = (bounds: ChartFeatureBounds | undefined, requestSeq: number) => {
             const job = bounds
                 ? fetchChartFeaturesByLayerInBounds(sourceLayer, bounds, taskId)
                 : fetchChartFeaturesByLayer(sourceLayer, taskId)
@@ -411,7 +463,20 @@ export function ChartFeatureOverlay({
         }
     }, [baseCrs, fitBounds, kind, label, map, outlineOnly, queryBounds, taskId, sourceLayer, styleConfig, viewportLoad, visible])
 
-    if (!visible || count === null) return null
+    if (!visible) return null
+
+    if (overflow !== null) {
+        return (
+            <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'none', top: controlOffsetTop }}>
+                <div className={`leaflet-control chart-feature-pill chart-${kind}-pill is-error`}>
+                    <span className="dot" />
+                    <span>{`${label}范围内 ${overflow} 个，放大查看`}</span>
+                </div>
+            </div>
+        )
+    }
+
+    if (count === null) return null
 
     return (
         <div className="leaflet-top leaflet-right" style={{ pointerEvents: 'none', top: controlOffsetTop }}>

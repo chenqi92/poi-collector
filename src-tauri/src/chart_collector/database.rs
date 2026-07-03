@@ -542,10 +542,11 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
+        // raw_json 返回空串：叠加显示只用 geometry_json，减半 IPC 量（导出走别的查询）。
         let mut stmt = conn
             .prepare(
                 "SELECT id, source, source_layer, source_feature_id, name, feature_type, geometry_type,
-                        geometry_json, min_lon, min_lat, max_lon, max_lat, raw_json
+                        geometry_json, min_lon, min_lat, max_lon, max_lat, '' AS raw_json
                  FROM chart_features
                  WHERE source_layer = ?1
                  ORDER BY name, id",
@@ -572,10 +573,12 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
+        // raw_json 返回空串：范围内叠加显示只用 geometry_json，不传原始 raw_json 可把 IPC
+        // 传输量减半，避免视野内要素多时一次性传几百 MB 卡界面（导出走别的查询，不受影响）。
         let mut stmt = conn
             .prepare(
                 "SELECT id, source, source_layer, source_feature_id, name, feature_type, geometry_type,
-                        geometry_json, min_lon, min_lat, max_lon, max_lat, raw_json
+                        geometry_json, min_lon, min_lat, max_lon, max_lat, '' AS raw_json
                  FROM chart_features
                  WHERE source_layer = ?1
                    AND max_lon >= ?2 AND min_lon <= ?3 AND max_lat >= ?4 AND min_lat <= ?5
@@ -599,6 +602,62 @@ impl ChartDatabase {
             .collect();
 
         Ok(features)
+    }
+
+    /// 统计指定图层与范围内相交的要素数量（只走 bbox 索引，不读几何，用于前端在拉取
+    /// 大量几何 / dissolve 之前先判断范围内数据是否过多，避免一次性拉几百 MB 卡死界面）。
+    pub fn count_features_by_layer_in_bounds(
+        &self,
+        source_layer: &str,
+        bounds: &ChartBounds,
+    ) -> Result<i64, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM chart_features
+             WHERE source_layer = ?1
+               AND max_lon >= ?2 AND min_lon <= ?3 AND max_lat >= ?4 AND min_lat <= ?5",
+            params![
+                source_layer,
+                bounds.west,
+                bounds.east,
+                bounds.south,
+                bounds.north
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("统计范围内航道要素失败: {}", e))
+    }
+
+    /// 统计指定图层与范围内、且属于某任务的要素数量（任务有归属记录时用）。
+    pub fn count_features_by_layer_and_task_in_bounds(
+        &self,
+        source_layer: &str,
+        task_id: i64,
+        bounds: &ChartBounds,
+    ) -> Result<i64, String> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| format!("获取数据库锁失败: {}", e))?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM chart_features f
+             JOIN chart_task_features tf ON tf.feature_id = f.id
+             WHERE tf.task_id = ?1 AND f.source_layer = ?2
+               AND f.max_lon >= ?3 AND f.min_lon <= ?4 AND f.max_lat >= ?5 AND f.min_lat <= ?6",
+            params![
+                task_id,
+                source_layer,
+                bounds.west,
+                bounds.east,
+                bounds.south,
+                bounds.north
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("统计任务范围内航道要素失败: {}", e))
     }
 
     /// 标记任务参与「按归属过滤」：写一条占位行（feature_id 为空，不匹配任何真实要素，
@@ -644,10 +703,11 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
+        // raw_json 返回空串（同上）：显示不需要，减半 IPC 量。
         let mut stmt = conn
             .prepare(
                 "SELECT f.id, f.source, f.source_layer, f.source_feature_id, f.name, f.feature_type,
-                        f.geometry_type, f.geometry_json, f.min_lon, f.min_lat, f.max_lon, f.max_lat, f.raw_json
+                        f.geometry_type, f.geometry_json, f.min_lon, f.min_lat, f.max_lon, f.max_lat, '' AS raw_json
                  FROM chart_features f
                  JOIN chart_task_features tf ON tf.feature_id = f.id
                  WHERE tf.task_id = ?1 AND f.source_layer = ?2
@@ -676,10 +736,11 @@ impl ChartDatabase {
             .lock()
             .map_err(|e| format!("获取数据库锁失败: {}", e))?;
 
+        // raw_json 返回空串（同 get_features_by_layer_in_bounds）：显示不需要，减半 IPC 量。
         let mut stmt = conn
             .prepare(
                 "SELECT f.id, f.source, f.source_layer, f.source_feature_id, f.name, f.feature_type,
-                        f.geometry_type, f.geometry_json, f.min_lon, f.min_lat, f.max_lon, f.max_lat, f.raw_json
+                        f.geometry_type, f.geometry_json, f.min_lon, f.min_lat, f.max_lon, f.max_lat, '' AS raw_json
                  FROM chart_features f
                  JOIN chart_task_features tf ON tf.feature_id = f.id
                  WHERE tf.task_id = ?1 AND f.source_layer = ?2

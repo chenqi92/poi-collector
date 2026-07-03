@@ -1958,6 +1958,34 @@ pub fn chart_get_features_by_layer_in_bounds(
     }
 }
 
+/// 统计范围内某图层要素数量（只走 bbox 索引，不读几何）。前端在真正拉几何 + dissolve 前
+/// 先探一下：范围内数据过多（如缩得太小把整条长江都框进来）就提示放大，不发起大请求，
+/// 避免一次性拉几百 MB 卡死界面。task_id 归属逻辑同 chart_get_features_by_layer_in_bounds。
+#[tauri::command]
+pub fn chart_count_features_by_layer_in_bounds(
+    source_layer: String,
+    west: f64,
+    south: f64,
+    east: f64,
+    north: f64,
+    task_id: Option<i64>,
+) -> Result<i64, String> {
+    if source_layer != "electronic_fence" && source_layer != "HYDRO_A" {
+        return Err(format!("不支持的航道要素图层: {}", source_layer));
+    }
+    let bounds = ChartBounds::new(west, south, east, north);
+    if !bounds.is_valid() {
+        return Err("无效的边界范围".to_string());
+    }
+    let db = ChartDatabase::new(&get_db_path())?;
+    match task_id {
+        Some(tid) if db.task_has_feature_associations(tid).unwrap_or(false) => {
+            db.count_features_by_layer_and_task_in_bounds(&source_layer, tid, &bounds)
+        }
+        _ => db.count_features_by_layer_in_bounds(&source_layer, &bounds),
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BuoyExtent {
     pub south: f64,
