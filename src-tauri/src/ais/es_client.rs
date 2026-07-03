@@ -66,25 +66,52 @@ impl EsClient {
         })
     }
 
+    /// 发送请求并在「短暂连接错误」（连接被拒/中途被重置或中止，如 os error 10053/10054）
+    /// 时自动重试几次再放弃。ES 服务端或中间网络偶尔会掐断一条已建立的连接，单次重试
+    /// 通常就能成功，避免把一次性抖动直接甩成「查询失败」。超时不重试（重试又是一整个
+    /// 超时周期，意义不大，交给用户缩小范围）。make 每次调用重建一个请求（body 可克隆）。
+    async fn send_retry<F>(&self, make: F, ctx: &str) -> Result<String, String>
+    where
+        F: Fn() -> reqwest::RequestBuilder,
+    {
+        const MAX_ATTEMPTS: usize = 3;
+        let mut attempt = 0usize;
+        loop {
+            attempt += 1;
+            match make().send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    let text = resp
+                        .text()
+                        .await
+                        .map_err(|e| format!("读取响应失败: {}", e))?;
+                    if !status.is_success() {
+                        return Err(format!(
+                            "ES 返回 HTTP {}: {}",
+                            status.as_u16(),
+                            truncate(&text, 500)
+                        ));
+                    }
+                    return Ok(text);
+                }
+                Err(e) => {
+                    if is_transient(&e) && attempt < MAX_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(300 * attempt as u64)).await;
+                        continue;
+                    }
+                    return Err(format!("{}: {}", ctx, describe_send_error(&e)));
+                }
+            }
+        }
+    }
+
     /// GET {base}{path}，返回解析后的 JSON。path 为空即请求根（集群信息）。
     pub async fn get(&self, path: &str) -> Result<Value, String> {
         let url = format!("{}{}", self.base, path);
-        let resp = self
-            .client
-            .get(&url)
-            .headers(self.headers.clone())
-            .send()
-            .await
-            .map_err(|e| format!("连接失败: {}", describe_send_error(&e)))?;
-        let status = resp.status();
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| format!("读取响应失败: {}", e))?;
-        if !status.is_success() {
-            return Err(format!("HTTP {}: {}", status.as_u16(), truncate(&body, 300)));
-        }
-        serde_json::from_str(&body).map_err(|e| format!("解析 JSON 失败: {}", e))
+        let text = self
+            .send_retry(|| self.client.get(&url).headers(self.headers.clone()), "连接失败")
+            .await?;
+        serde_json::from_str(&text).map_err(|e| format!("解析 JSON 失败: {}", e))
     }
 
     /// GET / —— 读取集群信息（含 version.number）。
@@ -99,26 +126,18 @@ impl EsClient {
             return Err("索引名不能为空".to_string());
         }
         let url = format!("{}/{}/_search", self.base, index);
-        let resp = self
-            .client
-            .post(&url)
-            .headers(self.headers.clone())
-            .body(serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string()))
-            .send()
-            .await
-            .map_err(|e| format!("查询失败: {}", describe_send_error(&e)))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| format!("读取响应失败: {}", e))?;
-        if !status.is_success() {
-            return Err(format!(
-                "ES 返回 HTTP {}: {}",
-                status.as_u16(),
-                truncate(&text, 500)
-            ));
-        }
+        let payload = serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string());
+        let text = self
+            .send_retry(
+                || {
+                    self.client
+                        .post(&url)
+                        .headers(self.headers.clone())
+                        .body(payload.clone())
+                },
+                "查询失败",
+            )
+            .await?;
         serde_json::from_str(&text).map_err(|e| format!("解析 JSON 失败: {}", e))
     }
 
@@ -134,26 +153,18 @@ impl EsClient {
             return Err("索引名不能为空".to_string());
         }
         let url = format!("{}/{}/_search?scroll={}", self.base, index, keep);
-        let resp = self
-            .client
-            .post(&url)
-            .headers(self.headers.clone())
-            .body(serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string()))
-            .send()
-            .await
-            .map_err(|e| format!("查询失败: {}", describe_send_error(&e)))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| format!("读取响应失败: {}", e))?;
-        if !status.is_success() {
-            return Err(format!(
-                "ES 返回 HTTP {}: {}",
-                status.as_u16(),
-                truncate(&text, 500)
-            ));
-        }
+        let payload = serde_json::to_string(body).unwrap_or_else(|_| "{}".to_string());
+        let text = self
+            .send_retry(
+                || {
+                    self.client
+                        .post(&url)
+                        .headers(self.headers.clone())
+                        .body(payload.clone())
+                },
+                "查询失败",
+            )
+            .await?;
         let v: Value =
             serde_json::from_str(&text).map_err(|e| format!("解析 JSON 失败: {}", e))?;
         let sid = v["_scroll_id"].as_str().unwrap_or("").to_string();
@@ -163,27 +174,18 @@ impl EsClient {
     /// 取下一批 scroll 数据。
     pub async fn scroll_next(&self, scroll_id: &str, keep: &str) -> Result<Value, String> {
         let url = format!("{}/_search/scroll", self.base);
-        let body = json!({ "scroll": keep, "scroll_id": scroll_id });
-        let resp = self
-            .client
-            .post(&url)
-            .headers(self.headers.clone())
-            .body(body.to_string())
-            .send()
-            .await
-            .map_err(|e| format!("查询失败: {}", describe_send_error(&e)))?;
-        let status = resp.status();
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| format!("读取响应失败: {}", e))?;
-        if !status.is_success() {
-            return Err(format!(
-                "ES 返回 HTTP {}: {}",
-                status.as_u16(),
-                truncate(&text, 500)
-            ));
-        }
+        let payload = json!({ "scroll": keep, "scroll_id": scroll_id }).to_string();
+        let text = self
+            .send_retry(
+                || {
+                    self.client
+                        .post(&url)
+                        .headers(self.headers.clone())
+                        .body(payload.clone())
+                },
+                "查询失败",
+            )
+            .await?;
         serde_json::from_str(&text).map_err(|e| format!("解析 JSON 失败: {}", e))
     }
 
@@ -233,6 +235,17 @@ fn describe_send_error(e: &reqwest::Error) -> String {
     if e.is_connect() {
         return "连接失败（ES 拒绝连接或网络不通，请检查主机 / 端口 / ES 是否在线）".to_string();
     }
+    let chain = error_chain_lower(e);
+    if chain.contains("10053")
+        || chain.contains("10054")
+        || chain.contains("connection reset")
+        || chain.contains("broken pipe")
+        || chain.contains("aborted")
+        || chain.contains("中止")
+        || chain.contains("重置")
+    {
+        return "连接被中断（已建立的连接被 ES 服务端或中间网络掐断，常见于查询过大 / 索引过多；已自动重试仍失败，请缩小时间范围或减少索引后重试）".to_string();
+    }
     let mut parts = vec![e.to_string()];
     let mut src: Option<&(dyn StdError + 'static)> = e.source();
     while let Some(s) = src {
@@ -240,6 +253,37 @@ fn describe_send_error(e: &reqwest::Error) -> String {
         src = s.source();
     }
     parts.join(" -> ")
+}
+
+/// 把 error 及其 source 链拼成一个小写字符串，便于匹配底层 os error 关键字。
+fn error_chain_lower(e: &reqwest::Error) -> String {
+    let mut s = String::new();
+    let mut src: Option<&(dyn StdError + 'static)> = Some(e);
+    while let Some(cur) = src {
+        s.push_str(&cur.to_string().to_lowercase());
+        s.push(' ');
+        src = cur.source();
+    }
+    s
+}
+
+/// 是否为「值得重试」的短暂连接错误：连接被拒 / 中途被重置或中止（os error 10053/10054、
+/// connection reset/aborted、broken pipe）。超时不算（重试又是一整个超时周期）。
+fn is_transient(e: &reqwest::Error) -> bool {
+    if e.is_timeout() {
+        return false;
+    }
+    if e.is_connect() {
+        return true;
+    }
+    let chain = error_chain_lower(e);
+    chain.contains("10053")
+        || chain.contains("10054")
+        || chain.contains("connection reset")
+        || chain.contains("broken pipe")
+        || chain.contains("aborted")
+        || chain.contains("重置")
+        || chain.contains("中止")
 }
 
 fn truncate(s: &str, n: usize) -> String {
