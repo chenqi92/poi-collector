@@ -13,6 +13,36 @@ export const DEFAULT_TRAJ: TrajParams = {
     maxJumpKn: 30,
     maxJumpKm: 8,
     tripGapMinutes: 30,
+    gapBridgeMinutes: 0, // 0 = 自动
+}
+
+// 「信号空档」自动判定参数（gapBridgeMinutes=0 时用）：
+// 只有「间隔 > GAP_FACTOR × 该船常态间隔、下限 GAP_FLOOR_S」且「直线拉开 ≥ GAP_MIN_M」的
+// 相邻两点才算缺口。距离下限专门滤掉密集/慢速的正常短跳，只把横穿水道的长直连线判成缺口。
+const GAP_FACTOR = 3
+const GAP_FLOOR_S = 240 // 再密集也不把 < 4 分钟的间隔当缺口
+const GAP_MIN_M = 800 // 直线距离 < 800m 的间隔不桥接（视觉上可忽略，且多为正常慢速）
+
+/** 相邻两点是否构成「信号空档」：时间间隔超阈值且拉开足够距离。 */
+function isGap(a: AisPoint, b: AisPoint, gapS: number, minM: number): boolean {
+    if (!Number.isFinite(gapS)) return false
+    const dt = (b.ts - a.ts) / 1000
+    if (dt <= gapS) return false
+    return haversineM(a.lon, a.lat, b.lon, b.lat) >= minM
+}
+
+/** 该航迹的自动空档阈值(秒)：常态采样间隔中位数 × 倍数，带下限。点太少返回 Infinity（不判定）。 */
+function autoGapSeconds(pts: AisPoint[]): number {
+    if (pts.length < 4) return Infinity
+    const dts: number[] = []
+    for (let k = 1; k < pts.length; k++) {
+        const dt = (pts[k].ts - pts[k - 1].ts) / 1000
+        if (dt > 0) dts.push(dt)
+    }
+    if (dts.length < 3) return Infinity
+    dts.sort((a, b) => a - b)
+    const median = dts[Math.floor(dts.length / 2)]
+    return Math.max(GAP_FLOOR_S, GAP_FACTOR * median)
 }
 
 export interface SailingSegment {
@@ -22,6 +52,10 @@ export interface SailingSegment {
     newTrip?: boolean
     /** 所属航次序号（与 trips 下标一致），用于按航次着色/显隐 */
     tripIndex?: number
+    /** 本段紧接一个「信号空档」：与上一段之间是接收缺口，渲染时用虚线/补全路径而非实线 */
+    afterGap?: boolean
+    /** 缺口的「沿水域补全」折线（WGS [lon,lat]），由 mapmatch 事后填充；无则渲染直线 */
+    gapFill?: [number, number][]
 }
 
 export interface AnchorSegment {
@@ -236,19 +270,37 @@ export function segmentTrack(
     const anchoredSet = new Set(anchoredValues.map(String))
     const flags = classify(pts, params, anchoredSet)
 
+    // 信号空档阈值：显式设了 gapBridgeMinutes 用绝对值，否则按常态间隔自适应
+    const gapS =
+        params.gapBridgeMinutes && params.gapBridgeMinutes > 0
+            ? params.gapBridgeMinutes * 60
+            : autoGapSeconds(pts)
+
     const segs: Segment[] = []
     let sailing: AisPoint[] = []
+    let lastSail: AisPoint | null = null
+    let pendingGap = false // 下一个 flush 出的行驶段是否紧接一个信号空档
     const flush = () => {
         if (sailing.length) {
-            segs.push({ kind: 'sailing', points: sailing })
+            segs.push({ kind: 'sailing', points: sailing, afterGap: pendingGap || undefined })
             sailing = []
+            pendingGap = false
         }
+    }
+    // 往行驶段追加一个点；若与上一点构成信号空档，先断段（渲染层会在断点画虚线桥/补全路径）
+    const pushSail = (p: AisPoint) => {
+        if (lastSail && isGap(lastSail, p, gapS, GAP_MIN_M)) {
+            flush() // 收尾缺口前的一段
+            pendingGap = true // 缺口后新起的一段标记 afterGap
+        }
+        sailing.push(p)
+        lastSail = p
     }
 
     let i = 0
     while (i < pts.length) {
         if (!flags[i]) {
-            sailing.push(pts[i])
+            pushSail(pts[i])
             i++
             continue
         }
@@ -286,9 +338,11 @@ export function segmentTrack(
                 endTs: cluster[cluster.length - 1].ts,
                 points: cluster,
             })
+            // 停泊段本身已用虚线桥跨过，前后行驶段不再互相做空档判定
+            lastSail = null
         } else {
-            // 不够停泊条件，并回行驶段
-            for (const p of cluster) sailing.push(p)
+            // 不够停泊条件，并回行驶段（同样做空档判定）
+            for (const p of cluster) pushSail(p)
         }
         i = j
     }

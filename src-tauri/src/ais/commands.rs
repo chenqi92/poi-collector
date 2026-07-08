@@ -371,7 +371,8 @@ pub async fn ais_list_ships(
     }
 
     let mut out: Vec<ShipSummary> = acc.into_values().collect();
-    out.sort_by(|a, b| b.count.cmp(&a.count));
+    // 点数降序；点数相同按 MMSI 升序，保证「加载更多」增量分页时前几页顺序稳定不抖动
+    out.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.mmsi.cmp(&b.mmsi)));
     out.truncate(final_limit);
     Ok(out)
 }

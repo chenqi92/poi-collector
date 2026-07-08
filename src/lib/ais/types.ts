@@ -21,6 +21,12 @@ export interface TrajParams {
     maxJumpKm: number
     /** 清洗：静默超过此分钟数视为新航次，切分多船共号/多航次拼接 */
     tripGapMinutes: number
+    /**
+     * 航次内的「信号空档」判定（分钟）：航行中相邻两点时间间隔超过此值、且拉开一定距离，
+     * 视为接收缺口，两点间用虚线桥接而非实线航迹（避免缺点被连成横穿水道的假直线）。
+     * 0 = 自动：按该船常态采样间隔的倍数自适应判定，兼容密集/稀疏数据。
+     */
+    gapBridgeMinutes: number
 }
 
 /** ES 字段 → 统一 AIS 字段映射，字段值支持点路径（a.b.c） */

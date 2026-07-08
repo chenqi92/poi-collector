@@ -195,6 +195,27 @@
     background: var(--accent-soft, color-mix(in oklch, var(--accent), transparent 88%));
 }
 
+.ais-more-btn {
+    padding: 7px 9px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-3);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s;
+}
+
+.ais-more-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.ais-more-btn:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
 .ais-ship-name {
     font-size: 12.5px;
     font-weight: 600;
@@ -531,6 +552,16 @@
 .lg-line.conn {
     border-top-style: dashed;
     border-top-color: #38bdf8;
+}
+
+.lg-line.gapfill {
+    border-top-style: dashed;
+    border-top-color: #2563eb;
+}
+
+.lg-line.gap {
+    border-top-style: dotted;
+    border-top-color: #64748b;
 }
 
 .lg-arrow {

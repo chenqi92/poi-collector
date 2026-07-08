@@ -375,16 +375,22 @@ const AisCanvasLayer = L.Layer.extend({
         }
         this._hovered = key
         if (!this._tooltip) {
+            // 先 setLatLng 再 addTo：否则 Leaflet 在 onAdd 时投影 undefined latlng 报错，
+            // 且带着空 latlng 卡在地图上，后续每次缩放动画都会重复抛错。
             this._tooltip = L.tooltip({
                 className: 'ais-pt-hover-wrap',
                 direction: 'top',
                 offset: [0, -8],
                 opacity: 0.96,
-            }).addTo(map)
+            })
+                .setLatLng([hit.lat, hit.lng])
+                .setContent(clusterHoverHtml(hit))
+                .addTo(map)
+        } else {
+            this._tooltip
+                .setLatLng([hit.lat, hit.lng])
+                .setContent(clusterHoverHtml(hit))
         }
-        this._tooltip
-            .setLatLng([hit.lat, hit.lng])
-            .setContent(clusterHoverHtml(hit))
     },
     _clearHover(this: any) {
         if (this._tooltip) {
@@ -522,13 +528,37 @@ export function AisRouteLayer({
                 }
                 if (!firstDisp && latlngs.length) firstDisp = latlngs[0]
                 if (prevEnd && latlngs.length) {
-                    L.polyline([prevEnd, latlngs[0]], {
-                        pane: 'aisRoutePane',
-                        color,
-                        weight: 1.5,
-                        opacity: 0.55,
-                        dashArray: '4 4',
-                    }).addTo(group)
+                    if (seg.afterGap) {
+                        // 信号空档：能沿水域补全就画绕行折线（推断航路），否则画醒目直线（纯猜测）
+                        if (seg.gapFill && seg.gapFill.length >= 2) {
+                            L.polyline(seg.gapFill.map((c) => disp(c[0], c[1])), {
+                                pane: 'aisRoutePane',
+                                color,
+                                weight: 2,
+                                opacity: 0.85,
+                                dashArray: '7 5',
+                                lineCap: 'round',
+                                lineJoin: 'round',
+                            }).addTo(group)
+                        } else {
+                            L.polyline([prevEnd, latlngs[0]], {
+                                pane: 'aisRoutePane',
+                                color: '#64748b',
+                                weight: 1.8,
+                                opacity: 0.8,
+                                dashArray: '2 6',
+                            }).addTo(group)
+                        }
+                    } else {
+                        // 停泊/其它跨段桥：细虚线，保持原样式
+                        L.polyline([prevEnd, latlngs[0]], {
+                            pane: 'aisRoutePane',
+                            color,
+                            weight: 1.5,
+                            opacity: 0.55,
+                            dashArray: '4 4',
+                        }).addTo(group)
+                    }
                 }
                 if (latlngs.length >= 2) {
                     L.polyline(latlngs, {

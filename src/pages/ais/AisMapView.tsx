@@ -18,6 +18,7 @@ import { emptyMapping } from '@/lib/ais/types'
 import { autoDetect, mappingSummary } from '@/lib/ais/autodetect'
 import { IndexPickerDialog, indicesSummary } from './IndexPickerDialog'
 import { cleanTrack, DEFAULT_TRAJ, haversineM, type Segment, segmentTrips, tripColor } from '@/lib/ais/trajectory'
+import { annotateGapFills } from '@/lib/ais/mapmatch'
 import { geometryToPolygons, dissolveOutline, pointInWater, type WaterPolygon, type Bbox } from '@/lib/ais/geo'
 import { normalizeToWgs84 } from '@/lib/ais/coords'
 
@@ -157,10 +158,16 @@ interface Props {
     onGoConnections: () => void
 }
 
+// fields 船只列表：每页条数 & 「加载更多」深度上限（防止 terms 聚合被拉到过大）
+const SHIP_PAGE = 300
+const SHIP_MAX = 20000
+
 export function AisMapView({ conn, connections, connId, onConnId, onGoConnections }: Props) {
     // 选择 / 搜索 / 时间
     const [selectedMmsi, setSelectedMmsi] = useState('')
     const [shipSearch, setShipSearch] = useState('')
+    // fields 模式：搜索框防抖后触发服务端列船，让 top-N 之外的长尾船只也能被找到
+    const [shipSearchDebounced, setShipSearchDebounced] = useState('')
     const [timeFrom, setTimeFrom] = useState('')
     const [timeTo, setTimeTo] = useState('')
 
@@ -186,6 +193,11 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [routeTruncated, setRouteTruncated] = useState(false)
     // fields 单船航迹最多加载点数（默认很大，尽量加载完整；脏数据/超大可调小）
     const [routeMax, setRouteMax] = useState(500000)
+    // fields 船只列表：增量分页浏览。shipLimit = 当前已请求条数（按点数排序取前 N）；「加载更多」
+    // 每次 += SHIP_PAGE 后整表替换（前 N 行 key=mmsi 不变、平滑追加）。搜索走服务端、不受此深度影响：
+    // 任意 MMSI / 船名都能直接查到，即便它不在已浏览的页里。
+    const [shipLimit, setShipLimit] = useState(SHIP_PAGE)
+    const [shipsExhausted, setShipsExhausted] = useState(false)
     // 航次显隐：被隐藏的航次序号集合 + 列表展开
     const [hiddenTrips, setHiddenTrips] = useState<Set<number>>(new Set())
     const [tripsOpen, setTripsOpen] = useState(true)
@@ -219,6 +231,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const [showDropped, setShowDropped] = useState(false)
     // 是否显示 AIS 点（canvas 聚合/单点，点击地图弹出详情）
     const [showPoints, setShowPoints] = useState(true)
+    // 缺口按水域补全：横穿陆地的信号空档直线，用水域内 A* 绕行折线替代（需已加载水域面）
+    const [gapMatch, setGapMatch] = useState(true)
     const [traj, setTraj] = useState<TrajParams>(DEFAULT_TRAJ)
 
     // 连接切换时重置
@@ -329,7 +343,9 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
     const sourceCrs = conn?.sourceCrs ?? 'wgs84'
 
     // —— fields 模式：列船 ——
-    const loadShips = async () => {
+    // 每次取「点数排序的前 limit 艘」整表替换（前几页 key=mmsi 不变，React 复用行、平滑追加）。
+    // limit 由「加载更多」增量放大；搜索走服务端，命中任意排名的船。
+    const loadShips = async (limit: number) => {
         if (!connId || selectedIndices.length === 0 || !mappingReady) return
         setShipsLoading(true)
         setShipError('')
@@ -340,21 +356,41 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                 mapping: queryMapping,
                 timeFrom: toMs(timeFrom),
                 timeTo: toMs(timeTo),
-                limit: 500,
+                search: shipSearch.trim() || undefined,
+                limit,
             })
             setFetchedShips(list)
+            setShipsExhausted(list.length < limit) // 没取满 => 后面没有更多船了
         } catch (e) {
             setShipError(String(e))
             setFetchedShips([])
+            setShipsExhausted(true)
         } finally {
             setShipsLoading(false)
         }
     }
 
+    // 「加载更多」：把请求深度 += 一页后整表重取
+    const loadMoreShips = () => {
+        const next = Math.min(SHIP_MAX, shipLimit + SHIP_PAGE)
+        setShipLimit(next)
+        loadShips(next)
+    }
+
+    // 搜索框防抖 → 触发服务端重新列船
     useEffect(() => {
-        if (mode === 'fields' && connId) loadShips()
+        const t = setTimeout(() => setShipSearchDebounced(shipSearch), 350)
+        return () => clearTimeout(t)
+    }, [shipSearch])
+
+    // 连接 / 索引 / 时间 / 搜索变化：回到第一页并重取
+    useEffect(() => {
+        if (mode === 'fields' && connId) {
+            setShipLimit(SHIP_PAGE)
+            loadShips(SHIP_PAGE)
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [mode, connId, indicesKey, mappingReady, timeFrom, timeTo])
+    }, [mode, connId, indicesKey, mappingReady, timeFrom, timeTo, shipSearchDebounced])
 
     // —— fields 模式：按船查询航迹（scroll 渐进式分页，无 1 万上限，边拉边画）——
     useEffect(() => {
@@ -611,6 +647,18 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
         [segTrips, traj, anchoredValues.join(',')],
     )
 
+    // 缺口按水域补全：给横穿陆地的信号空档挂上「沿水域绕行」的补全路径（用原始 waterPolys，
+    // 不受显示用外框栅格化影响）。关闭或无水域面时原样返回。计算只依赖 segments/waterPolys，
+    // 平移缩放不会触发重算。
+    const displaySegments = useMemo(
+        () => (gapMatch && waterPolys.length ? annotateGapFills(segments, waterPolys) : segments),
+        [gapMatch, waterPolys, segments],
+    )
+    const gapFillCount = useMemo(
+        () => displaySegments.filter((s) => s.kind === 'sailing' && s.gapFill).length,
+        [displaySegments],
+    )
+
     const anchorCount = segments.filter((s) => s.kind === 'anchored').length
     const waterKind = WATER_OPTIONS.find((o) => o.key === waterLayer)?.kind ?? 'hydro'
 
@@ -839,7 +887,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     <div className="ais-row-between">
                         <label className="ais-label">船只 {ships.length ? `(${ships.length})` : ''}</label>
                         {mode === 'fields' && (
-                            <button type="button" className="ais-mini-btn" onClick={loadShips} disabled={shipsLoading}>
+                            <button type="button" className="ais-mini-btn" onClick={() => loadShips(shipLimit)} disabled={shipsLoading}>
                                 <GcIcon name="refresh" size={12} /> 刷新
                             </button>
                         )}
@@ -851,12 +899,14 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                         onChange={(e) => setShipSearch(e.target.value)}
                     />
                     <div className="ais-ship-list">
-                        {shipsBusy && <div className="ais-hint">{mode === 'raw' ? '解码中…' : '加载中…'}</div>}
+                        {shipsBusy && filteredShips.length === 0 && (
+                            <div className="ais-hint">{mode === 'raw' ? '解码中…' : '加载中…'}</div>
+                        )}
                         {shipsErr && <div className="ais-hint err">{shipsErr}</div>}
                         {!shipsBusy && !shipsErr && filteredShips.length === 0 && (
                             <div className="ais-hint">{emptyShipsMsg}</div>
                         )}
-                        {filteredShips.slice(0, 500).map((s) => (
+                        {filteredShips.map((s) => (
                             <button
                                 key={s.mmsi}
                                 type="button"
@@ -871,8 +921,18 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                                 <div className="ais-ship-time">{fmtTs(s.firstTs)} ~ {fmtTs(s.lastTs)}</div>
                             </button>
                         ))}
-                        {filteredShips.length > 500 && (
-                            <div className="ais-hint">仅显示前 500 艘，请用搜索缩小。</div>
+                        {mode === 'fields' && !shipsExhausted && filteredShips.length > 0 && shipLimit < SHIP_MAX && (
+                            <button
+                                type="button"
+                                className="ais-more-btn"
+                                onClick={loadMoreShips}
+                                disabled={shipsLoading}
+                            >
+                                {shipsLoading ? '加载中…' : `加载更多（已显示 ${ships.length} 艘，按点数排序）`}
+                            </button>
+                        )}
+                        {mode === 'fields' && !shipsBusy && shipLimit >= SHIP_MAX && !shipsExhausted && (
+                            <div className="ais-hint">已加载 {ships.length} 艘（上限）。要找更靠后的船，用搜索框输入 MMSI / 船名——搜索直接查服务端，不受此上限影响。</div>
                         )}
                     </div>
                     {mode === 'raw' && selectedMmsi && (
@@ -989,6 +1049,25 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     <NumberRow label="跳点速度阈值 (节)" value={traj.maxJumpKn} step={5} onChange={(v) => setTraj((t) => ({ ...t, maxJumpKn: Math.max(5, v) }))} />
                     <NumberRow label="跳点最大距离 (公里)" value={traj.maxJumpKm} step={1} onChange={(v) => setTraj((t) => ({ ...t, maxJumpKm: Math.max(0, v) }))} />
                     <NumberRow label="航次切分静默 (分钟)" value={traj.tripGapMinutes} step={5} onChange={(v) => setTraj((t) => ({ ...t, tripGapMinutes: Math.max(1, v) }))} />
+                    <NumberRow label="信号空档桥接 (分钟, 0=自动)" value={traj.gapBridgeMinutes} step={1} onChange={(v) => setTraj((t) => ({ ...t, gapBridgeMinutes: Math.max(0, v) }))} />
+                    <div className="ais-hint">航行中相邻两点间隔超此值（0=按常态间隔自动）且拉开 &gt;800m，视为接收缺口，用虚线桥接、不画实线与方向箭头，避免缺点连成横穿水道的假直线。</div>
+                    <div className="ais-row-between">
+                        <span className="ais-toggle-text">缺口按水域补全</span>
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={gapMatch}
+                            className={`ais-toggle${gapMatch ? ' on' : ''}`}
+                            disabled={waterLayer === 'none'}
+                            onClick={() => setGapMatch((v) => !v)}
+                        >
+                            <span className="ais-toggle-knob" />
+                        </button>
+                    </div>
+                    <div className="ais-hint">
+                        开启后，横穿陆地的空档直线改为在水域面内 A* 绕行折线（推断航路，粗虚线）；无水域面或找不到通路时退回直线（灰色点线）。需先在上方选择水域图。
+                        {gapMatch && waterLayer !== 'none' && gapFillCount > 0 ? ` · 已补全 ${gapFillCount} 处` : ''}
+                    </div>
                     {selectedMmsi && (
                         <div className="ais-hint">
                             原始 {rawWgsPoints.length} 点 · 清洗后 {wgsPoints.length} 点 · {cleaned.trips.length} 航次
@@ -1066,7 +1145,7 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     <MapAutosize />
                     <ViewBoundsTracker onChange={setViewBbox} />
                     <AisRouteLayer
-                        segments={segments}
+                        segments={displaySegments}
                         anomalies={anomalies}
                         waterPolygons={effectiveWaterPolys}
                         waterKind={waterKind}
@@ -1194,6 +1273,8 @@ export function AisMapView({ conn, connections, connId, onConnId, onGoConnection
                     <div className="ais-legend-row"><i className="lg-arrow" /> 航向箭头</div>
                     {showPoints && <div className="ais-legend-row"><i className="lg-dot aispoint" /> AIS 点 / 聚合点</div>}
                     <div className="ais-legend-row"><i className="lg-line conn" /> 停泊跨段</div>
+                    <div className="ais-legend-row"><i className="lg-line gapfill" /> 空档补全（沿水域推断）</div>
+                    <div className="ais-legend-row"><i className="lg-line gap" /> 信号空档（直线推测）</div>
                     <div className="ais-legend-row"><i className="lg-anchor"><GcIcon name="anchor" size={11} /></i> 停泊点 + 摆动圈</div>
                     {filterOn && <div className="ais-legend-row"><i className="lg-dot anomaly" /> 水域外异常点</div>}
                     {showDropped && <div className="ais-legend-row"><i className="lg-dot dropped" /> 清洗掉的跳点</div>}
